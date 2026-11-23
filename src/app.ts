@@ -6,7 +6,7 @@ import type { PromoId, ResourceId, ScenarioId, TraditionId } from './game/data.t
 import { hexDist } from './game/hex.ts'
 import {
   atWar, attack, availableTechs, buy, canFoundCity, cityAt, cityById, citiesOf, cityWorkable, declareWar, dequeue, drainEvents, enqueue, foundCity, idx, isCivilian, isEmbarked,
-  isNaval, adoptTradition, traditionReady, promoteUnit, roadStep, tileJobs, upgradeUnit, upgradeBlock, canWork, killUnit, makePeace, moveUnit, note, pathMap, pathTo, pathTurns, previewAttack, promote, reachable, startWork, stopUnit, tilesWithin, unitById, unitsAt, unitsOf,
+  isNaval, planResearch, adoptTradition, traditionReady, promoteUnit, roadStep, tileJobs, upgradeUnit, upgradeBlock, canWork, killUnit, makePeace, moveUnit, note, pathMap, pathTo, pathTurns, previewAttack, promote, reachable, startWork, stopUnit, tilesWithin, unitById, unitsAt, unitsOf,
   updateVisibility, type PathMap,
 } from './game/rules.ts'
 import { clearSave, createGame, endTurn, loadGame, saveGame } from './game/state.ts'
@@ -30,6 +30,8 @@ export class App implements MapHost {
   private pm: PathMap | null = null
   /** Za kolik tahů dorazí vybraná jednotka na pole pod kurzorem (0 = letos), nebo -1. */
   hoverEta = -1
+  /** Tipy rádce: doporučení na mapě i v oknech a panel s radami. Platí pro všechny hry. */
+  hints = (() => { try { return localStorage.getItem('hex4x-hints') !== '0' } catch { return true } })()
   /** Další klik na mapu určí cíl cesty, kterou mají dělníci postavit. */
   roadMode = false
   /** Pole, kde mohou vybraní dělníci stavět vylepšení (index → práce). */
@@ -52,7 +54,8 @@ export class App implements MapHost {
   // ------------------------------------------------------------ start
 
   newGame(nation: NationId, difficulty: Difficulty, scenario: ScenarioId = 'valley'): void {
-    this.begin(createGame(nation, difficulty, scenario))
+    // Pokaždé jiné startovní místo ze tří.
+    this.begin(createGame(nation, difficulty, scenario, undefined, Math.floor(Math.random() * 3)))
     this.hud.showBriefing()
   }
 
@@ -128,15 +131,20 @@ export class App implements MapHost {
     }
     this.pm = pathMap(s, u, undefined, s.players[0])
     this.scene.showSelection(u, [...this.reach], [...this.targets])
-    if (u.type === 'worker' && !u.work) {
+    if (this.hints && u.type === 'worker' && !u.work) {
+      let best = -1, bv = -Infinity
       for (let i = 0; i < s.tiles.length; i++) {
         if (s.tiles[i].owner !== 0 || !s.players[0].explored[i]) continue
         const j = tileJobs(s, i, 0).find(o => o.ok && o.job !== 'road')
-        if (j && this.pm.dist[i] !== Infinity) this.jobs.set(i, j.job)
+        if (!j || this.pm.dist[i] === Infinity) continue
+        this.jobs.set(i, j.job)
+        // Nejvíc se vyplatí surovina a pole, které město už obdělává; blízkost rozhoduje při shodě.
+        const v = (s.tiles[i].res ? 6 : 0) + (s.cities.some(c => c.owner === 0 && c.worked.includes(i)) ? 4 : 0) - this.pm.dist[i] * 1.2
+        if (v > bv) { bv = v; best = i }
       }
-      this.scene.showJobs([...this.jobs].map(([i, job]) => ({ i, job })))
+      this.scene.showJobs([...this.jobs].map(([i, job]) => ({ i, job })), best)
     }
-    if (u.type === 'settler') {
+    if (this.hints && u.type === 'settler') {
       // Nejlepší známá místa v dosahu několika tahů, dost daleko od sebe.
       const cand: [number, number][] = []
       for (let i = 0; i < s.tiles.length; i++) {
@@ -400,6 +408,14 @@ export class App implements MapHost {
   queueRemove(c: City, i: number): void { dequeue(this.state, c, i); sfx('click'); saveGame(this.state); this.refresh() }
   queuePromote(c: City, i: number): void { promote(this.state, c, i); sfx('build'); saveGame(this.state); this.refresh() }
 
+  toggleHints(on = !this.hints): void {
+    this.hints = on
+    try { localStorage.setItem('hex4x-hints', on ? '1' : '0') } catch { /* bez úložiště */ }
+    sfx('click')
+    this.hud.toast(on ? 'Tipy zapnuty: žárovka označuje doporučenou volbu.' : 'Tipy vypnuty. Zapnete je žárovkou v horní liště (klávesa I).')
+    this.refresh()
+  }
+
   advise(c: City): void {
     adviseBuild(this.state, c)
     sfx('build')
@@ -417,10 +433,10 @@ export class App implements MapHost {
     this.refresh()
   }
 
-  chooseTech(t: TechId): void {
+  /** Zvolí výzkum; u vzdálené technologie naplánuje celou cestu k ní. S `append` se zařadí za dosavadní plán. */
+  chooseTech(t: TechId, append = false): void {
     const p = this.state.players[0]
-    if (!availableTechs(p).includes(t)) return
-    p.research = t
+    if (!planResearch(p, t, append)) return
     sfx('build')
     saveGame(this.state)
     this.refresh()
@@ -497,6 +513,7 @@ export class App implements MapHost {
     if (k === 't') { this.hud.showTech(); return }
     if (k === 'c') { this.hud.showTraditions(); return }
     if (k === 'l') { this.hud.toggleOverview(); return }
+    if (k === 'i') { this.toggleHints(); return }
     if (k === 'm') { this.hud.showMission(); return }
     if (k === 'h' || e.key === '?') { this.hud.showHelp(); return }
     if (e.key === '+' || e.key === '=') { this.scene.zoomBy(1); return }

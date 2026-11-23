@@ -1,6 +1,6 @@
 // Diplomacie hráče se soupeři: dary, obchod se surovinami a spojenectví.
 import { NATIONS, RESOURCES, type ResourceId } from './data.ts'
-import { atWar, declareWar, hasResource, militaryPower, note, ownsResource, playerIncome } from './rules.ts'
+import { atWar, declareWar, militaryPower, note, ownsResource, playerIncome, resourceFree, UNITS_PER_SOURCE } from './rules.ts'
 import type { GameState, Player } from './types.ts'
 
 export const TRADABLE: ResourceId[] = ['horses', 'iron']
@@ -35,7 +35,8 @@ export function saleBlock(s: GameState, aiId: number, r: ResourceId): string | n
   const p = s.players[aiId]
   if (atWar(s, 0, aiId)) return 'Jste ve válce.'
   if (!ownsResource(s, 0, r)) return `Nemáte vlastní zdroj (${RESOURCES[r].name.toLowerCase()} s vylepšením).`
-  if (hasResource(s, aiId, r)) return 'Tuto surovinu už mají.'
+  if (resourceFree(s, 0, r) < UNITS_PER_SOURCE) return 'Nemáte volný zdroj – všechny živí vaše vlastní jednotky.'
+  if (resourceFree(s, aiId, r) > 0) return 'Vlastní zdroje jim zatím stačí.'
   if (playerIncome(s, aiId).gold < salePrice(p) && p.gold < 40) return 'Nemají čím platit.'
   return null
 }
@@ -44,7 +45,7 @@ export function buyBlock(s: GameState, aiId: number, r: ResourceId): string | nu
   const p = s.players[aiId]
   if (atWar(s, 0, aiId)) return 'Jste ve válce.'
   if (!ownsResource(s, aiId, r)) return 'Tuto surovinu nemají.'
-  if (hasResource(s, 0, r)) return 'Tuto surovinu už máte.'
+  if (resourceFree(s, aiId, r) < UNITS_PER_SOURCE) return 'Nemají volný zdroj – potřebují ho pro vlastní vojsko.'
   if (p.attitude <= -40) return 'S vámi obchodovat nebudou.'
   return null
 }

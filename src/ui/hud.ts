@@ -3,7 +3,7 @@ import {
   BUILDINGS, BUILDING_IDS, DIFFICULTY, IMPROVEMENTS, NATIONS, PLAYABLE, RESOURCES, TECHS, TECH_IDS, TERRAIN, UNITS, UNIT_IDS,
   type BuildingId, type Difficulty, type ImprovementId, type NationId, type TechId, type UnitId,
 } from '../game/data.ts'
-import { describeAI, siteScore } from '../game/ai.ts'
+import { adviseTech, describeAI, recommendBuild, siteScore } from '../game/ai.ts'
 import { attitudeWord, buyBlock, buyPrice, DEAL_TURNS, GIFT, saleBlock, salePrice, TRADABLE } from '../game/diplo.ts'
 import { ERAS, GOLDEN_TURNS, PROMOS, PROMO_IDS, ROAD, SCENARIOS, SCENARIO_IDS, TRADITIONS, TRADITION_IDS, XP_LEVELS, traditionCost, type ScenarioId, type TraditionId } from '../game/data.ts'
 import { generateScenario, ISLANDS_SEED, MISSION_SEED } from '../game/mapgen.ts'
@@ -11,7 +11,7 @@ import { hexCenter } from '../game/hex.ts'
 import {
   atWar, availableBuilds, availableTechs, BORDER_AT, buyCost, canBuy, canFoundCity, cityAt, cityMaxHp, citiesOf, cityStrength, cityYields, cultureSources, freeUnits, growthNeed, hasTech, idx,
   isCivilian, isEmbarked, isNaval, isWater, itemCost, itemName, maxMoves, militaryPower, sameItem, playerIncome, previewAttack, resourceVisible, score, tileYield, unitBlockReason, unitStrength,
-  unitsAt, unitsOf, foundBlock, isCoastal, traditionReady, pendingPromos, tileJobs, upgradeBlock, upgradeCost, upgradeTarget, xpLevel,
+  unitsAt, unitsOf, UNITS_PER_SOURCE, resourceReport, unitsNeeding, traditionAdvice, techPath, foundBlock, isCoastal, traditionReady, pendingPromos, tileJobs, upgradeBlock, upgradeCost, upgradeTarget, xpLevel,
 } from '../game/rules.ts'
 import { hasSave, pickRivals, START_TECH } from '../game/state.ts'
 import { BARB, type BuildItem, type City, type Note, type Unit } from '../game/types.ts'
@@ -34,6 +34,8 @@ const tip = (s: string) => ` data-tip="${typo(s).replace(/&/g, '&amp;').replace(
 const ic = (n: string, cls = '') => `<img class="ic ${cls}" src="${UI}ic_${n}.png" alt="">`
 /** Body pohybu mohou být po cestách půlené. */
 const mv = (n: number) => String(Math.round(n * 2) / 2).replace('.', ',')
+/** Žárovka u doporučené volby. */
+const REC = `<img class="rec-ic" src="${import.meta.env.BASE_URL}assets/ui/ic_tip.png" alt="tip">`
 const signed = (n: number) => (n >= 0 ? `+${n}` : `−${Math.abs(n)}`)
 const turnsWord = (n: number) => (n === 1 ? 'tah' : n >= 2 && n <= 4 ? 'tahy' : 'tahů')
 
@@ -115,7 +117,7 @@ export class Hud {
   private unitTip(id: UnitId): string {
     const d = UNITS[id]
     const l = [d.desc, `Cena ${d.cost} výroby · pohyb ${d.move}${d.str ? ` · síla ${d.str}` : ''}${d.ranged ? ` · střelba ${d.ranged} na ${d.range} pole` : ''}`]
-    if (d.needs) l.push(`Vyžaduje surovinu: ${RESOURCES[d.needs].name} (vylepšenou ve vašem území).`)
+    if (d.needs) l.push(`Vyžaduje surovinu: ${RESOURCES[d.needs].name}. Každý zdroj (ložisko s vylepšením na vašem území, nebo koupě) uživí ${UNITS_PER_SOURCE} takové jednotky.`)
     if (d.replaces) l.push(`Unikátní jednotka vašeho národa (místo: ${UNITS[d.replaces].name}).`)
     if (d.naval) l.push('Loď: staví se jen v pobřežním městě a pluje jen po vodě.')
     if (!d.civilian) l.push('Vojsko nad volný limit stojí 1 zlato za tah.')
@@ -160,10 +162,11 @@ export class Hud {
       case 'tech-open': sfx('click'); this.showTech(); break
       case 'overview': sfx('click'); this.toggleOverview(); break
       case 'ov-city': { const c = this.s.cities.find(o => o.id === Number(arg)); if (c && !app.busy) { sfx('select'); app.openCity(c) } break }
+      case 'ov-tile': { const i = Number(arg); if (!app.busy) { sfx('select'); app.scene.centerOn(i % this.s.W, (i / this.s.W) | 0) } break }
       case 'ov-unit': { const u = this.s.units.find(o => o.id === Number(arg)); if (u && !app.busy) { sfx('select'); app.select(u, true) } break }
       case 'trad-open': sfx('click'); this.showTraditions(); break
       case 'trad': app.chooseTradition(arg as TraditionId); if (traditionReady(this.me)) this.showTraditions(); else this.closeModal(); break
-      case 'tech': app.chooseTech(arg as TechId); this.showTech(); break
+      case 'tech': app.chooseTech(arg as TechId, (e as MouseEvent).shiftKey); this.showTech(); break
       case 'mission': sfx('click'); this.showMission(); break
       case 'diplo': sfx('click'); this.showDiplo(); break
       case 'help': sfx('click'); this.showHelp(); break
@@ -188,7 +191,8 @@ export class Hud {
       case 'zoom': app.scene.zoomBy(Number(arg)); break
       case 'menu': this.confirm('Odejít do hlavního menu?', 'Hra je průběžně ukládána, můžete v ní později pokračovat.', 'Odejít', () => app.quitToMenu()); break
       case 'tip-ok': this.s.tutorial.push(arg); this.tipOpen = false; sfx('click'); this.render(); break
-      case 'tip-off': this.s.tutorial.push('off'); this.render(); break
+      case 'tip-off': app.toggleHints(false); break
+      case 'hints': app.toggleHints(); break
       case 'note': {
         const n = this.s.notes[Number(arg)]
         if (n) { this.read.add(n); if (n.x !== undefined && n.y !== undefined) app.scene.centerOn(n.x, n.y) }
@@ -342,7 +346,7 @@ export class Hud {
     if (p.research) {
       const t = TECHS[p.research]
       const left = Math.max(1, Math.ceil((t.cost - p.progress) / Math.max(1, inc.sci)))
-      research = `<div class="research" data-a="tech-open"${tip(`Výzkum: ${t.name}|${p.progress} / ${t.cost} bodů vědy, hotovo za ${left} ${turnsWord(left)}.\nOdemyká: ${t.unlocks}.\nKliknutím otevřete strom technologií (T).`)}>${ic('sci')}<span>${t.name}</span><div class="bar"><i style="width:${Math.min(100, 100 * p.progress / t.cost)}%"></i></div><small>${left}${NB}${turnsWord(left)}</small></div>`
+      research = `<div class="research" data-a="tech-open"${tip(`Výzkum: ${t.name}|${p.progress} / ${t.cost} bodů vědy, hotovo za ${left} ${turnsWord(left)}.\nOdemyká: ${t.unlocks}.${p.techQueue.length ? `\nPotom: ${p.techQueue.map(q => TECHS[q].name).join(' → ')}.` : ''}\nKliknutím otevřete strom technologií (T).`)}>${ic('sci')}<span>${t.name}</span><div class="bar"><i style="width:${Math.min(100, 100 * p.progress / t.cost)}%"></i></div><small>${left}${NB}${turnsWord(left)}</small></div>`
     } else {
       const any = availableTechs(p).length > 0
       research = `<div class="research ${any && citiesOf(s, 0).length ? 'need' : ''}" data-a="tech-open"${tip('Výzkum|Kliknutím otevřete strom technologií (T) a zvolte, co zkoumat.')}>${ic('sci')}<span>${any ? 'Zvolte výzkum' : 'Vše objeveno'}</span></div>`
@@ -354,12 +358,14 @@ export class Hud {
       <div class="stat clickable ${traditionReady(p) ? 'need' : ''}" data-a="trad-open"${tip(`Kultura: ${p.culture} / ${traditionCost(p.traditions.length)}|Města dohromady dávají ${signed(cult)} kultury za tah. Za nastřádanou kulturu si národ vybírá tradice – trvalé výhody (máte ${p.traditions.length}).${traditionReady(p) ? '\nMůžete zvolit novou tradici!' : cult > 0 ? `\nDalší tradice za ${Math.max(1, Math.ceil((traditionCost(p.traditions.length) - p.culture) / cult))} tahů.` : ''}\nKaždé město navíc svou kulturou rozšiřuje hranice. Kliknutím otevřete tradice (C).`)}>${ic('culture')}${p.culture}<small>/${traditionCost(p.traditions.length)}</small></div>
       <div class="stat clickable" data-a="mission"${tip(`${ERAS[p.era].name}|${p.era < ERAS.length - 1 ? `Další věk (${ERAS[p.era + 1].name}) při ${ERAS[p.era + 1].techs} technologiích, máte ${p.techs.length}. Vstup do věku přináší zlato a kulturu; kdo je první, získá zlatý věk.` : 'Dosáhli jste posledního věku.'}${s.turn < p.goldenUntil ? `\nZlatý věk: ještě ${p.goldenUntil - s.turn} tahů (+1 výroba, zlato a kultura v každém městě).` : ''}`)}>${s.turn < p.goldenUntil ? '<b style="color:var(--gold)">★</b> ' : ''}${ERAS[p.era].name.replace(/^Věk | věk$/, '').replace(/^./, ch => ch.toUpperCase())}</div>
       ${research}
+      ${this.resourceChips()}
       <div class="stat"${tip(`Tah ${Math.min(s.turn, s.maxTurns)} z ${s.maxTurns}|Po posledním tahu rozhodne o vítězi skóre.`)}>${ic('turn')}${Math.min(s.turn, s.maxTurns)}${NB}/${NB}${s.maxTurns}</div>
       <div class="stat"${tip('Skóre|Technologie 6 bodů, město 12, obyvatel 4, budova 3, pole území 0,5, splněné vedlejší úkoly 20–25.')}>${ic('star')}${score(s, 0)}</div>
       <div class="spacer"></div>
-      <button class="tbtn ${this.overviewOn ? 'on' : ''}" data-a="overview"${tip('Přehled měst a jednotek (L)|Postranní seznam: co která města stavějí a co dělají jednotky. Kliknutím na řádek na ně skočíte. Zůstává otevřený, dokud ho nevypnete.')}>${ic('pop', 's')}Přehled</button>
-      <button class="tbtn" data-a="mission" data-tip="Cíle mise (M)">${ic('flag', 's')}Mise</button>
-      <button class="tbtn" data-a="diplo"${tip('Diplomacie|Přehled soupeřů, vyhlášení války a nabídka míru.')}>${ic(this.me.war.length ? 'war' : 'peace', 's')}Diplomacie</button>
+      <button class="tbtn ${this.overviewOn ? 'on' : ''}" data-a="overview"${tip('Přehled měst a jednotek (L)|Postranní seznam: co která města stavějí a co dělají jednotky. Kliknutím na řádek na ně skočíte. Zůstává otevřený, dokud ho nevypnete.')}>${ic('pop', 's')}<span class="lbl">Přehled</span></button>
+      <button class="tbtn" data-a="mission" data-tip="Cíle mise (M)">${ic('flag', 's')}<span class="lbl">Mise</span></button>
+      <button class="tbtn" data-a="diplo"${tip('Diplomacie|Přehled soupeřů, vyhlášení války a nabídka míru.')}>${ic(this.me.war.length ? 'war' : 'peace', 's')}<span class="lbl">Diplomacie</span></button>
+      <button class="tbtn ${this.app.hints ? 'on' : ''}" data-a="hints"${tip(`Tipy: ${this.app.hints ? 'zapnuty' : 'vypnuty'} (I)|Žárovka označuje doporučenou volbu: co stavět ve městě, co zkoumat, kterou tradici přijmout, kde založit město a které pole vylepšit. Zapnuté tipy ukazují i rady rádce. Doporučení je jen vodítko – rozhodnutí je vždy na vás.`)}>${this.app.hints ? ic('tip', 's') : `<img class="ic s" src="${UI}ic_tip.png" alt="" style="opacity:.35;filter:grayscale(1)">`}</button>
       <button class="tbtn" data-a="help" data-tip="Nápověda (H)">${ic('help', 's')}</button>
       <button class="tbtn" data-a="zoom" data-v="-1" data-tip="Oddálit (−)">−</button>
       <button class="tbtn" data-a="zoom" data-v="1" data-tip="Přiblížit (+)">+</button>
@@ -455,6 +461,7 @@ export class Hud {
     const growT = y.foodNet > 0 ? Math.ceil((need - c.food) / y.foodNet) : 0
     const turns = (it: BuildItem) => Math.max(1, Math.ceil((itemCost(it) - c.prod) / Math.max(1, y.prod)))
     const scroll = this.cityPanel.querySelector('.inner')?.scrollTop ?? 0
+    const rec = this.app.hints ? recommendBuild(s, c) : null
     const cs = cultureSources(c, this.me, s.turn)
     const nextB = c.radius < 2 ? BORDER_AT[0] : c.radius < 3 ? BORDER_AT[1] : 0
     const prevB = c.radius < 2 ? 0 : BORDER_AT[0]
@@ -478,10 +485,11 @@ export class Hud {
     const row = (it: BuildItem) => {
       const def = it.kind === 'unit' ? UNITS[it.id] : BUILDINGS[it.id]
       const isCur = sameItem(c.build, it)
+      const isRec = sameItem(rec, it)
       const inQ = c.queue.filter(q => sameItem(q, it)).length
       const tt = (it.kind === 'unit' ? this.unitTip(it.id) : this.buildingTip(it.id)) + '\nKlik: zařadit do fronty · Shift + klik: stavět hned'
       const extra = it.kind === 'unit' ? [UNITS[it.id].str ? `síla ${UNITS[it.id].str}` : '', UNITS[it.id].ranged ? `střelba ${UNITS[it.id].ranged}` : '', `pohyb ${UNITS[it.id].move}`].filter(Boolean).join(', ') + '. ' : ''
-      return `<button class="build ${isCur ? 'cur' : ''}" data-a="build" data-v="${it.kind}:${it.id}"${tip(tt)}><img src="${this.itemIcon(it, 0)}" alt="">
+      return `<button class="build ${isCur ? 'cur' : ''} ${isRec ? 'rec' : ''}" data-a="build" data-v="${it.kind}:${it.id}"${tip(tt + (isRec ? '\nTip rádce: tohle se městu teď hodí nejvíc.' : ''))}>${isRec ? REC : ''}<img src="${this.itemIcon(it, 0)}" alt="">
         <span class="n">${def.name}${inQ ? ` <em class="inq">ve frontě${inQ > 1 ? ` ${inQ}×` : ''}</em>` : ''}<small>${esc(extra + def.desc)}</small></span><span class="c">${ic('prod', 's')}${itemCost(it)}<br>${turns(it)}${NB}${turnsWord(turns(it))}</span></button>`
     }
     const opts = availableBuilds(s, c)
@@ -514,7 +522,6 @@ export class Hud {
       <h4>Výroba a fronta</h4>
       ${cur}${queue}
       <div class="sub hint">Klik na položku ji zařadí do fronty, Shift + klik ji začne stavět hned.</div>
-      <div style="display:flex;justify-content:flex-end;margin:5px 0"><button class="btn small" data-a="advise" data-tip="Rádce vybere rozumnou stavbu">Poradit</button></div>
       <h4>Jednotky</h4>
       ${opts.filter(o => o.kind === 'unit').map(row).join('')}${blocked}
       <h4>Budovy</h4>
@@ -550,7 +557,7 @@ export class Hud {
 
   private nextTip(): Tip | null {
     const s = this.s, me = this.me
-    if (s.tutorial.includes('off')) return null
+    if (!this.app.hints) return null
     const done = (id: string) => s.tutorial.includes(id)
     const cities = citiesOf(s, 0)
     const units = unitsOf(s, 0)
@@ -592,6 +599,24 @@ export class Hud {
     ]
     for (const [id, cond, title, text] of tips) if (cond && !done(id)) return { id, title, text }
     return null
+  }
+
+  /** Stav strategických surovin (koně, železo) v horní liště. */
+  private resourceChips(): string {
+    const s = this.s
+    return resourceReport(s, 0).filter(r => RESOURCES[r.res].strategic).map(r => {
+      const def = RESOURCES[r.res]
+      const nm = def.name, low = nm.toLowerCase()
+      const units = unitsNeeding(s, 0, r.res).join(', ') || 'žádná vaše jednotka (můžete ji ale prodávat v Diplomacii)'
+      const imp = def.improvement === 'mine' ? 'důl' : 'ohradu'
+      const first = r.improved[0] ?? r.raw[0] ?? -1
+      let state: string, mark: string, text: string
+      if (!r.known) { state = 'unknown'; mark = '?'; text = `Ložiska zatím nevidíte – odhalí je technologie ${TECHS[def.tech!].name}.` }
+      else if (r.cap > 0) { state = r.used >= r.cap ? 'full' : 'have'; mark = `${r.used}/${r.cap}`; text = `Uživíte ${r.cap} ${r.cap === 1 ? 'jednotku' : r.cap < 5 ? 'jednotky' : 'jednotek'}, máte jich ${r.used}${r.used >= r.cap ? ' – další postavíte, až získáte nový zdroj' : ''}. Každý zdroj uživí ${UNITS_PER_SOURCE} jednotky.\nVlastních zdrojů s vylepšením: ${r.improved.length}.${r.raw.length ? ` Dalších ${r.raw.length} na vašem území čeká na ${imp}.` : ''}${r.bought ? ' Jeden zdroj kupujete.' : ''}${r.sold ? ' Jeden zdroj prodáváte.' : ''}` }
+      else if (r.raw.length) { state = 'raw'; mark = '!'; text = `Na vašem území ${r.raw.length === 1 ? 'je 1 ložisko' : `jsou ${r.raw.length} ložiska`}, ale bez vylepšení. Pošlete tam dělníky postavit ${imp}.` }
+      else { state = 'none'; mark = '–'; text = 'Na vašem území není. Hledejte ji na mapě a založte u ní město, nebo ji kupte v Diplomacii.' }
+      return `<div class="stat res ${state}${first >= 0 ? ' clickable' : ''}" ${first >= 0 ? `data-a="ov-tile" data-v="${first}"` : ''}${tip(`${nm} – strategická surovina|${text}\nPotřebuje ji: ${units}.${first >= 0 ? '\nKliknutím ukážete ložisko na mapě.' : ''}`)}><i class="resic" style="background-image:url(${UI}r_${r.res}.png)" aria-label="${low}"></i><small>${mark}</small></div>`
+    }).join('')
   }
 
   toggleOverview(): void {
@@ -643,6 +668,12 @@ export class Hud {
     const civ = mine.filter(u => isCivilian(u)), mil = mine.filter(u => !isCivilian(u))
     const waiting = mine.filter(u => this.unitDoing(u)[1]).length
     this.overview.innerHTML = `<h2>Přehled<button class="x" data-a="overview"${tip('Zavřít přehled (L)')}>✕</button></h2><div class="inner">
+      <h4>Suroviny</h4>${resourceReport(s, 0).map(r => {
+        const def = RESOURCES[r.res], n = r.improved.length + r.raw.length
+        const first = r.improved[0] ?? r.raw[0] ?? -1
+        const st = !r.known ? 'zatím neznámé' : def.strategic && r.cap > 0 ? `jednotek ${r.used} / ${r.cap}${r.raw.length ? `, bez vylepšení ${r.raw.length}` : ''}` : r.improved.length ? `využíváte ${r.improved.length}${r.raw.length ? `, bez vylepšení ${r.raw.length}` : ''}` : r.bought ? 'kupujete' : n ? `${n}× na území, chybí ${def.improvement === 'mine' ? 'důl' : def.improvement === 'pasture' ? 'ohrada' : 'farma'}` : 'nemáte'
+        return `<div class="ov" ${first >= 0 ? `data-a="ov-tile" data-v="${first}"` : 'style="cursor:default"'}><i class="resic" style="background-image:url(${UI}r_${r.res}.png)"></i><div><b>${def.name}</b>${def.strategic ? ' <small>strategická</small>' : ''}<br><span class="${r.known && !r.improved.length && r.raw.length ? 'idle' : 'doing'}">${st}</span></div></div>`
+      }).join('')}
       <h4>Města (${citiesOf(s, 0).length})</h4>${cities || '<div class="sub">Zatím žádné město.</div>'}
       <h4>Civilní jednotky (${civ.length})</h4>${civ.map(row).join('') || '<div class="sub">Žádné.</div>'}
       <h4>Vojsko (${mil.length})${waiting ? ` <small style="color:var(--gold)">· na rozkaz čeká ${waiting}</small>` : ''}</h4>${mil.map(row).join('') || '<div class="sub">Žádné.</div>'}</div>`
@@ -685,8 +716,8 @@ export class Hud {
       const vis = this.me.visible[idx(s, c.x, c.y)]
       let extra = ''
       if (c.owner === 0) {
-        if (c.build) { const y = cityYields(s, c); const t = Math.max(1, Math.ceil((itemCost(c.build) - c.prod) / Math.max(1, y.prod))); extra = `<em>${esc(itemName(c.build))} ${t}${c.queue.length ? ` +${c.queue.length}` : ''}</em>` }
-        else extra = `<em style="color:var(--gold)">nečinné!</em>`
+        if (c.build) { const y = cityYields(s, c); const t = Math.max(1, Math.ceil((itemCost(c.build) - c.prod) / Math.max(1, y.prod))); extra = `<em>${esc(itemName(c.build))} · ${t} t.${c.queue.length ? ` → ${esc(itemName(c.queue[0]))}${c.queue.length > 1 ? '…' : ''}` : ''}</em>`; el.dataset.tip = typo(`${c.name}|Staví: ${itemName(c.build)}, hotovo za ${t} ${turnsWord(t)}.${c.queue.length ? `\nVe frontě potom: ${c.queue.map(q => itemName(q)).join(', ')}.` : '\nFronta je prázdná.'}\nKliknutím otevřete město.`) }
+        else { extra = `<em style="color:var(--gold)">nečinné!</em>`; el.dataset.tip = typo(`${c.name}|Město nic nestaví, výroba se mění na zlato.\nKliknutím otevřete město a vyberete stavbu.`) }
       }
       const maxHp = cityMaxHp(c)
       const html = `<b>${vis || c.owner === 0 ? c.pop : '?'}</b><span>${c.capital ? '★ ' : ''}${esc(c.name)}</span>${extra}${vis && c.hp < maxHp ? `<div class="hpb"><i style="width:${100 * c.hp / maxHp}%"></i></div>` : ''}`
@@ -730,6 +761,7 @@ export class Hud {
     if (t.special === 'ruins') parts.push('<b style="color:var(--gold)">Ruiny Starého trůnu</b>')
     if (t.special === 'camp') parts.push('<b style="color:var(--bad)">Barbarský tábor</b>')
     if (t.res && resourceVisible(this.me, t.res)) parts.push(`<b>${RESOURCES[t.res].name}</b>`)
+    const strat = t.res && resourceVisible(this.me, t.res) && RESOURCES[t.res].strategic ? t.res : null
     if (t.imp) parts.push(IMPROVEMENTS[t.imp].name)
     if (t.road) parts.push('cesta')
     if (t.river && TERRAIN[t.t].land) parts.push('řeka')
@@ -752,6 +784,11 @@ export class Hud {
         const pv = previewAttack(s, sel, x, y)
         if (pv) html += `<br><span class="pv">${ic('war', 's')}Útok: nepřítel −${pv.dmgDef}${pv.dmgDef >= pv.defHp && !(pv.city && pv.ranged) ? ' (zničen)' : ''}${pv.ranged ? ', bez odvety' : `, vy −${pv.dmgAtt}${pv.dmgAtt >= pv.attHp ? ' (padnete!)' : ''}`}${pv.river ? ' · přes řeku −20 %' : ''}${pv.needWar >= 0 ? ' · znamená válku' : ''}</span>`
       }
+    }
+    if (strat) {
+      const def = RESOURCES[strat]
+      const used = t.imp === def.improvement || !!cityAt(s, x, y)
+      html += `<br><span class="${used ? 'job' : 'nojob'}">${esc(`Strategická surovina pro: ${unitsNeeding(s, 0, strat).join(', ') || '–'}. ${used ? (t.owner === 0 ? 'Využíváte ji.' : 'Využívá ji jiný národ.') : `Zpřístupní ji ${def.improvement === 'mine' ? 'důl' : 'ohrada'} na území města.`}`)}</span>`
     }
     const sel = this.app.unit, eta = this.app.hoverEta
     if (sel && sel.type === 'settler' && sel.owner === 0 && TERRAIN[t.t].passable) {
@@ -919,6 +956,7 @@ export class Hud {
     const p = this.me
     const inc = playerIncome(this.s, 0)
     const avail = availableTechs(p)
+    const recTech = this.app.hints ? adviseTech(this.s, p) : null
     const W = 196, H = 70, GX = 34, GY = 12
     const pos = (t: TechId) => [(TECHS[t].tier - 1) * (W + GX), TECHS[t].row * (H + GY)]
     let lines = ''
@@ -931,13 +969,19 @@ export class Hud {
         const done = p.techs.includes(r)
         lines += `<path d="M${rx + W} ${ry + H / 2} C ${rx + W + 20} ${ry + H / 2}, ${x - 20} ${y + H / 2}, ${x} ${y + H / 2}" stroke="${done ? '#3f8f5a' : '#3a466f'}" stroke-width="3" fill="none"/>`
       }
-      const cls = p.techs.includes(id) ? 'done' : p.research === id ? 'cur avail' : avail.includes(id) ? 'avail' : 'locked'
-      const left = Math.max(1, Math.ceil((t.cost - (p.research === id ? p.progress : 0)) / Math.max(1, inc.sci)))
-      cards += `<div class="tech ${cls}" style="left:${x}px;top:${y}px"${tip(this.techTip(id))} ${avail.includes(id) ? `data-a="tech" data-v="${id}"` : ''}>
-        <span class="cost">${p.techs.includes(id) ? '✓' : `${t.cost} · ${left}${NB}t.`}</span><b>${t.name}</b><small>${esc(t.unlocks)}</small></div>`
+      const qi = p.techQueue.indexOf(id)
+      const isRec = recTech === id && p.research !== id
+      const cls = p.techs.includes(id) ? 'done' : p.research === id ? 'cur avail' : `${avail.includes(id) ? 'avail' : 'locked far'}${qi >= 0 ? ' queued' : ''}`
+      // U plánovaných technologií se tahy sčítají přes celou frontu.
+      let pts = t.cost - (p.research === id ? p.progress : 0)
+      if (qi >= 0) pts = (p.research ? TECHS[p.research].cost - p.progress : 0) + p.techQueue.slice(0, qi + 1).reduce((a, q) => a + TECHS[q].cost, 0)
+      const left = Math.max(1, Math.ceil(pts / Math.max(1, inc.sci)))
+      const order = p.research === id ? '1' : qi >= 0 ? String(qi + (p.research ? 2 : 1)) : ''
+      cards += `<div class="tech ${cls}${isRec ? ' rec' : ''}" style="left:${x}px;top:${y}px"${tip(`${this.techTip(id)}${p.techs.includes(id) ? '' : avail.includes(id) ? '\nKlik: zkoumat hned · Shift + klik: zařadit za dosavadní plán' : `\nKlik: naplánovat cestu sem (${techPath(p, id).map(q => TECHS[q].name).join(' → ')}) · Shift + klik: zařadit za dosavadní plán`}`)} ${p.techs.includes(id) ? '' : `data-a="tech" data-v="${id}"`}>
+        ${isRec ? REC : ''}${order ? `<i class="ord">${order}</i>` : ''}<span class="cost">${p.techs.includes(id) ? '✓' : `${t.cost} · ${left}${NB}t.`}</span><b>${t.name}</b><small>${esc(t.unlocks)}</small></div>`
     }
     const w = 5 * W + 4 * GX, hh = 7 * (H + GY)
-    this.open('tech', `${ic('sci')}Strom technologií`, `<p style="color:var(--muted)">${esc(`Klikněte na modře orámovanou technologii. Vaše věda: ${inc.sci} za tah.`)}${p.progress && !p.research ? esc(` Nastřádáno ${p.progress} bodů.`) : ''}</p>
+    this.open('tech', `${ic('sci')}Strom technologií`, `<p style="color:var(--muted)">${esc(`Klikněte na kteroukoli technologii: u vzdálené se naplánuje celá cesta k ní a výzkum pak pokračuje sám. Shift + klik ji zařadí za dosavadní plán. Čísla ukazují pořadí. Vaše věda: ${inc.sci} za tah.${p.techQueue.length ? ` Ve frontě: ${p.techQueue.map(q => TECHS[q].name).join(' → ')}.` : ''}`)}${p.progress && !p.research ? esc(` Nastřádáno ${p.progress} bodů.`) : ''}</p>
       <div class="tree" style="width:${w}px;height:${hh}px"><svg width="${w}" height="${hh}">${lines}</svg>${cards}</div>`)
   }
 
@@ -948,9 +992,10 @@ export class Hud {
     const cost = traditionCost(p.traditions.length)
     const cult = citiesOf(this.s, 0).reduce((a, c) => a + cityYields(this.s, c).culture, 0)
     const left = Math.max(0, cost - p.culture)
+    const recTrad = this.app.hints ? traditionAdvice(p) : null
     const cards = TRADITION_IDS.map(id => {
       const has = p.traditions.includes(id)
-      return `<div class="trad ${has ? 'done' : ready ? 'avail' : 'locked'}" ${!has && ready ? `data-a="trad" data-v="${id}"` : ''}><b>${has ? '✓ ' : ''}${TRADITIONS[id].name}</b><small>${esc(TRADITIONS[id].desc)}</small></div>`
+      return `<div class="trad ${has ? 'done' : ready ? 'avail' : 'locked'}${id === recTrad ? ' rec' : ''}" ${!has && ready ? `data-a="trad" data-v="${id}"` : ''}>${id === recTrad ? REC : ''}<b>${has ? '✓ ' : ''}${TRADITIONS[id].name}</b><small>${esc(TRADITIONS[id].desc)}</small></div>`
     }).join('')
     const all = p.traditions.length >= TRADITION_IDS.length
     this.open('trad', `${ic('culture')}Tradice`, `<p>${esc(all ? 'Váš národ přijal všechny tradice.' : ready ? `Máte ${p.culture} kultury – vyberte si novou tradici (stojí ${cost}). Platí pro celý národ a napořád.` : `Další tradice stojí ${cost} kultury, máte ${p.culture}.${cult > 0 ? ` Při ${cult} kultury za tah to bude za ${Math.ceil(left / cult)} tahů.` : ' Vaše města zatím žádnou kulturu nedávají.'} Kulturu zvyšují monumenty a chrámy.`)}</p>
@@ -980,8 +1025,8 @@ export class Hud {
         ${war ? '' : `<div class="dip">${TRADABLE.map(r => {
           const sb = saleBlock(s, p.id, r), bb = buyBlock(s, p.id, r)
           const nm = RESOURCES[r].name.toLowerCase()
-          return `<button class="btn small" data-a="dip" data-v="sell:${p.id}:${r}" ${sb ? 'disabled' : ''}${tip(`Prodat: ${nm}|Dostanete ${salePrice(p)} zlata za tah po ${DEAL_TURNS} tahů, o surovinu sami nepřijdete. Soupeř ale bude moci stavět jednotky, které ji potřebují.${sb ? `\nNelze: ${sb}` : ''}`)}>${ic('trade', 's')}Prodat ${nm} +${salePrice(p)}</button>
-            <button class="btn small" data-a="dip" data-v="buy:${p.id}:${r}" ${bb ? 'disabled' : ''}${tip(`Koupit: ${nm}|Zaplatíte ${buyPrice(p)} zlata za tah po ${DEAL_TURNS} tahů a můžete stavět jednotky, které surovinu potřebují.${bb ? `\nNelze: ${bb}` : ''}`)}>${ic('trade', 's')}Koupit ${nm} −${buyPrice(p)}</button>`
+          return `<button class="btn small" data-a="dip" data-v="sell:${p.id}:${r}" ${sb ? 'disabled' : ''}${tip(`Prodat: ${nm}|Dostanete ${salePrice(p)} zlata za tah po ${DEAL_TURNS} tahů. Jeden váš zdroj tím přenecháte soupeři: vy uživíte o ${UNITS_PER_SOURCE} jednotky méně, on o ${UNITS_PER_SOURCE} více.${sb ? `\nNelze: ${sb}` : ''}`)}>${ic('trade', 's')}Prodat ${nm} +${salePrice(p)}</button>
+            <button class="btn small" data-a="dip" data-v="buy:${p.id}:${r}" ${bb ? 'disabled' : ''}${tip(`Koupit: ${nm}|Zaplatíte ${buyPrice(p)} zlata za tah po ${DEAL_TURNS} tahů a uživíte o ${UNITS_PER_SOURCE} jednotky se surovinou víc.${bb ? `\nNelze: ${bb}` : ''}`)}>${ic('trade', 's')}Koupit ${nm} −${buyPrice(p)}</button>`
         }).join('')}
           <button class="btn small" data-a="dip" data-v="gift:${p.id}" ${this.me.gold < GIFT ? 'disabled' : ''}${tip(`Dar ${GIFT} zlata|Zlepší vztah o 12 bodů.`)}>${ic('gold', 's')}Dar ${GIFT}</button>
           ${s.players.filter(q => (q.id === 1 || q.id === 2) && q.id !== p.id && q.alive && this.me.met.includes(q.id)).map(q => `<button class="btn small" data-a="dip" data-v="ally:${p.id}:${q.id}"${tip(`Spojenectví proti: ${NATIONS[q.nation].name}|Oba vyhlásíte tomuto národu válku a spojenec vás 25 tahů nenapadne. Přijme, když je k vám aspoň vstřícný (vztah 20+) a soupeř pro něj není příliš silný, nebo když s ním už válčí.`)}>${ic('war', 's')}Spojenectví proti: ${NATIONS[q.nation].name}</button>`).join('')}
@@ -1019,6 +1064,7 @@ export class Hud {
         <li>${esc('Najetím myši na kteroukoli ikonu, tlačítko, stavbu nebo technologii zobrazíte nápovědu.')}</li>
         <li>${esc('Tažení myší nebo WASD / šipky: posun mapy. Kolečko nebo + a −: přiblížení.')}</li>
         <li>${esc('Osadníci: zlaté značky ukazují doporučená místa pro město, kliknutím tam osadníky pošlete a po příchodu město sami založí. Po najetí myší na pole uvidíte, jak je pro město dobré.')}</li>
+        <li>${esc('I: tipy rádce zapnout / vypnout. Žárovka značí doporučenou volbu – stavbu ve městě, technologii, tradici, místo pro město i pole pro dělníky.')}</li>
         <li>${esc('L: přehled měst a jednotek – postranní seznam, co se kde staví a co která jednotka dělá.')}</li>
         <li>${esc('Enter: další rozhodnutí nebo konec tahu (Shift+Enter ukončí tah hned). N: další jednotka. T: technologie. M: mise. Esc: zrušit výběr.')}</li>
         <li>${esc('Jednotky: B založit město, F opevnit, Z spát, X přeskočit tah, E automatika (dělníci vylepšují pole, zvěd a lodě zkoumají mapu).')}</li></ul>
@@ -1030,6 +1076,7 @@ export class Hud {
       <h4>Zkušenosti a přezbrojení</h4><p>${esc('Jednotky získávají bojem zkušenosti a při 10, 25 a 45 bodech si vyberou povýšení: Výcvik (+15 % útok), Zocelení (+20 % obrana), Ranhojič (rychlejší léčení) nebo Pochodník (+1 pohyb). Zastaralou jednotku lze na vlastním území za zlato přezbrojit (klávesa U): válečník → kopiník → šermíř, zvěd → jezdec, galéra → triéra.')}</p>
       <h4>Obchod a spojenectví</h4><p>${esc('V okně Diplomacie vidíte vztah každého soupeře k vám. Koně a železo můžete prodávat či kupovat za zlato za tah, darem vztah zlepšíte. Vstřícný soupeř přijme spojenectví proti třetímu národu a 25 tahů vás nenapadne; někdy o pomoc požádá sám.')}</p>
       <h4>Lodě a nalodění</h4><p>${esc('Technologie Plavba dovolí pozemním jednotkám vstoupit na pobřežní vody, Navigace i na oceán. Nalodění i vylodění ukončí tah; naloděná jednotka pluje 3 pole za tah (s Navigací 4), nemůže útočit a brání se silou 4. Pobřežní město staví galéry (boj zblízka proti lodím a člunům) a triéry (střelba na 2 pole, i na břeh a města) a přístav (+1 jídlo z vodních polí, +2 zlato).')}</p>
+      <h4>Suroviny</h4><p>${esc('Obilí, zvěř, ryby, kámen a zlato zvyšují výnos pole. Koně a železo jsou strategické: teprve s ohradou (koně) či dolem (železo) na vašem území jdou stavět jezdci a šermíři, a každý takový zdroj uživí jen 2 jednotky. Kdo chce víc jezdců či šermířů, potřebuje víc ložisek nebo surovinu dokoupit; přijdete-li o zdroj, hotové jednotky vám zůstanou, ale nové nepostavíte. Železo se na mapě objeví až po objevu Bronzu. Stav obou surovin ukazují ikony v horní liště, všechny suroviny na vašem území najdete v Přehledu (L). Chybějící surovinu lze koupit v Diplomacii.')}</p>
       <h4>Pole a vylepšení</h4><p>${esc('Louky dávají jídlo, pláně jídlo i výrobu, pahorkatina výrobu, les výrobu. Dělníci staví farmy (+jídlo), doly (+výroba), ohrady (koně, zvěř) a pily (les). Koně a železo je nutné vylepšit, aby šlo stavět jezdce a šermíře.')}</p>
       <h4>Boj</h4><p>${esc('Na jednom poli může stát jedna vojenská a jedna civilní jednotka. V boji zblízka utrpí ztráty obě strany, střelci (dostřel 2) odvetu nedostanou. Pahorkatina a les dávají obránci +25 %, opevnění dalších +25 %. Kopiníci mají +50 % proti jízdě, katapulty dvojnásobný účinek proti městům. Jednotka, která se celý tah nehýbe, se léčí (nejrychleji ve městě).')}</p>
       <p>${esc('Město se dobývá tak, že mu útoky srazíte hradby na nulu a vstoupíte do něj jednotkou pro boj zblízka. Města sama střílejí na nepřátele do 2 polí.')}</p>
@@ -1050,11 +1097,11 @@ export class Hud {
         li(['Mapu posouváte tažením myši nebo klávesami WASD, kolečkem přibližujete.', 'Kliknutím vyberete jednotku nebo město. Esc výběr zruší.', 'S vybranou jednotkou: klik na světlé pole = pohyb ještě tento tah, klik kamkoli dál = cesta na více tahů (jednotka pak chodí sama), klik na červený rámeček = útok.', 'Shift + klik přidá jednotce další průjezdní bod.', 'Najeďte myší na cokoli v rozhraní a zobrazí se nápověda. Dole uprostřed vidíte popis pole pod kurzorem.'])],
       ['První město', pic(`u_settler_${nat}`, 88) + pic(`city_1_${nat}`, 110),
         `<p>${esc('Začínáte s osadníky, válečníkem a zvědem. Vyberte osadníky a založte město (klávesa B) – místo, kde stojí, je dobré.')}</p>` +
-        li(['Kliknutím na město otevřete jeho okno. Obyvatelé obdělávají okolní pole a přinášejí jídlo (růst), výrobu (stavby) a zlato.', 'Vyberte, co stavět. Další kliknutí přidávají položky do fronty, takže město může mít plán na mnoho tahů dopředu.', 'Na začátek: válečník nebo zvěd, pak dělníci a osadníci pro druhé město. Tlačítko Poradit vybere rozumnou stavbu za vás.'])],
+        li(['Kliknutím na město otevřete jeho okno. Obyvatelé obdělávají okolní pole a přinášejí jídlo (růst), výrobu (stavby) a zlato.', 'Vyberte, co stavět. Další kliknutí přidávají položky do fronty, takže město může mít plán na mnoho tahů dopředu.', 'Na začátek: válečník nebo zvěd, pak dělníci a osadníci pro druhé město. Žárovka u položky značí, co rádce doporučuje.'])],
       ['Pole, dělníci a kultura', pic(`u_worker_${nat}`, 80) + pic('i_farm', 80) + pic('i_mine', 80) + pic('ic_culture', 60),
         li(['Dělníci staví na polích ve vašem území farmy, doly, ohrady a pily. Když je vyberete, pole k vylepšení se označí zeleně – stačí na ně kliknout. Rozkaz Automaticky (E) je nechá pracovat samostatně.', 'Po objevu Kola stavějí i cesty: pohyb po nich stojí polovinu a překlenou řeku.', 'Koně a železo je nutné vylepšit (ohrada, důl), teprve pak lze stavět jízdu a šermíře.', 'Kultura rozšiřuje hranice města. Každé město ji střádá zvlášť: druhý okruh polí získá při 18 bodech, třetí při 90. Zrychlí to monument a chrám.', 'Kultura všech měst se navíc sčítá a národ si za ni vybírá tradice – trvalé výhody (ukazatel kultury nahoře, klávesa C).'])],
       ['Výzkum', pic('ic_sci', 72) + pic('b_library', 80) + pic('b_academy', 80),
-        li(['Vědu dávají obyvatelé, knihovny a akademie. Co zkoumat, volíte ve stromu technologií (klávesa T nebo ukazatel nahoře).', 'Technologie odemykají jednotky, budovy a vylepšení polí. Po najetí myší na kartu uvidíte přesně co.', 'Každý národ začíná s jednou hotovou technologií. Počet objevů vás posouvá do dalších věků – kdo je v novém věku první, získá zlatý věk.', 'Astronomie na konci stromu odemyká Sluneční chrám.'])],
+        li(['Vědu dávají obyvatelé, knihovny a akademie. Co zkoumat, volíte ve stromu technologií (klávesa T nebo ukazatel nahoře). Kliknete-li na vzdálenou technologii, naplánuje se celá cesta k ní.', 'Technologie odemykají jednotky, budovy a vylepšení polí. Po najetí myší na kartu uvidíte přesně co.', 'Každý národ začíná s jednou hotovou technologií. Počet objevů vás posouvá do dalších věků – kdo je v novém věku první, získá zlatý věk.', 'Astronomie na konci stromu odemyká Sluneční chrám.'])],
       ['Vojsko a boj', pic(`u_warrior_${nat}`, 80) + pic(`u_archer_${nat}`, 80) + pic('f_camp', 96),
         li(['Na jednom poli stojí nejvýš jedna vojenská a jedna civilní jednotka.', 'Zblízka utrpí ztráty obě strany, střelci (dostřel 2 pole) odvetu nedostanou. Před útokem vidíte odhad ztrát.', 'Les a pahorkatina pomáhají obránci, opevnění (F) také, útok přes řeku je slabší. Jednotka, která se tah nehýbe, se léčí.', 'Bojem jednotky sbírají zkušenosti a vybírají si povýšení; staré jednotky lze za zlato přezbrojit.', 'Barbarský tábor vypálíte tím, že na něj vstoupíte. Město dobudete, když mu srazíte hradby na nulu a vejdete do něj pěchotou.'])],
       ['Lodě', pic(`u_galley_${nat}`, 80) + pic(`u_trireme_${nat}`, 80) + pic(`u_boat_${nat}`, 80) + pic('b_harbor', 80),

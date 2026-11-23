@@ -14,7 +14,7 @@ export const START_TECH: Record<NationId, TechId> = { aur: 'agriculture', khar: 
 
 function makePlayer(id: number, nation: NationId, human: boolean, personality: Player['personality']): Player {
   return {
-    id, nation, human, alive: true, gold: nation === 'thal' ? 60 : 30, research: null, progress: 0, techs: id !== BARB ? (nation === 'thal' ? [START_TECH[nation], 'sailing'] : [START_TECH[nation]]) : [],
+    id, nation, human, alive: true, gold: nation === 'thal' ? 60 : 30, research: null, techQueue: [], progress: 0, techs: id !== BARB ? (nation === 'thal' ? [START_TECH[nation], 'sailing'] : [START_TECH[nation]]) : [],
     explored: [], visible: [], war: [], met: [], personality, lastWarTurn: -99, peaceUntil: [0, 0, 0, 0], cityNames: 0, attitude: 0, pactUntil: 0, culture: 0, traditions: [], era: 0, goldenUntil: 0,
   }
 }
@@ -27,7 +27,7 @@ export function pickRivals(nation: NationId): [NationId, NationId] {
   return [aggr, build]
 }
 
-export function createGame(nation: NationId, difficulty: Difficulty, scenario: ScenarioId = 'valley', seed = scenario === 'valley' ? MISSION_SEED : scenario === 'islands' ? ISLANDS_SEED : 1 + Math.floor(Math.random() * 999983)): GameState {
+export function createGame(nation: NationId, difficulty: Difficulty, scenario: ScenarioId = 'valley', seed = scenario === 'valley' ? MISSION_SEED : scenario === 'islands' ? ISLANDS_SEED : 1 + Math.floor(Math.random() * 999983), startSlot = 0): GameState {
   const sc = generateScenario(seed, scenario)
   const [aggr, build] = pickRivals(nation)
   const players = [
@@ -47,7 +47,8 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
     return [x, y]
   }
   for (let pid = 0; pid < 3; pid++) {
-    const [sx, sy] = sc.starts[pid]
+    // Startovní místa se mezi hráči protáčejí: hráč `pid` dostane místo o `startSlot` dál.
+    const [sx, sy] = sc.starts[(pid + startSlot) % sc.starts.length]
     makeUnit(s, pid, 'settler', sx, sy)
     makeUnit(s, pid, 'warrior', sx, sy)
     const a = freeNear(sx, sy)
@@ -106,7 +107,7 @@ export function deserialize(json: string): GameState | null {
     // Doplnění polí, která starší uložené hry neznají.
     for (const c of s.cities) c.queue ??= []
     for (const u of s.units) { u.way ??= []; u.auto ??= false; u.todo ??= null; u.roadTo ??= null; u.xp ??= 0; u.promos ??= []; u.sea ??= false }
-    for (const p of s.players) { p.attitude ??= 0; p.pactUntil ??= 0; p.culture ??= 0; p.traditions ??= []; p.era ??= eraOf(p); p.goldenUntil ??= 0 }
+    for (const p of s.players) { p.attitude ??= 0; p.techQueue ??= []; p.pactUntil ??= 0; p.culture ??= 0; p.traditions ??= []; p.era ??= eraOf(p); p.goldenUntil ??= 0 }
     s.eraFirst ??= [0]; s.popup ??= null
     s.deals ??= []
     s.scenario ??= 'valley'

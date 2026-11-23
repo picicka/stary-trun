@@ -13,7 +13,7 @@ export interface MapHost {
   onCameraMove(): void
 }
 
-interface UnitView { c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string }
+interface UnitView { c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
 
 const A = 'atlas'
 const D_FOG = 100000
@@ -206,7 +206,7 @@ export class MapScene extends Phaser.Scene {
     for (const f of this.fog) f?.destroy()
     for (const f of this.dim) f?.destroy()
     for (const b of this.borders) b.destroy()
-    for (const u of this.units.values()) u.c.destroy()
+    for (const u of this.units.values()) { u.work?.stop(); u.c.destroy() }
     this.clearMarks()
     const n = this.host.state.W * this.host.state.H
     this.tileStatic = new Array(n).fill(null)
@@ -381,7 +381,84 @@ export class MapScene extends Phaser.Scene {
   /** Naloděná pozemní jednotka se kreslí jako člun. */
   private frameOf(u: Unit): string {
     const s = this.host.state
-    return `u_${isEmbarked(s, u) ? 'boat' : u.type}_${s.players[u.owner].nation}`
+    // Při práci drží dělník nářadí zvlášť (animuje se), proto tělo bez něj.
+    return `u_${isEmbarked(s, u) ? 'boat' : u.type === 'worker' && u.work ? 'workerb' : u.type}_${s.players[u.owner].nation}`
+  }
+
+  /**
+   * Animace práce dělníků podle toho, co stavějí: krumpáč (důl), motyka (farma), kladivo (ohrada),
+   * pila (pila v lese) a lopata (cesta). Nářadí je samostatný obrázek, který se otáčí kolem ruky.
+   */
+  private animateWork(v: UnitView, job: string | null): void {
+    if (job === (v.job ?? null)) return
+    v.work?.stop(); v.tool?.destroy()
+    v.work = undefined; v.tool = undefined; v.job = job ?? undefined
+    v.spr.setY(0)
+    if (!job) return
+    const kind = job === 'mine' ? 'pick' : job === 'farm' ? 'hoe' : job === 'pasture' ? 'hammer' : job === 'lumber' ? 'saw' : 'shovel'
+    const tool = this.add.image(0, 0, A, `tool_${kind}`)
+    v.c.addAt(tool, 2)
+    v.tool = tool
+    const dur = { pick: 950, hoe: 850, hammer: 1100, saw: 560, shovel: 1300 }[kind]
+    const chip = { pick: [0xcdd6e6, 0x8a90a2], hoe: [0x8c5a36, 0x5f3a26], hammer: [0xe2b77c, 0xbd8752], saw: [0xe2b77c, 0xf8e6a4], shovel: [0x8c5a36, 0xb07f42] }[kind]
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+    const seg = (t: number, a: number, b: number) => Math.min(1, Math.max(0, (t - a) / (b - a)))
+    const ease = (t: number) => t * t * (3 - 2 * t)
+    let last = 0
+    v.work = this.tweens.addCounter({
+      from: 0, to: 1, duration: dur, repeat: -1,
+      onUpdate: tw => {
+        const t = tw.getValue() ?? 0
+        const dir = v.spr.flipX ? -1 : 1
+        let ang = 0, ox = 0, oy = 0, body = 0
+        let hits: number[] = []
+        if (kind === 'pick' || kind === 'hoe') {
+          // Pomalý nápřah za hlavu, rychlý úder před sebe.
+          const hi = kind === 'pick' ? -55 : -25, lo = kind === 'pick' ? 105 : 98
+          ang = t < 0.5 ? lerp(lo, hi, ease(seg(t, 0.08, 0.5))) : t < 0.62 ? lerp(hi, lo, seg(t, 0.5, 0.62) ** 2) : lo
+          body = t >= 0.58 && t < 0.78 ? 1 : 0
+          hits = [0.62]
+        } else if (kind === 'hammer') {
+          // Tři rychlé údery a krátká pauza.
+          const k = t < 0.75 ? (t / 0.25) % 1 : 0
+          ang = t < 0.75 ? (k < 0.55 ? lerp(88, 30, ease(k / 0.55)) : lerp(30, 88, ((k - 0.55) / 0.45) ** 2)) : 60
+          hits = [0.24, 0.49, 0.74]
+        } else if (kind === 'saw') {
+          // Tah pilou tam a zpět, tělo se pohupuje s ní.
+          ang = 14
+          ox = 3 * Math.sin(t * Math.PI * 2)
+          body = ox > 1.5 ? 1 : 0
+          hits = [0.2, 0.7]
+        } else {
+          // Lopata: zarazit do země, nabrat, odhodit hlínu, vrátit.
+          if (t < 0.25) { ang = lerp(150, 172, ease(t / 0.25)); oy = lerp(0, 3, ease(t / 0.25)); body = 1 }
+          else if (t < 0.5) { ang = lerp(172, 95, ease(seg(t, 0.25, 0.5))); oy = lerp(3, 0, seg(t, 0.25, 0.5)) }
+          else if (t < 0.64) ang = lerp(95, 35, seg(t, 0.5, 0.64) ** 2)
+          else ang = lerp(35, 150, ease(seg(t, 0.64, 1)))
+          hits = [0.57]
+        }
+        if (kind === 'saw') tool.setOrigin(dir < 0 ? 0.88 : 0.12, 0.45)
+        else tool.setOrigin(0.5, 0.92)
+        tool.setFlipX(dir < 0).setAngle(ang * dir).setPosition((3.5 + ox) * dir, -0.5 + oy + body)
+        v.spr.setY(body)
+        // Odletující úlomky, hlína či piliny v okamžiku úderu.
+        for (const h of hits) {
+          if (!(last < h && t >= h) || !v.c.visible || this.playing) continue
+          const far = kind === 'shovel' ? -9 : kind === 'saw' ? 7 : 10
+          this.chips(v.c.x + far * dir * v.c.scaleX, v.c.y + (kind === 'shovel' ? -6 : 6), chip, kind === 'shovel' ? 5 : 3, kind === 'shovel' ? -dir : dir)
+        }
+        last = t
+      },
+    })
+  }
+
+  private chips(x: number, y: number, colors: number[], n: number, dir: number): void {
+    for (let k = 0; k < n; k++) {
+      const r = this.add.rectangle(x, y, 1, 1, colors[k % colors.length]).setDepth(D_FOG - 6)
+      const dx = dir * (1 + Math.random() * 5) + (Math.random() - 0.5) * 3, up = 2 + Math.random() * 4
+      this.tweens.add({ targets: r, x: x + dx, duration: 420, ease: 'Linear' })
+      this.tweens.add({ targets: r, y: y - up, duration: 160, ease: 'Quad.easeOut', onComplete: () => { this.tweens.add({ targets: r, y: y + 3, alpha: 0.2, duration: 260, ease: 'Quad.easeIn', onComplete: () => r.destroy() }) } })
+    }
   }
 
   private unitVisible(u: Unit): boolean {
@@ -416,7 +493,8 @@ export class MapScene extends Phaser.Scene {
     }
     const spent = u.owner === 0 && u.moves <= 0
     v.spr.setTint(spent ? 0xa9adbd : 0xffffff)
-    v.spr.setAlpha(u.owner === 0 && (u.sleep || u.fortified || u.work) ? 0.88 : 1)
+    v.spr.setAlpha(u.owner === 0 && (u.sleep || u.fortified) ? 0.88 : 1)
+    this.animateWork(v, u.work && v.c.visible ? u.work : null)
   }
 
   syncUnits(): void {
@@ -429,7 +507,7 @@ export class MapScene extends Phaser.Scene {
       if (v.key !== frame) { v.spr.setFrame(frame); v.key = frame }
       this.placeUnit(u, v)
     }
-    for (const [id, v] of this.units) if (!alive.has(id)) { v.c.destroy(); this.units.delete(id) }
+    for (const [id, v] of this.units) if (!alive.has(id)) { v.work?.stop(); v.c.destroy(); this.units.delete(id) }
   }
 
   // ------------------------------------------------------------ zvýraznění
@@ -452,6 +530,8 @@ export class MapScene extends Phaser.Scene {
     this.marks = []
     for (const m of this.routeDots) m.destroy()
     this.routeDots = []
+    for (const t of this.markTweens) t.stop()
+    this.markTweens = []
     this.clearPath()
   }
 
@@ -505,7 +585,16 @@ export class MapScene extends Phaser.Scene {
   }
 
   /** Pole, kde mohou vybraní dělníci něco postavit: zelený rám a zmenšená ikona vylepšení. */
-  showJobs(jobs: { i: number; job: string }[]): void {
+  private markTweens: Phaser.Tweens.Tween[] = []
+
+  /** Žárovka na poli, které rádce doporučuje. */
+  private tipIcon(i: number): void {
+    const [, , px, py] = this.tilePos(i)
+    this.marks.push(this.add.image(px + 25, py + 7, A, 'ic_tip').setDepth(D_FOG - 9))
+  }
+
+  showJobs(jobs: { i: number; job: string }[], best = -1): void {
+    if (best >= 0) this.tipIcon(best)
     for (const { i, job } of jobs) {
       const [, y, px, py] = this.tilePos(i)
       this.marks.push(this.add.image(px, py, A, 'hex_move').setOrigin(0, 0).setTint(0x8dffb0).setAlpha(0.8).setDepth(y * 10 + 5))
@@ -516,6 +605,7 @@ export class MapScene extends Phaser.Scene {
   /** Doporučená místa pro město: zlatý rám a zmenšené město, nejlepší místo výrazněji. */
   showSites(sites: { i: number; best: boolean }[], nation: string): void {
     for (const { i, best } of sites) {
+      if (best) this.tipIcon(i)
       const [, , px, py] = this.tilePos(i)
       this.marks.push(this.add.image(px, py, A, 'hex_worked').setOrigin(0, 0).setTint(best ? 0xffd23a : 0xfff2a8).setAlpha(best ? 1 : 0.75).setDepth(D_FOG - 12))
       this.marks.push(this.add.image(px + 16, py + 8, A, `city_1_${nation}`).setScale(best ? 0.6 : 0.45).setAlpha(best ? 0.95 : 0.8).setDepth(D_FOG - 11))
@@ -534,8 +624,8 @@ export class MapScene extends Phaser.Scene {
     return !!s.players[0].visible[idx(s, x, y)]
   }
 
-  private fx(key: string, frame: string, x: number, y: number): void {
-    const sp = this.add.sprite(x, y, A, frame).setDepth(D_FOG - 5)
+  private fx(key: string, frame: string, x: number, y: number, scale = 1): void {
+    const sp = this.add.sprite(x, y, A, frame).setDepth(D_FOG - 5).setScale(scale).setAlpha(scale < 1 ? 0.7 : 1)
     sp.play(key)
     sp.once('animationcomplete', () => sp.destroy())
   }
@@ -604,6 +694,7 @@ export class MapScene extends Phaser.Scene {
           const v = this.units.get(ev.unit)
           if (!v) continue
           this.units.delete(ev.unit)
+          v.work?.stop()
           if (v.c.visible && this.seen(ev.x, ev.y)) {
             sfx('die')
             this.fx('smoke', 'fx_smoke_0', v.c.x, v.c.y)

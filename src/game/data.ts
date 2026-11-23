@@ -5,12 +5,12 @@ export type ScenarioId = 'valley' | 'islands' | 'random'
 export interface ScenarioDef { name: string; short: string; desc: string; intro: string; inPlace: string; over: string; ruinsWhere: string }
 export const SCENARIOS: Record<ScenarioId, ScenarioDef> = {
   valley: {
-    name: 'Údolí Starého trůnu', short: 'Údolí', desc: 'Ručně navržená mapa: jeden kontinent, tři kouty oddělené horami s průsmyky, ruiny uprostřed. Vyvážená mise pro první hru.',
-    intro: 'přivádí svůj lid na úrodný jihozápad. Za horami se ale usazují další dva národy se stejným cílem.',
+    name: 'Údolí Starého trůnu', short: 'Údolí', desc: 'Ručně navržená mapa: jeden kontinent, tři kouty oddělené horami s průsmyky, ruiny uprostřed. Vyvážená mise pro první hru; ve kterém koutě začnete, je pokaždé jiné.',
+    intro: 'přivádí svůj lid do jednoho ze tří úrodných koutů údolí. Za horami se ale usazují další dva národy se stejným cílem.',
     inPlace: 'v Údolí', over: 'Nad Údolím Starého trůnu', ruinsWhere: 'uprostřed údolí',
   },
   islands: {
-    name: 'Souostroví Sedmi větrů', short: 'Souostroví', desc: 'Každý národ začíná na vlastním ostrově a všichni už umějí plout. K ruinám, k soupeřům i na menší ostrovy se dostanete jen po moři; piráti tu mají žně.',
+    name: 'Souostroví Sedmi větrů', short: 'Souostroví', desc: 'Každý národ začíná na jednom ze tří velkých ostrovů (pokaždé na jiném) a všichni už umějí plout. K ruinám, k soupeřům i na menší ostrovy se dostanete jen po moři; piráti tu mají žně.',
     intro: 'přistává se svým lidem na jednom z velkých ostrovů. Na dalších dvou se usazují soupeři a o prostřední ostrov s ruinami se strhne závod po moři.',
     inPlace: 'v Souostroví', over: 'Nad Souostrovím Sedmi větrů', ruinsWhere: 'na prostředním ostrově',
   },

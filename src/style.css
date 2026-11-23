@@ -277,3 +277,45 @@ button[data-tip], .build[data-tip], .tech.avail[data-tip], [data-a][data-tip] { 
 .ov .idle { color: var(--gold); }
 #ui.with-overview #tip { right: 354px; }
 #topbar .tbtn.on { border-color: var(--gold); color: #fff; }
+
+/* fronta výzkumu */
+.tech.far { cursor: pointer; }
+.tech.far:hover { border-color: var(--sci); color: var(--text); }
+.tech.queued { border-color: var(--gold); border-style: dashed; color: var(--text); background: #1c2444; }
+.tech .ord { position: absolute; right: 4px; bottom: 4px; width: 22px; height: 22px; background: var(--gold); color: #2a1a08; font-style: normal; font-family: var(--head); font-size: 14px; display: flex; align-items: center; justify-content: center; border: 2px solid #0b1020; }
+#topbar .research { min-width: 230px; }
+/* na užších oknech zůstanou v liště jen ikony tlačítek (popis je v bublině) */
+@media (max-width: 1560px) { #topbar .tbtn .lbl { display: none; } }
+#topbar .research span { flex: 0 0 auto; overflow: visible; }
+#topbar .research .bar { min-width: 24px; }
+
+/* tipy rádce: poskakující žárovka a třpytivý rám u doporučené volby */
+.rec-ic { position: absolute; left: -9px; top: -11px; width: 24px; height: 24px; z-index: 2; pointer-events: none; animation: recbob .85s ease-in-out infinite; filter: drop-shadow(0 0 4px #f2c230); }
+.build, .trad { position: relative; }
+.build.rec, .tech.rec, .trad.rec { animation: recglow 1.7s ease-in-out infinite; }
+.trad.rec.locked { opacity: 1; }
+@keyframes recbob { 0%, 100% { transform: translateY(0) rotate(-8deg); } 50% { transform: translateY(-5px) rotate(8deg); } }
+@keyframes recglow { 0%, 100% { box-shadow: 0 0 0 0 #f2c23000; } 50% { box-shadow: 0 0 0 3px #f2c230aa, 0 0 12px #f2c23066; } }
+.build .rec-ic { left: 30px; top: -9px; }
+.tech .rec-ic { left: auto; right: 28px; top: -13px; }
+.trad .rec-ic { left: auto; right: 8px; top: -11px; }
+.build .rec-ic { left: 12px; top: -11px; }
+.tech .rec-ic { right: 84px; top: -17px; }
+
+/* žárovka i rám doporučené volby jsou statické */
+.rec-ic { animation: none; }
+.build.rec, .tech.rec, .trad.rec { animation: none; box-shadow: 0 0 0 2px #f2c230cc; }
+
+/* strategické suroviny */
+.resic { display: inline-block; width: 30px; height: 24px; flex: none; background-repeat: no-repeat; background-size: 48px 48px; background-position: -2px -17px; image-rendering: pixelated; }
+#topbar .stat.res { gap: 1px; }
+#topbar .stat.res small { font-size: 18px; color: var(--good); }
+#topbar .stat.res.raw small { color: var(--gold); }
+#topbar .stat.res.none, #topbar .stat.res.unknown { opacity: .55; }
+#topbar .stat.res.none small, #topbar .stat.res.unknown small { color: var(--muted); }
+#topbar .stat.res.raw { animation: pillpulse 1.6s ease-in-out 4; }
+.ov .resic { width: 32px; }
+#topbar .resic { width: 34px; height: 26px; background-size: 64px 64px; background-position: -4px -25px; }
+/* okna musí být nad hlavním menu (návod spuštěný z úvodní obrazovky) */
+#modal { z-index: 30; }
+#topbar .stat.res.full small { color: var(--gold); }

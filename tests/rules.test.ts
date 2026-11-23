@@ -375,3 +375,81 @@ test('osadníci: rozkaz dojít na místo a usadit se', () => {
   assert.ok(!s.units.includes(st))
   drainEvents()
 })
+
+import { planResearch, techPath } from '../src/game/rules.ts'
+
+test('fronta výzkumu: cesta ke vzdálené technologii a postupné zkoumání', () => {
+  const s = createGame('aur', 'normal')
+  foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)
+  const p = s.players[0]
+  // Filosofie: mystika + písmo, obojí přes hrnčířství (zemědělství už umíme).
+  assert.deepEqual(techPath(p, 'philosophy'), ['pottery', 'writing', 'mysticism', 'philosophy'])
+  assert.ok(planResearch(p, 'philosophy'))
+  assert.equal(p.research, 'pottery')
+  assert.deepEqual(p.techQueue, ['writing', 'mysticism', 'philosophy'])
+  // Přidání za plán nic nezruší.
+  planResearch(p, 'mining', true)
+  assert.equal(p.research, 'pottery')
+  assert.deepEqual(p.techQueue, ['writing', 'mysticism', 'philosophy', 'mining'])
+  // Po objevu se výzkum sám posune dál.
+  gt2(s, p, 'pottery')
+  assert.equal(p.research, 'writing')
+  for (let i = 0; i < 60 && !p.techs.includes('writing'); i++) endTurn(s)
+  assert.ok(p.techs.includes('writing'))
+  assert.equal(p.research, 'mysticism')
+  // Nový plán bez Shiftu nahradí starý.
+  planResearch(p, 'archery')
+  assert.equal(p.research, 'archery')
+  assert.deepEqual(p.techQueue, [])
+  drainEvents()
+})
+
+import { resourceCap, resourceUsed, resourceFree, canBuildUnit as cbu3, unitBlockReason as ubr3 } from '../src/game/rules.ts'
+import { barbTurn } from '../src/game/ai.ts'
+
+test('suroviny: jeden zdroj uživí dvě jednotky, další zdroj či koupě kapacitu zvedne', () => {
+  const s = createGame('thal', 'normal')
+  const c = foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)!
+  s.players[0].techs.push('iron', 'bronze')
+  assert.equal(resourceCap(s, 0, 'iron'), 0)
+  assert.ok(!cbu3(s, c, 'swordsman'))
+  const own = s.tiles.map((t, i) => ({ t, i })).filter(o => o.t.owner === 0 && !(o.i === idx(s, c.x, c.y)))
+  own[0].t.res = 'iron'; own[0].t.imp = 'mine'
+  assert.equal(resourceCap(s, 0, 'iron'), 2)
+  assert.ok(cbu3(s, c, 'swordsman'))
+  makeUnit(s, 0, 'swordsman', c.x, c.y)
+  assert.ok(cbu3(s, c, 'swordsman'))
+  makeUnit(s, 0, 'swordsman', own[0].i % s.W, (own[0].i / s.W) | 0)
+  assert.equal(resourceUsed(s, 0, 'iron'), 2)
+  assert.equal(resourceFree(s, 0, 'iron'), 0)
+  assert.ok(!cbu3(s, c, 'swordsman'), 'třetího šermíře už jeden zdroj neuživí')
+  assert.match(ubr3(s, c, 'swordsman')!, /vytížené/)
+  // Druhé ložisko = další dva.
+  own[1].t.res = 'iron'; own[1].t.imp = 'mine'
+  assert.equal(resourceCap(s, 0, 'iron'), 4)
+  assert.ok(cbu3(s, c, 'swordsman'))
+  // Koupě od soupeře přidá kapacitu, prodej ubere.
+  s.deals.push({ seller: 0, buyer: 1, res: 'iron', gpt: 3, until: 99 })
+  assert.equal(resourceCap(s, 0, 'iron'), 2)
+  assert.equal(resourceCap(s, 1, 'iron'), 2)
+  assert.ok(!cbu3(s, c, 'swordsman'))
+})
+
+test('startovní místa se protáčejí a barbaři ze sousedního tábora útočí', () => {
+  const a = createGame('aur', 'normal', 'valley', undefined, 0), b = createGame('aur', 'normal', 'valley', undefined, 1)
+  const pos = (g: typeof a, p: number) => { const u = unitsOf(g, p).find(v => v.type === 'settler')!; return `${u.x},${u.y}` }
+  assert.notEqual(pos(a, 0), pos(b, 0))
+  assert.equal(pos(b, 0), pos(a, 1))
+  assert.equal(pos(b, 2), pos(a, 0))
+  for (const p of [0, 1, 2]) assert.equal(canFoundCity(b, unitsOf(b, p).find(u => u.type === 'settler')!), null)
+  // Válečník postavený vedle tábora je do pár tahů napaden.
+  const s = createGame('aur', 'normal')
+  const camp = s.tiles.findIndex(t => t.special === 'camp')
+  const cx = camp % s.W, cy = (camp / s.W) | 0
+  const spot = nb2(s, cx, cy).find(n => TERRAIN[s.tiles[idx(s, n[0], n[1])].t].passable && !s.units.some(u => u.x === n[0] && u.y === n[1]))!
+  const w = makeUnit(s, 0, 'warrior', spot[0], spot[1])
+  let attacked = false
+  for (let i = 0; i < 4 && !attacked; i++) { barbTurn(s); attacked = !s.units.includes(w) || w.hp < 100 || drainEvents().some(e => e.e === 'attack') }
+  assert.ok(attacked, 'barbaři zaútočili na sousední jednotku')
+  drainEvents()
+})

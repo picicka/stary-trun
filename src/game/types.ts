@@ -86,6 +86,8 @@ export interface Player {
   alive: boolean
   gold: number
   research: TechId | null
+  /** Fronta výzkumu: co zkoumat po aktuální technologii. */
+  techQueue: TechId[]
   progress: number
   techs: TechId[]
   explored: number[]

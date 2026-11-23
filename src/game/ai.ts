@@ -9,7 +9,7 @@ import {
   canWork, hasRoad, hasTech, isEmbarked, upgradeBlock, upgradeCost, upgradeUnit,
   type PathMap,
 } from './rules.ts'
-import { BARB, type City, type GameState, type Player, type Unit } from './types.ts'
+import { BARB, type BuildItem, type City, type GameState, type Player, type Unit } from './types.ts'
 
 const RESEARCH: Record<string, TechId[]> = {
   builder: ['agriculture', 'pottery', 'mining', 'husbandry', 'archery', 'writing', 'bronze', 'wheel', 'mysticism', 'masonry', 'currency', 'philosophy', 'math', 'astronomy', 'sailing', 'forestry', 'construction', 'iron', 'tactics', 'riding', 'irrigation', 'navigation', 'law'],
@@ -629,14 +629,15 @@ export function barbTurn(s: GameState): void {
     }
     const hx = u.home >= 0 ? u.home % s.W : u.x, hy = u.home >= 0 ? (u.home / s.W) | 0 : u.y
     const isGuard = u.home >= 0 && u.x === hx && u.y === hy
-    if (tryAttack(s, u, isGuard ? -8 : 3)) continue
+    // Barbaři jsou draví: napadnou i vyrovnaného soupeře, stráž tábora je jen o málo opatrnější.
+    if (tryAttack(s, u, isGuard ? 14 : 16)) continue
     if (isGuard) { u.fortified = true; continue }
     // Tábor bez stráže: nejbližší se vrátí hlídat.
     if (u.home >= 0 && !militaryAt(s, hx, hy)) { moveUnit(s, u, hx, hy); continue }
     if (u.hp < 35) { if (u.home >= 0) approach(s, u, hx, hy, 1); continue }
     // Cíl: nejbližší cizí jednotka nebo město v dosahu.
     let tx = -1, ty = -1, td = Infinity
-    if (s.turn > 10) {
+    if (s.turn > 6) {
       for (const o of s.units) {
         if (o.owner === BARB) continue
         const d = hexDist(u.x, u.y, o.x, o.y) - (isCivilian(o) ? 1 : 0)
@@ -684,6 +685,26 @@ function seaRaid(s: GameState): void {
     emit({ e: 'spawn', unit: u.id, x: u.x, y: u.y })
   })
   if (c.owner === 0) note(s, 0, `Piráti! U města ${c.name} se objevily nepřátelské lodě s nájezdníky.`, 'bad', first[0], first[1])
+}
+
+/** Tip pro hráče: co by ve městě stavěl rozvážný stavitel. Stav hry nemění. */
+export function recommendBuild(s: GameState, c: City): BuildItem | null {
+  const p = s.players[c.owner]
+  const keep = { build: c.build, prod: c.prod, queue: c.queue, rng: s.rng, pers: p.personality }
+  p.personality = 'builder'; c.prod = 0; c.build = null
+  aiCityBuild(s, p, c)
+  const out = c.build as BuildItem | null
+  c.build = keep.build; c.prod = keep.prod; c.queue = keep.queue; s.rng = keep.rng; p.personality = keep.pers
+  return out
+}
+
+/** Tip pro hráče: kterou dostupnou technologii zkoumat. V míru podle stavitele, ve válce podle válečníka. */
+export function adviseTech(s: GameState, p: Player): TechId | null {
+  const avail = availableTechs(p)
+  if (!avail.length) return null
+  let order = p.war.length ? RESEARCH.aggressive : RESEARCH.builder
+  if (seafarer(s, p)) order = ['sailing', ...(p.techs.length >= 5 ? ['navigation' as TechId] : []), ...order]
+  return order.find(t => avail.includes(t)) ?? avail[0]
 }
 
 /** Doporučení výroby pro hráče (tlačítko „Poradit“) – stejná logika jako AI stavitel. */

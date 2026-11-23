@@ -337,6 +337,70 @@ const UNITS = {
     .vwvBBBBBBBBBBBvwv..
     ..IvIvIIvIvIIvIvI...`,
 }
+// Dělník bez nářadí v ruce: při práci se nářadí kreslí zvlášť a animuje (viz tool_* níže).
+UNITS.workerb = UNITS.worker.split("\n").map((row, i) => {
+  const m = row.match(/^(\s*)(\S{20})$/)
+  if (!m || i === 10) return row // řádek 10 = ruka, zůstává
+  if (i <= 3) return m[1] + "...................." // hlavice krumpáče nad hlavou
+  return m[1] + m[2].slice(0, 12) + "........"
+}).join("\n")
+
+// Nářadí: úchop je dole uprostřed (pila vlevo), hra s ním otáčí kolem ruky dělníka.
+sprite("tool_pick", { w: 9, h: 11, outline: "k" }, `
+  .tuuuuut.
+  tu..l..ut
+  t...l...t
+  ....l....
+  ....l....
+  ....l....
+  ....b....
+  ....b....
+  ....b....
+  ....b....
+  ....b....`)
+sprite("tool_hoe", { w: 7, h: 11, outline: "k" }, `
+  .uuuu..
+  .tttl..
+  .t..l..
+  ....l..
+  ....l..
+  ....l..
+  ....b..
+  ....b..
+  ....b..
+  ....b..
+  ....b..`)
+sprite("tool_hammer", { w: 7, h: 10, outline: "k" }, `
+  .uuuuu.
+  .tTtTt.
+  .ttttt.
+  ...l...
+  ...l...
+  ...l...
+  ...b...
+  ...b...
+  ...b...
+  ...b...`)
+sprite("tool_shovel", { w: 5, h: 12, outline: "k" }, `
+  ..u..
+  .uWu.
+  uWuut
+  uuuut
+  uuutt
+  ..l..
+  ..l..
+  ..l..
+  ..b..
+  ..b..
+  ..b..
+  .bbb.`)
+sprite("tool_saw", { w: 13, h: 5, outline: "k" }, `
+  bb...........
+  bLWWWWWWWWWWu
+  bLuuuuuuuuuu.
+  bb.t.t.t.t.t.
+  .............`)
+
 for (const [type, g] of Object.entries(UNITS)) {
   sprite("_u_" + type, { w: 20, h: 20, outline: "k" }, g)
   for (const [n, sw] of Object.entries(NATIONS)) sprite(`u_${type}_${n}`, { base: "_u_" + type, swap: sw })

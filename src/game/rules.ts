@@ -97,22 +97,48 @@ export function resourceVisible(p: Player, r: ResourceId): boolean {
   return !t || hasTech(p, t)
 }
 
-/** Má hráč přístup ke strategické surovině (pole ve vlastním území s patřičným vylepšením nebo pod městem)? */
-export function hasResource(s: GameState, pid: number, r: ResourceId): boolean {
-  if (ownsResource(s, pid, r)) return true
-  return s.deals.some(d => d.buyer === pid && d.res === r && ownsResource(s, d.seller, r))
-}
+/** Kolik jednotek uživí jeden zdroj strategické suroviny. */
+export const UNITS_PER_SOURCE = 2
 
-/** Vlastní zdroj suroviny (bez nakoupených). */
-export function ownsResource(s: GameState, pid: number, r: ResourceId): boolean {
+/** Počet vlastních zdrojů suroviny: pole ve vlastním území s patřičným vylepšením nebo pod městem. */
+export function ownSources(s: GameState, pid: number, r: ResourceId): number {
+  let n = 0
   for (let i = 0; i < s.tiles.length; i++) {
     const t = s.tiles[i]
     if (t.owner !== pid || t.res !== r) continue
-    if (t.imp === RESOURCES[r].improvement) return true
-    if (s.cities.some(c => c.y * s.W + c.x === i)) return true
+    if (t.imp === RESOURCES[r].improvement || s.cities.some(c => c.y * s.W + c.x === i)) n++
   }
-  return false
+  return n
 }
+
+/** Vlastní zdroj suroviny (bez nakoupených). */
+export function ownsResource(s: GameState, pid: number, r: ResourceId): boolean { return ownSources(s, pid, r) > 0 }
+
+/** Kolik jednotek může hráč se surovinou držet: vlastní zdroje + nakoupené − prodané, krát jednotek na zdroj. */
+export function resourceCap(s: GameState, pid: number, r: ResourceId): number {
+  let n = ownSources(s, pid, r)
+  for (const d of s.deals) {
+    if (d.res !== r) continue
+    if (d.buyer === pid && ownsResource(s, d.seller, r)) n++
+    if (d.seller === pid) n--
+  }
+  return Math.max(0, n) * UNITS_PER_SOURCE
+}
+
+/** Kolik kapacity už je zabrané: existující jednotky a rozestavěné v ostatních městech (město `exceptCity` se nepočítá). */
+export function resourceUsed(s: GameState, pid: number, r: ResourceId, exceptCity = -1): number {
+  let n = 0
+  for (const u of s.units) if (u.owner === pid && UNITS[u.type].needs === r) n++
+  for (const c of s.cities) if (c.owner === pid && c.id !== exceptCity && c.build?.kind === 'unit' && UNITS[c.build.id].needs === r) n++
+  return n
+}
+
+export function resourceFree(s: GameState, pid: number, r: ResourceId, exceptCity = -1): number {
+  return resourceCap(s, pid, r) - resourceUsed(s, pid, r, exceptCity)
+}
+
+/** Má hráč k surovině vůbec nějaký přístup (vlastní zdroj nebo koupi)? */
+export function hasResource(s: GameState, pid: number, r: ResourceId): boolean { return resourceCap(s, pid, r) > 0 }
 
 // ---------------------------------------------------------------- výnosy
 
@@ -236,8 +262,39 @@ export function playerIncome(s: GameState, pid: number): Income {
 export function claimTiles(s: GameState, c: City): void {
   for (const [x, y] of tilesWithin(s, c.x, c.y, c.radius)) {
     const t = s.tiles[idx(s, x, y)]
-    if (t.owner === -1) { t.owner = c.owner; t.city = c.id }
+    if (t.owner !== -1) continue
+    t.owner = c.owner; t.city = c.id
+    // Strategická surovina v novém území stojí za zprávu.
+    if (c.owner === 0 && t.res && RESOURCES[t.res].strategic && resourceVisible(s.players[0], t.res) && !cityAt(s, x, y)) {
+      const imp = RESOURCES[t.res].improvement
+      const need = unitsNeeding(s, 0, t.res)
+      note(s, 0, `Na území města ${c.name} je surovina ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Pošlete tam dělníky postavit ${imp === 'mine' ? 'důl' : 'ohradu'} – pak půjde stavět: ${need.join(', ')}.` : `Vaše vojsko ji nepotřebuje, ale s vylepšením (${imp === 'mine' ? 'důl' : 'ohrada'}) ji můžete prodávat v Diplomacii.`}`, 'good', x, y)
+    }
   }
+}
+
+/** Jména jednotek hráče, které vyžadují danou surovinu. */
+export function unitsNeeding(s: GameState, pid: number, r: ResourceId): string[] {
+  const nation = s.players[pid].nation
+  return UNIT_IDS.filter(id => UNITS[id].needs === r && (!UNITS[id].nation || UNITS[id].nation === nation) && !UNIT_IDS.some(o => UNITS[o].replaces === id && UNITS[o].nation === nation)).map(id => UNITS[id].name)
+}
+
+export interface ResourceInfo { res: ResourceId; known: boolean; improved: number[]; raw: number[]; bought: boolean; sold: boolean; cap: number; used: number }
+
+/** Přehled surovin na území hráče: pole s vylepšením (surovina se využívá) a pole bez něj. */
+export function resourceReport(s: GameState, pid: number): ResourceInfo[] {
+  const p = s.players[pid]
+  const out = new Map<ResourceId, ResourceInfo>()
+  const get = (r: ResourceId) => { let o = out.get(r); if (!o) { o = { res: r, known: resourceVisible(p, r), improved: [], raw: [], bought: s.deals.some(d => d.buyer === pid && d.res === r), sold: s.deals.some(d => d.seller === pid && d.res === r), cap: resourceCap(s, pid, r), used: resourceUsed(s, pid, r) }; out.set(r, o) } return o }
+  for (const r of Object.keys(RESOURCES) as ResourceId[]) if (RESOURCES[r].strategic) get(r)
+  for (let i = 0; i < s.tiles.length; i++) {
+    const t = s.tiles[i]
+    if (t.owner !== pid || !t.res || !resourceVisible(p, t.res)) continue
+    const def = RESOURCES[t.res]
+    const used = !def.improvement || t.imp === def.improvement || s.cities.some(c => c.y * s.W + c.x === i)
+    ;(used ? get(t.res).improved : get(t.res).raw).push(i)
+  }
+  return [...out.values()].sort((a, b) => Number(!!RESOURCES[b.res].strategic) - Number(!!RESOURCES[a.res].strategic))
 }
 
 export function updateVisibility(s: GameState, pid: number): void {
@@ -542,10 +599,19 @@ export function grantTech(s: GameState, p: Player, t: TechId): void {
   if (p.techs.includes(t)) return
   p.techs.push(t)
   if (p.research === t) { p.research = null; p.progress = 0 }
+  p.techQueue = p.techQueue.filter(q => q !== t)
+  nextResearch(p)
   if (p.id === 0) emit({ e: 'sound', id: 'tech' })
   if (p.id === BARB) return
   if (p.human) {
     // Která vojska teď půjde přezbrojit.
+    // Nově viditelné suroviny (železo po objevu bronzu).
+    for (const r of Object.keys(RESOURCES) as ResourceId[]) {
+      if (RESOURCES[r].tech !== t) continue
+      const mine: number[] = []
+      for (let i = 0; i < s.tiles.length; i++) if (s.tiles[i].res === r && s.tiles[i].owner === 0) mine.push(i)
+      note(s, 0, `Na mapě se objevila ložiska: ${RESOURCES[r].name.toLowerCase()}. ${mine.length ? `Na vašem území: ${mine.length} – postavte na nich důl.` : 'Na vašem území žádné není; hledejte je v okolí, založte u nich město, nebo surovinu kupte v Diplomacii.'}`, 'good', mine.length ? mine[0] % s.W : undefined, mine.length ? (mine[0] / s.W) | 0 : undefined)
+    }
     const up = new Set<string>()
     for (const u of unitsOf(s, p.id)) { const to = upgradeTarget(s, u); if (to && UNITS[to].tech === t) up.add(`${UNITS[u.type].name} → ${UNITS[to].name}`) }
     if (up.size) note(s, 0, `Nová výzbroj: ${[...up].join(', ')}. Jednotku vyberte na vlastním území a zvolte Přezbrojit (klávesa U).`, 'good')
@@ -565,11 +631,53 @@ export function grantTech(s: GameState, p: Player, t: TechId): void {
   } else if (s.players[0].met.includes(p.id)) note(s, 0, `${NATIONS[p.nation].name} vstoupili do nového věku: ${name}${first ? ' (jako první – mají zlatý věk)' : ''}.`, 'info')
 }
 
+/** Když se nic nezkoumá, vezme první dostupnou technologii z fronty. */
+function nextResearch(p: Player): void {
+  if (p.research) return
+  const avail = availableTechs(p)
+  const i = p.techQueue.findIndex(q => avail.includes(q))
+  if (i >= 0) p.research = p.techQueue.splice(i, 1)[0]
+}
+
+/** Technologie, které je třeba objevit před `t` (včetně ní), v pořadí, v jakém to jde. */
+export function techPath(p: Player, t: TechId): TechId[] {
+  const out: TechId[] = []
+  const visit = (id: TechId) => {
+    if (p.techs.includes(id) || out.includes(id)) return
+    for (const r of TECHS[id].req.slice().sort((a, b) => TECHS[a].cost - TECHS[b].cost)) visit(r)
+    out.push(id)
+  }
+  visit(t)
+  return out
+}
+
+/** Naplánuje výzkum až k technologii `t`: nahradí dosavadní plán, nebo (append) se zařadí za něj. */
+export function planResearch(p: Player, t: TechId, append = false): boolean {
+  if (p.techs.includes(t)) return false
+  const path = techPath(p, t)
+  if (append && p.research) {
+    for (const id of path) if (id !== p.research && !p.techQueue.includes(id)) p.techQueue.push(id)
+  } else {
+    // Rozpracovaný výzkum neztrácí body: přejde se na první krok nové cesty.
+    p.research = null
+    p.techQueue = path
+  }
+  nextResearch(p)
+  return true
+}
+
 export function eraOf(p: Player): number { return ERAS.filter(e => p.techs.length >= e.techs).length - 1 }
 
 /** Může si národ vybrat další tradici? */
 export function traditionReady(p: Player): boolean {
   return p.traditions.length < TRADITION_IDS.length && p.culture >= traditionCost(p.traditions.length)
+}
+
+/** Která tradice se národu právě hodí nejvíc (volba soupeřů i tip pro hráče): ve válce a výbojným bojové, jinak hospodářské. */
+export function traditionAdvice(p: Player): TraditionId | null {
+  const martial = p.personality === 'aggressive' || (p.human && p.war.length > 0)
+  const pref: TraditionId[] = martial ? ['craft', 'warrior', 'stores', 'trade', 'militia', 'builders', 'scribes', 'feasts', 'settlers', 'sea'] : ['stores', 'craft', 'scribes', 'feasts', 'trade', 'settlers', 'builders', 'militia', 'sea', 'warrior']
+  return pref.find(x => !p.traditions.includes(x)) ?? null
 }
 
 export function adoptTradition(_s: GameState, p: Player, id: TraditionId): boolean {
@@ -650,7 +758,7 @@ export function canBuildUnit(s: GameState, c: City, id: UnitId): boolean {
   // Běžná jednotka, kterou národ nahrazuje unikátní, není dostupná.
   if (UNIT_IDS.some(o => UNITS[o].replaces === id && UNITS[o].nation === p.nation)) return false
   if (d.tech && !hasTech(p, d.tech)) return false
-  if (d.needs && !hasResource(s, c.owner, d.needs)) return false
+  if (d.needs && resourceFree(s, c.owner, d.needs, c.id) <= 0) return false
   if (id === 'settler' && c.pop < 2) return false
   if (d.naval && !isCoastal(s, c.x, c.y)) return false
   return true
@@ -683,6 +791,7 @@ export function unitBlockReason(s: GameState, c: City, id: UnitId): string | nul
   const p = s.players[c.owner]
   if (d.tech && !hasTech(p, d.tech)) return `Vyžaduje technologii ${TECHS[d.tech].name}`
   if (d.needs && !hasResource(s, c.owner, d.needs)) return `Vyžaduje surovinu ${RESOURCES[d.needs].name} (s vylepšením ve vašem území)`
+  if (d.needs && resourceFree(s, c.owner, d.needs, c.id) <= 0) return `Zdroje suroviny ${RESOURCES[d.needs].name.toLowerCase()} jsou vytížené (${resourceUsed(s, c.owner, d.needs, c.id)} / ${resourceCap(s, c.owner, d.needs)} jednotek). Každý zdroj uživí ${UNITS_PER_SOURCE} jednotky – získejte další ložisko`
   if (id === 'settler' && c.pop < 2) return 'Město musí mít alespoň 2 obyvatele'
   if (d.naval && !isCoastal(s, c.x, c.y)) return 'Lodě lze stavět jen v pobřežním městě'
   return null
@@ -1114,7 +1223,7 @@ export function upgradeTarget(s: GameState, u: Unit): UnitId | null {
   for (const base of UNITS[u.type].upgrade ?? []) {
     const id = unitFor(p.nation, base)
     const d = UNITS[id]
-    if (id === u.type || (d.tech && !hasTech(p, d.tech)) || (d.needs && !hasResource(s, u.owner, d.needs))) continue
+    if (id === u.type || (d.tech && !hasTech(p, d.tech)) || (d.needs && resourceFree(s, u.owner, d.needs) <= 0)) continue
     return id
   }
   return null
@@ -1327,6 +1436,10 @@ export function endPlayerTurn(s: GameState, pid: number): void {
       u.workLeft -= 1
       if (u.workLeft <= 0) {
         if (u.work === 'road') t.road = true; else t.imp = u.work
+        if (pid === 0 && t.res && RESOURCES[t.res].strategic && RESOURCES[t.res].improvement === u.work && t.owner === 0) {
+          const need = unitsNeeding(s, 0, t.res)
+          note(s, 0, `Máte přístup k surovině ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Můžete stavět: ${need.join(', ')}.` : 'Vaše vojsko ji nepotřebuje, ale můžete ji prodávat v Diplomacii.'}`, 'good', u.x, u.y)
+        }
         u.work = null
         const c = cityById(s, t.city)
         if (c) assignWorkers(s, c)
@@ -1344,8 +1457,7 @@ export function endPlayerTurn(s: GameState, pid: number): void {
   if (pid !== 0 && s.turn % 4 === 0) { p.attitude += p.attitude > 0 ? -1 : p.attitude < 0 ? 1 : 0; if (s.deals.some(d => (d.seller === pid && d.buyer === 0) || (d.buyer === pid && d.seller === 0))) p.attitude = Math.min(100, p.attitude + 2) }
   for (const c of citiesOf(s, pid)) { processCity(s, c); p.culture += cityYields(s, c).culture }
   if (!p.human) {
-    const pref: TraditionId[] = p.personality === 'aggressive' ? ['craft', 'warrior', 'stores', 'trade', 'militia', 'builders', 'scribes', 'feasts', 'settlers', 'sea'] : ['stores', 'craft', 'scribes', 'feasts', 'trade', 'settlers', 'builders', 'militia', 'sea', 'warrior']
-    while (traditionReady(p)) adoptTradition(s, p, pref.find(x => !p.traditions.includes(x))!)
+    while (traditionReady(p)) adoptTradition(s, p, traditionAdvice(p)!)
   } else if (traditionReady(p)) noteOnce(s, 'Nastřádali jste dost kultury na novou tradici.', 'good')
   const inc = playerIncome(s, pid)
   p.gold += inc.gold

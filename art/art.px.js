@@ -69,4 +69,4 @@ include("portraits.px.js")
 include("title.px.js")
 include("demo.px.js")
 
-sheet("atlas", ["t_*", "f_*", "i_*", "city_*", "shore_*", "r_*", "hex_*", "border_*", "road_*", "river_*", "mark_worked", "fog", "path_dot", "u_*", "fx_*"], { pad: 2 })
+sheet("atlas", ["t_*", "f_*", "i_*", "city_*", "shore_*", "r_*", "hex_*", "border_*", "road_*", "river_*", "mark_worked", "ic_tip", "tool_*", "fog", "path_dot", "u_*", "fx_*"], { pad: 2 })
