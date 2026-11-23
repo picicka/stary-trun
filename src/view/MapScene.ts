@@ -513,6 +513,15 @@ export class MapScene extends Phaser.Scene {
     }
   }
 
+  /** Doporučená místa pro město: zlatý rám a zmenšené město, nejlepší místo výrazněji. */
+  showSites(sites: { i: number; best: boolean }[], nation: string): void {
+    for (const { i, best } of sites) {
+      const [, , px, py] = this.tilePos(i)
+      this.marks.push(this.add.image(px, py, A, 'hex_worked').setOrigin(0, 0).setTint(best ? 0xffd23a : 0xfff2a8).setAlpha(best ? 1 : 0.75).setDepth(D_FOG - 12))
+      this.marks.push(this.add.image(px + 16, py + 8, A, `city_1_${nation}`).setScale(best ? 0.6 : 0.45).setAlpha(best ? 0.95 : 0.8).setDepth(D_FOG - 11))
+    }
+  }
+
   // ------------------------------------------------------------ animace událostí
 
   private wait(ms: number): Promise<void> { return new Promise(r => this.time.delayedCall(ms, () => r())) }

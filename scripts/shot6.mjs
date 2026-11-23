@@ -1,0 +1,31 @@
+// Ověření: postranní přehled měst a jednotek.
+import { chromium } from 'playwright'
+const url = process.argv[2] || 'http://localhost:5173'
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const errors = []
+page.on('pageerror', e => errors.push(e.message))
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
+await page.goto(url)
+await page.waitForFunction(() => window.game?.isRunning)
+await page.waitForTimeout(400)
+await page.click('[data-a="m-new"]'); await page.click('[data-a="m-next"]'); await page.click('[data-a="m-start"]')
+await page.waitForTimeout(600); await page.click('[data-a="close"]')
+await page.keyboard.press('b'); await page.waitForTimeout(800)
+const rows = await page.$$('#city .build:not(.off)')
+await rows[0].click(); await (await page.$$('#city .build:not(.off)'))[2].click()
+await page.keyboard.press('Escape')
+await page.evaluate(async () => { const a = window.app, s = a.state; const R = await import('/src/game/rules.ts'); const c = s.cities[0]; const w = R.makeUnit(s, 0, 'worker', c.x, c.y); w.auto = true; const sc = s.units.find(u => u.type === 'scout'); sc.goto = [c.x + 3, c.y]; const wr = s.units.find(u => u.type === 'warrior'); wr.fortified = true; wr.hp = 55; a.scene.syncAll(); a.refresh() })
+await page.keyboard.press('l'); await page.waitForTimeout(300)
+const out = {}
+out.rows = await page.$$eval('#overview .ov', e => e.map(x => x.innerText.replace(/\n/g, ' | ')))
+out.menuFits = await page.evaluate(() => document.querySelector('#topbar [data-a="menu"]').getBoundingClientRect().right <= window.innerWidth)
+await page.screenshot({ path: 'shots/o_overview.png' })
+await page.click('#overview .ov[data-a="ov-unit"]'); await page.waitForTimeout(300)
+out.selected = await page.evaluate(() => window.app.unit?.type)
+await page.click('#overview .ov[data-a="ov-city"]'); await page.waitForTimeout(300)
+out.cityOpen = await page.evaluate(() => !!window.app.city)
+await page.keyboard.press('Escape'); await page.keyboard.press('l')
+out.closed = await page.evaluate(() => document.getElementById('overview').classList.contains('hidden'))
+console.log(JSON.stringify({ out, errors }, null, 1))
+await browser.close()

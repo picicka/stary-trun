@@ -1,0 +1,38 @@
+// Ověření: tradice, věky, milníky, startovní technologie.
+import { chromium } from 'playwright'
+const url = process.argv[2] || 'http://localhost:5173'
+const browser = await chromium.launch()
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+const errors = []
+page.on('pageerror', e => errors.push(e.message))
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
+const out = {}
+await page.goto(url)
+await page.waitForFunction(() => window.game?.isRunning)
+await page.waitForTimeout(400)
+await page.click('[data-a="m-new"]'); await page.click('[data-a="m-next"]')
+await page.waitForTimeout(200)
+out.cardFits = await page.evaluate(() => document.querySelector('[data-a="m-start"]').getBoundingClientRect().bottom <= window.innerHeight)
+out.starts = await page.$$eval('.starts', e => e.map(x => x.textContent))
+await page.click('[data-a="m-start"]'); await page.waitForTimeout(600)
+out.brief = await page.$eval('#modal .body', e => e.innerText.includes('už ovládá: Zemědělství'))
+await page.click('[data-a="close"]')
+await page.keyboard.press('b'); await page.waitForTimeout(800); await page.keyboard.press('Escape')
+await page.evaluate(() => { const a = window.app, p = a.state.players[0]; p.culture = 30; a.refresh() })
+out.attn = await page.evaluate(() => window.app.attention().kind)
+await page.keyboard.press('c'); await page.waitForTimeout(200)
+await page.screenshot({ path: 'shots/t_trad.png' })
+await page.click('.trad.avail'); await page.waitForTimeout(200)
+out.traditions = await page.evaluate(() => window.app.state.players[0].traditions)
+out.modalAfter = await page.evaluate(() => window.app.hud.modalOpen)
+// Nový věk přes pravidla (pět objevů naráz) a okno s milníkem.
+await page.evaluate(async () => { const a = window.app, s = a.state; const R = await import('/src/game/rules.ts'); await a.run(() => { for (const t of ['husbandry', 'mining', 'archery', 'pottery', 'wheel']) R.grantTech(s, s.players[0], t) }) })
+await page.waitForTimeout(400)
+out.popup = await page.$eval('#modal h2', e => e.textContent)
+await page.screenshot({ path: 'shots/t_era.png' })
+await page.keyboard.press('Escape')
+await page.keyboard.press('m'); await page.waitForTimeout(200)
+await page.screenshot({ path: 'shots/t_mission.png' })
+await page.keyboard.press('Escape')
+console.log(JSON.stringify({ out, errors }, null, 1))
+await browser.close()

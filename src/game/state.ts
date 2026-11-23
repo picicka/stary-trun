@@ -2,7 +2,7 @@
 import { PLAYABLE, SCENARIOS, type Difficulty, type NationId, type ScenarioId, type TechId, DIFFICULTY } from './data.ts'
 import { aiTurn, autoUnits, barbTurn } from './ai.ts'
 import { generateScenario, ISLANDS_SEED, MISSION_SEED } from './mapgen.ts'
-import { beginTurn, checkVictory, endPlayerTurn, idx, makeUnit, neighbors, note, unitsAt, updateVisibility } from './rules.ts'
+import { eraOf, beginTurn, checkVictory, endPlayerTurn, idx, makeUnit, neighbors, note, unitsAt, updateVisibility } from './rules.ts'
 import { TERRAIN } from './data.ts'
 import { BARB, type GameState, type Player } from './types.ts'
 
@@ -10,12 +10,12 @@ export const SAVE_VERSION = 3
 export const MAX_TURNS = 120
 const SAVE_KEY = 'hex4x-save-v' + SAVE_VERSION
 
-const START_TECH: Record<NationId, TechId> = { aur: 'agriculture', khar: 'mining', thal: 'agriculture', sylv: 'archery', barb: 'mining' }
+export const START_TECH: Record<NationId, TechId> = { aur: 'agriculture', khar: 'mining', thal: 'agriculture', sylv: 'archery', barb: 'mining' }
 
 function makePlayer(id: number, nation: NationId, human: boolean, personality: Player['personality']): Player {
   return {
     id, nation, human, alive: true, gold: nation === 'thal' ? 60 : 30, research: null, progress: 0, techs: id !== BARB ? (nation === 'thal' ? [START_TECH[nation], 'sailing'] : [START_TECH[nation]]) : [],
-    explored: [], visible: [], war: [], met: [], personality, lastWarTurn: -99, peaceUntil: [0, 0, 0, 0], cityNames: 0, attitude: 0, pactUntil: 0,
+    explored: [], visible: [], war: [], met: [], personality, lastWarTurn: -99, peaceUntil: [0, 0, 0, 0], cityNames: 0, attitude: 0, pactUntil: 0, culture: 0, traditions: [], era: 0, goldenUntil: 0,
   }
 }
 
@@ -40,7 +40,7 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
     version: SAVE_VERSION, seed, scenario, rng: seed * 31 + 7, turn: 1, maxTurns: MAX_TURNS, difficulty, W: sc.W, H: sc.H, tiles: sc.tiles,
     players, cities: [], units: [], nextId: 1, notes: [],
     mission: { ruinsBy: -1, campsDestroyed: 0, questCities: false, questCamps: false, questRuins: false, wonderBy: -1 },
-    over: null, offers: [], deals: [], tutorial: [],
+    over: null, offers: [], deals: [], eraFirst: [0], popup: null, tutorial: [],
   }
   const freeNear = (x: number, y: number): [number, number] => {
     for (const n of neighbors(s, x, y)) if (TERRAIN[s.tiles[idx(s, n[0], n[1])].t].passable && !unitsAt(s, n[0], n[1]).length) return n
@@ -106,7 +106,8 @@ export function deserialize(json: string): GameState | null {
     // Doplnění polí, která starší uložené hry neznají.
     for (const c of s.cities) c.queue ??= []
     for (const u of s.units) { u.way ??= []; u.auto ??= false; u.todo ??= null; u.roadTo ??= null; u.xp ??= 0; u.promos ??= []; u.sea ??= false }
-    for (const p of s.players) { p.attitude ??= 0; p.pactUntil ??= 0 }
+    for (const p of s.players) { p.attitude ??= 0; p.pactUntil ??= 0; p.culture ??= 0; p.traditions ??= []; p.era ??= eraOf(p); p.goldenUntil ??= 0 }
+    s.eraFirst ??= [0]; s.popup ??= null
     s.deals ??= []
     s.scenario ??= 'valley'
     for (const p of s.players) updateVisibility(s, p.id)

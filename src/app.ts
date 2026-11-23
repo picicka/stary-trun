@@ -1,12 +1,12 @@
 // Ovladač hry: drží stav, výběr a propojuje pravidla, mapu a rozhraní.
 import { IMPROVEMENTS, NATIONS, UNITS, type Difficulty, type ImprovementId, type NationId, type TechId } from './game/data.ts'
-import { aiAcceptsPeace, adviseBuild } from './game/ai.ts'
+import { aiAcceptsPeace, adviseBuild, siteScore } from './game/ai.ts'
 import { answerAlly, askAlliance, buyResource, giveGold, sellResource } from './game/diplo.ts'
-import type { PromoId, ResourceId, ScenarioId } from './game/data.ts'
+import type { PromoId, ResourceId, ScenarioId, TraditionId } from './game/data.ts'
 import { hexDist } from './game/hex.ts'
 import {
   atWar, attack, availableTechs, buy, canFoundCity, cityAt, cityById, citiesOf, cityWorkable, declareWar, dequeue, drainEvents, enqueue, foundCity, idx, isCivilian, isEmbarked,
-  isNaval, promoteUnit, roadStep, tileJobs, upgradeUnit, upgradeBlock, canWork, killUnit, makePeace, moveUnit, note, pathMap, pathTo, pathTurns, previewAttack, promote, reachable, startWork, stopUnit, tilesWithin, unitById, unitsAt, unitsOf,
+  isNaval, adoptTradition, traditionReady, promoteUnit, roadStep, tileJobs, upgradeUnit, upgradeBlock, canWork, killUnit, makePeace, moveUnit, note, pathMap, pathTo, pathTurns, previewAttack, promote, reachable, startWork, stopUnit, tilesWithin, unitById, unitsAt, unitsOf,
   updateVisibility, type PathMap,
 } from './game/rules.ts'
 import { clearSave, createGame, endTurn, loadGame, saveGame } from './game/state.ts'
@@ -15,7 +15,7 @@ import { sfx, unlockAudio } from './audio.ts'
 import { Hud } from './ui/hud.ts'
 import type { MapHost, MapScene } from './view/MapScene.ts'
 
-export type Attention = { kind: 'research' } | { kind: 'city'; city: City } | { kind: 'unit'; unit: Unit } | { kind: 'end' }
+export type Attention = { kind: 'research' } | { kind: 'tradition' } | { kind: 'city'; city: City } | { kind: 'unit'; unit: Unit } | { kind: 'end' }
 
 export class App implements MapHost {
   state!: GameState
@@ -34,6 +34,8 @@ export class App implements MapHost {
   roadMode = false
   /** Pole, kde mohou vybraní dělníci stavět vylepšení (index → práce). */
   jobs = new Map<number, string>()
+  /** Doporučená místa pro město pro vybrané osadníky (index pole → hodnocení). */
+  sites = new Map<number, number>()
   /** Za kolik tahů dorazí vybraná jednotka do cíle své cesty, nebo -1. */
   gotoEta = -1
 
@@ -106,7 +108,7 @@ export class App implements MapHost {
   }
 
   private computeSelection(): void {
-    this.reach.clear(); this.targets.clear(); this.pm = null; this.gotoEta = -1; this.jobs.clear()
+    this.reach.clear(); this.targets.clear(); this.pm = null; this.gotoEta = -1; this.jobs.clear(); this.sites.clear()
     if (!this.unit || this.unit.type !== 'worker') this.roadMode = false
     const u = this.unit
     const c = this.city
@@ -133,6 +135,25 @@ export class App implements MapHost {
         if (j && this.pm.dist[i] !== Infinity) this.jobs.set(i, j.job)
       }
       this.scene.showJobs([...this.jobs].map(([i, job]) => ({ i, job })))
+    }
+    if (u.type === 'settler') {
+      // Nejlepší známá místa v dosahu několika tahů, dost daleko od sebe.
+      const cand: [number, number][] = []
+      for (let i = 0; i < s.tiles.length; i++) {
+        if (!s.players[0].explored[i] || this.pm.dist[i] === Infinity || this.pm.dist[i] > 12) continue
+        const sc = siteScore(s, 0, i % s.W, (i / s.W) | 0)
+        // Vzdálenější místo musí být o to lepší; pole, kde osadníci stojí, má malou výhodu.
+        if (sc >= 44) cand.push([i, sc - this.pm.dist[i] * 1.2 + (this.pm.dist[i] === 0 ? 2 : 0)])
+      }
+      cand.sort((a, b) => b[1] - a[1])
+      const picked: number[] = []
+      for (const [i] of cand) {
+        if (picked.length >= 5) break
+        if (picked.some(j => hexDist(i % s.W, (i / s.W) | 0, j % s.W, (j / s.W) | 0) < 3)) continue
+        picked.push(i)
+        this.sites.set(i, siteScore(s, 0, i % s.W, (i / s.W) | 0))
+      }
+      this.scene.showSites(picked.map((i, k) => ({ i, best: k === 0 })), s.players[0].nation)
     }
     const far = u.goto ?? u.roadTo
     if (far && !u.goto) { const path = pathTo(s, this.pm, far[0], far[1]); if (path) this.scene.showRoute(path, [far]) }
@@ -163,9 +184,12 @@ export class App implements MapHost {
       this.busy = false
     }
     if (this.selUnit >= 0 && !this.unit) this.selUnit = -1
+    const pop = this.state.popup
+    this.state.popup = null
     saveGame(this.state)
     this.refresh()
     if (this.state.over) this.gameOver()
+    else if (pop) this.hud.showPopup(pop.title, pop.text)
   }
 
   private gameOver(): void {
@@ -190,6 +214,17 @@ export class App implements MapHost {
     }
     if (u) {
       if (this.targets.has(i)) { this.orderAttack(u, x, y); return }
+      // Osadníci: klik na doporučené místo = dojít tam a založit město.
+      if (u.type === 'settler' && this.sites.has(i) && !right && !shift && !(u.x === x && u.y === y)) {
+        stopUnit(u); u.todo = 'found'
+        sfx('build')
+        void this.run(() => { moveUnit(s, u, x, y) }).then(() => {
+          const c = cityAt(s, x, y)
+          if (c && c.owner === 0 && !this.unit) { this.selCity = c.id; this.refresh() }
+          else { this.hud.toast('Osadníci vyrazili a na místě založí město.'); this.autoAdvance() }
+        })
+        return
+      }
       // Dělníci: klik na pole se zelenou značkou = dojít tam a postavit vylepšení.
       const job = this.jobs.get(i)
       if (job && !right && !shift && !(u.x === x && u.y === y)) {
@@ -262,6 +297,7 @@ export class App implements MapHost {
     const s = this.state
     const cs = citiesOf(s, 0)
     if (cs.length && !s.players[0].research && availableTechs(s.players[0]).length) return { kind: 'research' }
+    if (cs.length && traditionReady(s.players[0])) return { kind: 'tradition' }
     const c = cs.find(o => !o.build)
     if (c) return { kind: 'city', city: c }
     const idle = this.idleUnits()
@@ -279,6 +315,7 @@ export class App implements MapHost {
     const a = force ? { kind: 'end' as const } : this.attention()
     sfx('click')
     if (a.kind === 'research') this.hud.showTech()
+    else if (a.kind === 'tradition') this.hud.showTraditions()
     else if (a.kind === 'city') this.openCity(a.city)
     else if (a.kind === 'unit') this.select(a.unit, true)
     else this.endTurn()
@@ -317,6 +354,12 @@ export class App implements MapHost {
     if (a === 'roadto') { this.roadMode = !this.roadMode; sfx('click'); if (this.roadMode) this.hud.toast('Klikněte na pole, kam má cesta vést (pravé tlačítko ruší).'); this.refresh(); return }
     if (a.startsWith('promo:')) {
       if (promoteUnit(s, u, a.slice(6) as PromoId)) { sfx('quest'); saveGame(s); this.refresh() }
+      return
+    }
+    if (a === 'upgradeall') {
+      // Přezbrojí všechny jednotky téhož druhu, u kterých to právě jde a na které stačí zlato.
+      const type = u.type
+      void this.run(() => { let n = 0; for (const o of unitsOf(s, 0)) if (o.type === type && !upgradeBlock(s, o) && upgradeUnit(s, o)) n++; note(s, 0, `Přezbrojeno jednotek: ${n}.`, 'good') })
       return
     }
     if (a === 'upgrade') {
@@ -365,6 +408,13 @@ export class App implements MapHost {
 
   buyNow(c: City): void {
     void this.run(() => { if (buy(this.state, c)) sfx('found'); else sfx('error') })
+  }
+
+  chooseTradition(id: TraditionId): void {
+    if (!adoptTradition(this.state, this.state.players[0], id)) { sfx('error'); return }
+    sfx('quest')
+    saveGame(this.state)
+    this.refresh()
   }
 
   chooseTech(t: TechId): void {
@@ -445,6 +495,8 @@ export class App implements MapHost {
     if (e.key === 'Escape') { if (this.roadMode) this.roadMode = false; else { this.selUnit = -1; this.selCity = -1 } this.refresh(); return }
     if (k === 'n' || e.key === 'Tab') { e.preventDefault(); const a = this.idleUnits(); if (a.length) { const cur = a.findIndex(u => u.id === this.selUnit); this.select(a[(cur + 1) % a.length], true) } return }
     if (k === 't') { this.hud.showTech(); return }
+    if (k === 'c') { this.hud.showTraditions(); return }
+    if (k === 'l') { this.hud.toggleOverview(); return }
     if (k === 'm') { this.hud.showMission(); return }
     if (k === 'h' || e.key === '?') { this.hud.showHelp(); return }
     if (e.key === '+' || e.key === '=') { this.scene.zoomBy(1); return }

@@ -71,6 +71,33 @@ export const IMPROVEMENTS: Record<ImprovementId, ImprovementDef> = {
   lumber: { name: 'Pila', verb: 'Postavit pilu', turns: 4, tech: 'forestry', food: 0, prod: 1, gold: 0 },
 }
 
+/** Tradice: trvalé výhody, které si národ vybírá za nastřádanou kulturu. */
+export type TraditionId = 'craft' | 'stores' | 'trade' | 'scribes' | 'feasts' | 'warrior' | 'militia' | 'builders' | 'settlers' | 'sea'
+export const TRADITIONS: Record<TraditionId, { name: string; desc: string }> = {
+  craft: { name: 'Řemeslné cechy', desc: '+1 výroba v každém městě.' },
+  stores: { name: 'Společné sýpky', desc: '+1 jídlo v každém městě.' },
+  trade: { name: 'Kupecké stezky', desc: '+2 zlato v každém městě.' },
+  scribes: { name: 'Písařské školy', desc: '+1 věda v každém městě, s knihovnou +2.' },
+  feasts: { name: 'Slavnosti', desc: '+2 kultura v každém městě – další tradice i hranice přijdou dřív.' },
+  warrior: { name: 'Válečnický kodex', desc: '+10 % síly při útoku a nové vojenské jednotky začínají s 5 zkušenostmi.' },
+  militia: { name: 'Domobrana', desc: '+25 % k obraně všech měst.' },
+  builders: { name: 'Stavitelské bratrstvo', desc: 'Dělníci dokončí každou práci o tah dřív.' },
+  settlers: { name: 'Osadnický duch', desc: 'Nově založená města začínají se 2 obyvateli.' },
+  sea: { name: 'Námořní tradice', desc: 'Lodě i naloděné jednotky mají +1 pohyb.' },
+}
+export const TRADITION_IDS = Object.keys(TRADITIONS) as TraditionId[]
+/** Kolik kultury stojí další tradice, když jich národ už má `n`. */
+export const traditionCost = (n: number): number => 25 + 20 * n + 5 * n * n
+
+/** Věky: do dalšího se vstupuje počtem objevených technologií. */
+export const ERAS = [
+  { name: 'Věk úsvitu', techs: 0 },
+  { name: 'Bronzový věk', techs: 6 },
+  { name: 'Železný věk', techs: 12 },
+  { name: 'Klasický věk', techs: 18 },
+]
+export const GOLDEN_TURNS = 10
+
 export const ROAD = { name: 'Cesta', verb: 'Postavit cestu', turns: 2, tech: 'wheel' as TechId }
 
 export type PromoId = 'drill' | 'guard' | 'medic' | 'march'

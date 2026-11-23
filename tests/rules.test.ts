@@ -323,3 +323,55 @@ test('scénáře: souostroví a náhodná země jsou hratelné, Thalassové vlá
   const cap = citiesOf(v, thal.id)[0]
   assert.ok(cap && ic2(v, cap.x, cap.y), 'hlavní město Thalassů leží na pobřeží')
 })
+
+import { adoptTradition, traditionReady, eraOf, grantTech as gt2 } from '../src/game/rules.ts'
+import { traditionCost, ERAS } from '../src/game/data.ts'
+
+test('kultura a věky: tradice za kulturu, milníky a zlatý věk za výzkum', () => {
+  const s = createGame('aur', 'normal')
+  const c = foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)!
+  const p = s.players[0]
+  assert.deepEqual(p.techs, ['agriculture'], 'národ začíná s jednou technologií')
+  assert.equal(p.era, 0)
+  // Kultura města se sčítá národu.
+  endTurn(s)
+  assert.ok(p.culture >= 2)
+  assert.ok(!traditionReady(p))
+  p.culture = traditionCost(0)
+  const before = cityYields(s, c).prod
+  assert.ok(adoptTradition(s, p, 'craft'))
+  assert.equal(cityYields(s, c).prod, before + 1)
+  assert.equal(p.culture, 0)
+  assert.ok(!adoptTradition(s, p, 'stores'), 'bez kultury další tradice nejde')
+  assert.ok(traditionCost(1) > traditionCost(0))
+  // Šestá technologie = Bronzový věk, první národ dostane zlatý věk.
+  const gold = p.gold
+  for (const t of ['husbandry', 'mining', 'archery', 'pottery', 'wheel'] as const) gt2(s, p, t)
+  assert.equal(p.techs.length, ERAS[1].techs)
+  assert.equal(eraOf(p), 1)
+  assert.equal(p.era, 1)
+  assert.equal(s.eraFirst[1], 0)
+  assert.ok(p.goldenUntil > s.turn)
+  assert.equal(p.gold, gold + 30)
+  assert.ok(s.popup && s.popup.title.includes('Bronzový'))
+  // Druhý národ už zlatý věk nedostane.
+  const q = s.players[1]
+  while (q.techs.length < ERAS[1].techs) gt2(s, q, (['agriculture', 'husbandry', 'mining', 'archery', 'pottery', 'wheel', 'bronze'] as const).find(t => !q.techs.includes(t))!)
+  assert.equal(q.era, 1)
+  assert.equal(q.goldenUntil, 0)
+  drainEvents()
+})
+
+test('osadníci: rozkaz dojít na místo a usadit se', () => {
+  const s = createGame('aur', 'normal')
+  const st = unitsOf(s, 0).find(u => u.type === 'settler')!
+  const goal: [number, number] = [st.x + 3, st.y - 1]
+  st.todo = 'found'
+  moveUnit(s, st, goal[0], goal[1])
+  for (let i = 0; i < 5 && !citiesOf(s, 0).length; i++) endTurn(s)
+  const c = citiesOf(s, 0)[0]
+  assert.ok(c, 'město založeno')
+  assert.deepEqual([c.x, c.y], goal)
+  assert.ok(!s.units.includes(st))
+  drainEvents()
+})

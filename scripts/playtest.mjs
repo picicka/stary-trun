@@ -25,7 +25,7 @@ while (guard++ < 3000) {
   if (s.over || s.turn > turns) break
   if (s.busy) { await page.waitForTimeout(60); continue }
   if (s.modal) {
-    const tech = await page.$('.tech.avail:not(.cur)')
+    const tech = await page.$('.tech.avail:not(.cur), .trad.avail')
     if (tech) { await tech.click().catch(() => {}); await page.keyboard.press('Escape') }
     else { const b = await page.$('#modal .foot .btn:last-child'); if (b) await b.click().catch(() => {}); else await page.keyboard.press('Escape') }
     continue

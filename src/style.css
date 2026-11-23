@@ -241,3 +241,39 @@ button[data-tip], .build[data-tip], .tech.avail[data-tip], [data-a][data-tip] { 
 .scens { margin: 14px 0 18px !important; }
 .scen.sel { outline: 3px solid var(--gold); }
 #menu.setup h2 { margin: 6px 0 4px; }
+
+/* tradice a věky */
+.stat.clickable { cursor: pointer; }
+.stat.clickable:hover { color: #fff; }
+.stat.need { outline: 2px solid var(--gold); outline-offset: 2px; animation: pillpulse 1.6s ease-in-out infinite; }
+.trads { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.trad { background: #0f1530; border: 2px solid var(--line); padding: 6px 10px; font-size: 19px; line-height: 1.2; }
+.trad b { display: block; font-family: var(--head); font-size: 18px; font-weight: 600; }
+.trad small { color: var(--muted); font-size: 18px; }
+.trad.done { background: #1d3a2c; border-color: #3f8f5a; }
+.trad.avail { cursor: pointer; border-color: #b872ea; }
+.trad.avail:hover { background: #2a2350; border-color: #fff; }
+.trad.locked { opacity: .75; }
+.starts { font-size: 17.5px; color: var(--sci); margin-top: 4px; }
+/* horní lišta se musí vejít i na užší okno */
+#topbar { gap: 10px; }
+#topbar .research { min-width: 0; flex: 0 1 250px; overflow: hidden; }
+#topbar .research span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#topbar .tbtn { padding: 3px 7px; flex: none; }
+#topbar .spacer { min-width: 4px; }
+
+/* přehled měst a jednotek */
+#overview { position: absolute; right: 12px; top: 58px; width: 330px; max-height: calc(100vh - 58px - 270px); display: flex; flex-direction: column; }
+#overview h2 { margin: 0 0 4px; font-size: 20px; display: flex; justify-content: space-between; align-items: center; }
+#overview .inner { overflow-y: auto; min-height: 0; padding-right: 4px; }
+#overview h4 { margin: 8px 0 3px; color: var(--gold); font-size: 19px; font-weight: 400; border-bottom: 2px solid var(--line); }
+.ov { display: flex; gap: 8px; align-items: center; padding: 3px 5px; border: 2px solid transparent; cursor: pointer; font-size: 19px; line-height: 1.15; }
+.ov:hover { background: #2b3466; border-color: var(--line); }
+.ov.sel { border-color: var(--gold); }
+.ov img { width: 32px; height: 32px; flex: none; }
+.ov b { font-weight: 400; color: #fff; }
+.ov small { color: var(--muted); font-size: 17px; }
+.ov .doing { color: var(--muted); }
+.ov .idle { color: var(--gold); }
+#ui.with-overview #tip { right: 354px; }
+#topbar .tbtn.on { border-color: var(--gold); color: #fff; }

@@ -1,6 +1,6 @@
 // Pravidla hry: výnosy, města, pohyb, boj, průběh tahu. Bez závislosti na Phaseru.
 import {
-  SCENARIOS, BUILDINGS, BUILDING_IDS, DIFFICULTY, IMPROVEMENTS, NATIONS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS, TERRAIN, UNITS, UNIT_IDS, XP_LEVELS, unitFor,
+  ERAS, GOLDEN_TURNS, TRADITIONS, TRADITION_IDS, traditionCost, type TraditionId, SCENARIOS, BUILDINGS, BUILDING_IDS, DIFFICULTY, IMPROVEMENTS, NATIONS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS, TERRAIN, UNITS, UNIT_IDS, XP_LEVELS, unitFor,
   type BuildingId, type ImprovementId, type PromoId, type ResourceId, type TechId, type UnitId, type Yields,
 } from './data.ts'
 import { hexDist, neighborXY } from './hex.ts'
@@ -78,12 +78,12 @@ export function canEnterTile(s: GameState, u: Unit, t: Tile): boolean {
 
 /** Pohyb na začátku tahu: naloděné jednotky plují pevnou rychlostí. */
 /** Rychlost naloděných jednotek. */
-export function embarkSpeed(p: Player): number { return (hasTech(p, 'navigation') ? 4 : 3) + (p.nation === 'thal' ? 1 : 0) }
+export function embarkSpeed(p: Player): number { return (hasTech(p, 'navigation') ? 4 : 3) + (p.nation === 'thal' ? 1 : 0) + (p.traditions.includes('sea') ? 1 : 0) }
 
 export function maxMoves(s: GameState, u: Unit): number {
   const p = s.players[u.owner]
   if (isEmbarked(s, u)) return embarkSpeed(p)
-  return UNITS[u.type].move + (u.promos.includes('march') ? 1 : 0) + (isNaval(u) && p.nation === 'thal' ? 1 : 0)
+  return UNITS[u.type].move + (u.promos.includes('march') ? 1 : 0) + (isNaval(u) && p.nation === 'thal' ? 1 : 0) + (isNaval(u) && p.traditions.includes('sea') ? 1 : 0)
 }
 
 export function atWar(s: GameState, a: number, b: number): boolean {
@@ -171,8 +171,14 @@ export function cityYields(s: GameState, c: City): CityYields {
     if (has('harbor') && isWater(s.tiles[i])) food += 1
   }
   let sci = c.pop
-  const culture = cultureSources(c).reduce((a, x) => a + x[1], 0)
+  const culture = cultureSources(c, p, s.turn).reduce((a, x) => a + x[1], 0)
   if (c.capital) { prod += 1; gold += 2; sci += 2 }
+  const tr = (id: TraditionId) => p.traditions.includes(id)
+  if (tr('craft')) prod += 1
+  if (tr('stores')) food += 1
+  if (tr('trade')) gold += 2
+  if (tr('scribes')) sci += has('library') ? 2 : 1
+  if (s.turn < p.goldenUntil) { prod += 1; gold += 1 }
   if (has('harbor')) gold += 2
   if (has('granary')) food += 2
   if (has('workshop')) prod += 2
@@ -189,8 +195,10 @@ export function cityYields(s: GameState, c: City): CityYields {
 }
 
 /** Odkud město bere kulturu (pro výpočet i pro nápovědu). */
-export function cultureSources(c: City): [string, number][] {
+export function cultureSources(c: City, p?: Player, turn = 0): [string, number][] {
   const out: [string, number][] = [['Město', 1]]
+  if (p?.traditions.includes('feasts')) out.push(['Slavnosti', 2])
+  if (p && turn < p.goldenUntil) out.push(['Zlatý věk', 1])
   if (c.capital) out.push(['Hlavní město', 1])
   if (c.buildings.includes('monument')) out.push(['Monument', 2])
   if (c.buildings.includes('temple')) out.push(['Chrám', 3])
@@ -393,7 +401,7 @@ export function pathTurns(s: GameState, u: Unit, path: [number, number][]): numb
   let turns = 0, moves = u.moves
   let cur = idx(s, u.x, u.y)
   const pl = s.players[u.owner]
-  const speed = (i: number) => (!isNaval(u) && isWater(s.tiles[i]) ? embarkSpeed(pl) : UNITS[u.type].move + (u.promos.includes('march') ? 1 : 0) + (isNaval(u) && pl.nation === 'thal' ? 1 : 0))
+  const speed = (i: number) => (!isNaval(u) && isWater(s.tiles[i]) ? embarkSpeed(pl) : UNITS[u.type].move + (u.promos.includes('march') ? 1 : 0) + (isNaval(u) && pl.nation === 'thal' ? 1 : 0) + (isNaval(u) && pl.traditions.includes('sea') ? 1 : 0))
   for (const [x, y] of path) {
     const ni = idx(s, x, y)
     if (moves <= 0) { turns++; moves = speed(cur) }
@@ -451,6 +459,11 @@ function doTodo(s: GameState, u: Unit): void {
   const job = u.todo
   if (!job || !s.units.includes(u)) return
   u.todo = null
+  if (job === 'found') {
+    // Osadníci došli na vybrané místo a usadí se.
+    if (!foundCity(s, u) && u.owner === 0) note(s, 0, 'Osadníci dorazili, ale město tu už založit nejde. Vyberte jim jiné místo.', 'bad', u.x, u.y)
+    return
+  }
   if (!startWork(s, u, job) && u.owner === 0) note(s, 0, 'Dělníci dorazili, ale naplánovanou práci už tu provést nejde.', 'info', u.x, u.y)
 }
 
@@ -530,6 +543,40 @@ export function grantTech(s: GameState, p: Player, t: TechId): void {
   p.techs.push(t)
   if (p.research === t) { p.research = null; p.progress = 0 }
   if (p.id === 0) emit({ e: 'sound', id: 'tech' })
+  if (p.id === BARB) return
+  if (p.human) {
+    // Která vojska teď půjde přezbrojit.
+    const up = new Set<string>()
+    for (const u of unitsOf(s, p.id)) { const to = upgradeTarget(s, u); if (to && UNITS[to].tech === t) up.add(`${UNITS[u.type].name} → ${UNITS[to].name}`) }
+    if (up.size) note(s, 0, `Nová výzbroj: ${[...up].join(', ')}. Jednotku vyberte na vlastním území a zvolte Přezbrojit (klávesa U).`, 'good')
+  }
+  const e = eraOf(p)
+  if (e <= p.era) return
+  p.era = e
+  const first = s.eraFirst[e] === undefined
+  if (first) { s.eraFirst[e] = p.id; p.goldenUntil = s.turn + GOLDEN_TURNS }
+  const gold = 30 * e, cult = 15 * e
+  p.gold += gold; p.culture += cult
+  const name = ERAS[e].name
+  if (p.human) {
+    emit({ e: 'sound', id: 'quest' })
+    s.popup = { title: `Nový věk: ${name}`, text: `Váš lid vstoupil do nového věku. Milník přináší ${gold} zlata a ${cult} bodů kultury.${first ? ` Jste v něm první ze všech národů – nastává zlatý věk: po ${GOLDEN_TURNS} tahů dává každé vaše město +1 výrobu, +1 zlato a +1 kulturu.` : ` Jiný národ vás ale předběhl, zlatý věk připadl jemu.`}` }
+    note(s, 0, `Nový věk: ${name}.${first ? ' Zlatý věk!' : ''}`, 'good')
+  } else if (s.players[0].met.includes(p.id)) note(s, 0, `${NATIONS[p.nation].name} vstoupili do nového věku: ${name}${first ? ' (jako první – mají zlatý věk)' : ''}.`, 'info')
+}
+
+export function eraOf(p: Player): number { return ERAS.filter(e => p.techs.length >= e.techs).length - 1 }
+
+/** Může si národ vybrat další tradici? */
+export function traditionReady(p: Player): boolean {
+  return p.traditions.length < TRADITION_IDS.length && p.culture >= traditionCost(p.traditions.length)
+}
+
+export function adoptTradition(_s: GameState, p: Player, id: TraditionId): boolean {
+  if (!traditionReady(p) || p.traditions.includes(id)) return false
+  p.culture -= traditionCost(p.traditions.length)
+  p.traditions.push(id)
+  return true
 }
 
 // ---------------------------------------------------------------- města
@@ -539,6 +586,7 @@ export function cityMaxHp(c: City): number { return 200 + (c.buildings.includes(
 export function cityStrength(s: GameState, c: City): number {
   let v = 7 + c.pop * 1.2 + s.players[c.owner].techs.length * 0.25
   if (c.buildings.includes('walls')) v *= 1.5
+  if (s.players[c.owner].traditions.includes('militia')) v *= 1.25
   const g = militaryAt(s, c.x, c.y)
   if (g && g.owner === c.owner) v += UNITS[g.type].str * 0.3
   return v
@@ -546,11 +594,16 @@ export function cityStrength(s: GameState, c: City): number {
 
 export function canFoundCity(s: GameState, u: Unit): string | null {
   if (u.type !== 'settler') return 'Město zakládají jen osadníci.'
-  const t = s.tiles[idx(s, u.x, u.y)]
+  return foundBlock(s, u.owner, u.x, u.y)
+}
+
+/** Proč hráč `pid` na poli město založit nemůže, nebo null. */
+export function foundBlock(s: GameState, pid: number, x: number, y: number): string | null {
+  const t = s.tiles[idx(s, x, y)]
   if (!TERRAIN[t.t].passable) return 'Zde město stát nemůže.'
-  if (t.owner !== -1 && t.owner !== u.owner) return 'Toto území patří jinému národu.'
+  if (t.owner !== -1 && t.owner !== pid) return 'Toto území patří jinému národu.'
   if (t.special) return 'Zde město stát nemůže.'
-  for (const c of s.cities) if (hexDist(c.x, c.y, u.x, u.y) < 4) return 'Příliš blízko jiného města (nejméně 3 pole mezi městy).'
+  for (const c of s.cities) if (hexDist(c.x, c.y, x, y) < 4) return 'Příliš blízko jiného města (nejméně 3 pole mezi městy).'
   return null
 }
 
@@ -562,7 +615,7 @@ export function foundCity(s: GameState, u: Unit): City | null {
   p.cityNames++
   const first = !s.cities.some(c => c.founder === u.owner)
   const c: City = {
-    id: s.nextId++, owner: u.owner, founder: u.owner, name, x: u.x, y: u.y, pop: 1, food: 0, prod: 0, culture: 0, radius: 1,
+    id: s.nextId++, owner: u.owner, founder: u.owner, name, x: u.x, y: u.y, pop: p.traditions.includes('settlers') ? 2 : 1, food: 0, prod: 0, culture: 0, radius: 1,
     build: null, queue: [], buildings: [], hp: 200, capital: first, seat: first ? u.owner : -1, worked: [],
   }
   const t = s.tiles[idx(s, u.x, u.y)]
@@ -737,6 +790,7 @@ function completeBuild(s: GameState, c: City): boolean {
     u.moves = 0
     // Thalasské lodě vyplouvají se zkušenou posádkou.
     if (UNITS[it.id].naval && s.players[c.owner].nation === 'thal') gainXp(s, u, 10)
+    if (!civ && s.players[c.owner].traditions.includes('warrior')) u.xp += 5
     emit({ e: 'spawn', unit: u.id, x: u.x, y: u.y })
     note(s, c.owner, `${c.name}: dokončena jednotka ${UNITS[it.id].name}.`, 'info', c.x, c.y)
     c.prod -= UNITS[it.id].cost
@@ -870,7 +924,7 @@ export function canWork(s: GameState, u: Unit, job: JobId): boolean {
 export function startWork(s: GameState, u: Unit, job: JobId): boolean {
   if (!canWork(s, u, job)) return false
   stopUnit(u)
-  u.work = job; u.workLeft = job === 'road' ? ROAD.turns : IMPROVEMENTS[job].turns; u.moves = 0; u.fortified = false; u.sleep = false
+  u.work = job; u.workLeft = Math.max(1, (job === 'road' ? ROAD.turns : IMPROVEMENTS[job].turns) - (s.players[u.owner].traditions.includes('builders') ? 1 : 0)); u.moves = 0; u.fortified = false; u.sleep = false
   return true
 }
 
@@ -913,6 +967,7 @@ export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): numb
   }
   if (nation === 'khar' && t.t === 'hills') m += 0.15
   if (u.promos.includes(ctx.defending ? 'guard' : 'drill')) m += ctx.defending ? 0.2 : 0.15
+  if (!ctx.defending && s.players[u.owner].traditions.includes('warrior')) m += 0.1
   // Útok zblízka přes řeku je těžší.
   if (ctx.river) m -= 0.2
   if (d.antiMounted && ctx.vs && UNITS[ctx.vs.type].mounted) m += 0.5
@@ -1188,7 +1243,7 @@ export function militaryPower(s: GameState, pid: number): number {
 
 export function score(s: GameState, pid: number): number {
   const p = s.players[pid]
-  let v = p.techs.length * 6
+  let v = p.techs.length * 6 + p.traditions.length * 5 + p.era * 8
   for (const c of citiesOf(s, pid)) v += 12 + c.pop * 4 + c.buildings.length * 3 + (c.buildings.includes('wonder') ? 60 : 0)
   for (const t of s.tiles) if (t.owner === pid) v += 0.5
   if (pid === 0) v += (s.mission.questCamps ? 20 : 0) + (s.mission.questCities ? 20 : 0) + (s.mission.questRuins ? 25 : 0)
@@ -1287,7 +1342,11 @@ export function endPlayerTurn(s: GameState, pid: number): void {
     return ok
   })
   if (pid !== 0 && s.turn % 4 === 0) { p.attitude += p.attitude > 0 ? -1 : p.attitude < 0 ? 1 : 0; if (s.deals.some(d => (d.seller === pid && d.buyer === 0) || (d.buyer === pid && d.seller === 0))) p.attitude = Math.min(100, p.attitude + 2) }
-  for (const c of citiesOf(s, pid)) processCity(s, c)
+  for (const c of citiesOf(s, pid)) { processCity(s, c); p.culture += cityYields(s, c).culture }
+  if (!p.human) {
+    const pref: TraditionId[] = p.personality === 'aggressive' ? ['craft', 'warrior', 'stores', 'trade', 'militia', 'builders', 'scribes', 'feasts', 'settlers', 'sea'] : ['stores', 'craft', 'scribes', 'feasts', 'trade', 'settlers', 'builders', 'militia', 'sea', 'warrior']
+    while (traditionReady(p)) adoptTradition(s, p, pref.find(x => !p.traditions.includes(x))!)
+  } else if (traditionReady(p)) noteOnce(s, 'Nastřádali jste dost kultury na novou tradici.', 'good')
   const inc = playerIncome(s, pid)
   p.gold += inc.gold
   let sci = inc.sci

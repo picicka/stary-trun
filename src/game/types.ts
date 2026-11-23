@@ -1,4 +1,4 @@
-import type { ScenarioId, BuildingId, Difficulty, ImprovementId, NationId, PromoId, ResourceId, TechId, TerrainId, UnitId } from './data.ts'
+import type { TraditionId, ScenarioId, BuildingId, Difficulty, ImprovementId, NationId, PromoId, ResourceId, TechId, TerrainId, UnitId } from './data.ts'
 
 /** Práce dělníků: vylepšení pole, nebo cesta. */
 export type JobId = ImprovementId | 'road'
@@ -62,7 +62,7 @@ export interface Unit {
   vet: boolean
   work: JobId | null
   /** Co mají dělníci postavit, až dojdou na cíl cesty. */
-  todo: JobId | null
+  todo: JobId | 'found' | null
   /** Dělníci staví cestu pole po poli až sem. */
   roadTo: [number, number] | null
   xp: number
@@ -99,6 +99,12 @@ export interface Player {
   cityNames: number
   /** Vztah soupeře k hráči (−100 až 100). */
   attitude: number
+  /** Nastřádaná kultura národa na další tradici. */
+  culture: number
+  traditions: TraditionId[]
+  era: number
+  /** Do tohoto tahu trvá zlatý věk (+1 výroba, zlato a kultura v každém městě). */
+  goldenUntil: number
   /** Do tohoto tahu soupeř hráče nenapadne (spojenectví). */
   pactUntil: number
 }
@@ -141,6 +147,10 @@ export interface GameState {
   over: GameOver | null
   offers: PeaceOffer[]
   deals: Deal[]
+  /** Kdo vstoupil do kterého věku první (id hráče, index = věk). */
+  eraFirst: number[]
+  /** Zpráva, kterou má rozhraní ukázat hráči v okně (nový věk apod.). */
+  popup: { title: string; text: string } | null
   tutorial: string[]
 }
 
