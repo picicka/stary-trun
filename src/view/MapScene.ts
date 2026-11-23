@@ -122,11 +122,14 @@ export class MapScene extends Phaser.Scene {
     const cam = this.cameras.main
     const w = s.W * TILE_W + 16, h = s.H * ROW_H + 8
     const vw = cam.width / cam.zoom, vh = cam.height / cam.zoom
-    const m = 40
     // Střed se počítá ze scrollu: cam.midPoint se obnovuje až při vykreslení a po setScroll by vracel starou polohu.
     const mx = cam.scrollX + cam.width / 2, my = cam.scrollY + cam.height / 2
-    const cx = Phaser.Math.Clamp(mx, Math.min(w / 2, vw / 2 - m), Math.max(w / 2, w - vw / 2 + m))
-    const cy = Phaser.Math.Clamp(my, Math.min(h / 2, vh / 2 - m), Math.max(h / 2, h - vh / 2 + m))
+    // Střed záběru smí kamkoli na mapu (kousek od kraje), aby šlo vycentrovat i pole u okraje
+    // a při oddálení, kdy se mapa skoro vejde do okna. Za okrajem mapy je pak vidět prázdno.
+    const mxm = Math.min(w / 2, 48), mym = Math.min(h / 2, 36)
+    void vw; void vh
+    const cx = Phaser.Math.Clamp(mx, mxm, w - mxm)
+    const cy = Phaser.Math.Clamp(my, mym, h - mym)
     cam.centerOn(cx, cy)
   }
 
@@ -172,6 +175,12 @@ export class MapScene extends Phaser.Scene {
     const cam = this.cameras.main
     if (smooth) cam.pan(cx, cy, 260, 'Sine.easeInOut', true, (_c, prog) => { this.host.onCameraMove(); if (prog === 1) { this.clampCamera(); this.host.onCameraMove() } })
     else { cam.centerOn(cx, cy); this.clampCamera(); this.host.onCameraMove() }
+  }
+
+  /** Krátké zablikání rámu na poli, aby bylo vidět, kam mapa skočila. */
+  ping(x: number, y: number): void {
+    const ring = this.add.image(x * TILE_W + (y & 1) * 16 + 16, y * ROW_H + 16, A, 'hex_worked').setTint(0xffffff).setDepth(D_FOG + 6).setScale(1.9).setAlpha(0)
+    this.tweens.add({ targets: ring, scale: 1, alpha: 1, duration: 320, ease: 'Quad.easeOut', onComplete: () => { this.tweens.add({ targets: ring, alpha: 0.15, duration: 260, yoyo: true, repeat: 2, onComplete: () => ring.destroy() }) } })
   }
 
   /** Je pole pohodlně v záběru? */

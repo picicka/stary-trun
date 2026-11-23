@@ -1,12 +1,12 @@
 // Umělá inteligence soupeřů a barbarů.
-import { BUILDINGS, DIFFICULTY, NATIONS, TECHS, TERRAIN, UNITS, unitFor, type BuildingId, type TechId, type UnitId } from './data.ts'
+import { BUILDINGS, DIFFICULTY, NATIONS, RESOURCES, TECHS, TERRAIN, UNITS, unitFor, type BuildingId, type TechId, type UnitId } from './data.ts'
 import { hexDist } from './hex.ts'
 import { rand, randInt } from './rng.ts'
 import {
   assignWorkers, atWar, attack, availableTechs, buy, buyCost, canBuildBuilding, canBuildUnit, canFoundCity, cityAt, citiesOf, cityYields,
   declareWar, foundCity, idx, improvementsFor, isCivilian, isCoastal, isNaval, isWater, stopUnit, itemCost, makePeace, makeUnit, militaryAt, militaryPower, moveUnit, neighbors,
   note, pathMap, pathTo, playerIncome, previewAttack, startWork, tileYield, tilesWithin, unitsAt, unitsOf, updateVisibility, emit,
-  canWork, hasRoad, hasTech, isEmbarked, upgradeBlock, upgradeCost, upgradeUnit,
+  canWork, hasRoad, hasTech, isEmbarked, resourceCap, resourceVisible, unitsNeeding, upgradeBlock, upgradeCost, upgradeUnit,
   type PathMap,
 } from './rules.ts'
 import { BARB, type BuildItem, type City, type GameState, type Player, type Unit } from './types.ts'
@@ -116,15 +116,27 @@ export function siteScore(s: GameState, pid: number, x: number, y: number): numb
   if (!TERRAIN[t.t].passable || t.special) return -1
   if (t.owner !== -1 && t.owner !== pid) return -1
   for (const c of s.cities) if (hexDist(c.x, c.y, x, y) < 4) return -1
+  const p = s.players[pid]
   let v = 0
   for (const [tx, ty] of tilesWithin(s, x, y, 2)) {
     const i = idx(s, tx, ty)
     const tt = s.tiles[i]
     if (tt.owner !== -1 && tt.owner !== pid) { v -= 0.5; continue }
+    // Hráč nezná, co je v neprozkoumané mlze: počítá se průměrné pole, ať rada nic neprozradí.
+    if (p.human && !p.explored[i]) { v += 2.5; continue }
     const yl = tileYield(s, i, pid)
-    v += yl.food * 1.4 + yl.prod + yl.gold * 0.6 + (tt.res ? 1.5 : 0)
+    let tv = yl.food * 1.4 + yl.prod + yl.gold * 0.6
+    if (tt.res && resourceVisible(p, tt.res)) {
+      // Koně a železo živí vojsko; nejcennější jsou, když národu úplně chybějí a jeho jednotky je potřebují.
+      const strat = RESOURCES[tt.res].strategic
+      tv += strat ? (unitsNeeding(s, pid, tt.res).length ? (resourceCap(s, pid, tt.res) === 0 ? 7 : 4) : 2) : 1.5
+    }
+    // Pole, která už patří jinému vlastnímu městu, nové město skoro nevyužije.
+    v += tt.owner === pid && tt.city !== -1 ? tv * 0.3 : tv
   }
   if (t.t === 'hills') v += 2
+  // Barbarský tábor za humny znamená neustálé nájezdy.
+  for (const [tx, ty] of tilesWithin(s, x, y, 3)) if (s.tiles[idx(s, tx, ty)].special === 'camp' && (!p.human || p.explored[idx(s, tx, ty)])) v -= 7
   // Přístav se hodí: lodě, přístavní budova, obchod po moři.
   if (isCoastal(s, x, y)) v += seafarer(s, s.players[pid]) ? 12 : 4
   return v

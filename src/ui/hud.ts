@@ -162,7 +162,7 @@ export class Hud {
       case 'tech-open': sfx('click'); this.showTech(); break
       case 'overview': sfx('click'); this.toggleOverview(); break
       case 'ov-city': { const c = this.s.cities.find(o => o.id === Number(arg)); if (c && !app.busy) { sfx('select'); app.openCity(c) } break }
-      case 'ov-tile': { const i = Number(arg); if (!app.busy) { sfx('select'); app.scene.centerOn(i % this.s.W, (i / this.s.W) | 0) } break }
+      case 'ov-tile': { const i = Number(arg); if (!app.busy) { sfx('select'); app.scene.centerOn(i % this.s.W, (i / this.s.W) | 0); app.scene.ping(i % this.s.W, (i / this.s.W) | 0) } break }
       case 'ov-unit': { const u = this.s.units.find(o => o.id === Number(arg)); if (u && !app.busy) { sfx('select'); app.select(u, true) } break }
       case 'trad-open': sfx('click'); this.showTraditions(); break
       case 'trad': app.chooseTradition(arg as TraditionId); if (traditionReady(this.me)) this.showTraditions(); else this.closeModal(); break
@@ -195,7 +195,7 @@ export class Hud {
       case 'hints': app.toggleHints(); break
       case 'note': {
         const n = this.s.notes[Number(arg)]
-        if (n) { this.read.add(n); if (n.x !== undefined && n.y !== undefined) app.scene.centerOn(n.x, n.y) }
+        if (n) { this.read.add(n); if (n.x !== undefined && n.y !== undefined) { app.scene.centerOn(n.x, n.y); app.scene.ping(n.x, n.y) } }
         this.renderNotes()
         break
       }
