@@ -64,5 +64,6 @@ sprite("_o_city_3", { w: 30, h: 46, outline: "k" }, (c) => {
   c.hline(13, 36, 4, "N")
   tower(c, 0, 31, 6, 13, 4); tower(c, 24, 31, 6, 13, 4)
 })
-for (const n of CITY_NATIONS) for (let i = 1; i <= 3; i++)
-  sprite(`city_${i}_${n}`, { w: 32, h: 48 }, ellipse(16, 43, 13 + (i > 1 ? 1 : 0), 3, SHADOW), stamp("_o_city_" + i, 0, 0, { swap: NATIONS[n] }))
+// Jedna sada se zástupnými barvami; národní barvy dosadí hra za běhu.
+for (let i = 1; i <= 3; i++)
+  sprite(`city_${i}`, { w: 32, h: 48 }, ellipse(16, 43, 13 + (i > 1 ? 1 : 0), 3, SHADOW), stamp("_o_city_" + i, 0, 0))

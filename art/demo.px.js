@@ -2,13 +2,16 @@
 const contact = (name, names, cw, ch, cols, bg = "#3a6a40") => {
   const rows = Math.ceil(names.length / cols)
   scene(name, { w: cols * (cw + 2) + 2, h: rows * (ch + 2) + 2, bg },
-    ...names.map((n, i) => stamp(n, 2 + (i % cols) * (cw + 2), 2 + Math.floor(i / cols) * (ch + 2), { frame: 0 })))
+    ...names.map((n, i) => stamp(...[n].flat().slice(0, 1), 2 + (i % cols) * (cw + 2), 2 + Math.floor(i / cols) * (ch + 2), { frame: 0, ...[n].flat()[1] })))
 }
+// náhled v barvách národa: [jméno, volby razítka]
+const PREVIEW_IDS = Object.keys(PREVIEW_NATIONS)
+const nat = (n, extra) => ({ swap: { ...PREVIEW_NATIONS[n], ...extra } })
 contact("_cs_terrain", ["t_grass_1", "t_grass_2", "t_grass_3", "t_plains_1", "t_plains_2", "t_plains_3", "t_desert_1", "t_desert_2", "t_hills_1", "t_hills_2", "t_ocean", "t_coast", "t_mountain_1", "t_mountain_2"], 32, 48, 7, "#222")
 contact("_cs_feat", ["f_forest_1", "f_forest_2", "f_ruins", "f_camp", "f_wonder", "i_farm", "i_mine", "i_pasture", "i_lumber", "t_mountain_1", "t_mountain_2"].map((n) => n), 32, 48, 6, "#62b846")
-contact("_cs_city", CITY_NATIONS.flatMap((n) => [1, 2, 3].map((i) => `city_${i}_${n}`)), 32, 48, 6, "#62b846")
+contact("_cs_city", PREVIEW_IDS.slice(0, 4).flatMap((n) => [1, 2, 3].map((i) => [`city_${i}`, nat(n)])), 32, 48, 6, "#62b846")
 contact("_cs_over", ["shore_0", "shore_1", "shore_2", "shore_3", "shore_4", "shore_5", "border_0", "border_1", "border_2", "border_3", "border_4", "border_5", "r_wheat", "r_horses", "r_iron", "r_gold", "r_stone", "r_fish", "r_deer", "hex_mask", "hex_cursor", "hex_move", "hex_attack", "fog"], 36, 36, 6, "#3a7a44")
-contact("_cs_units", Object.keys(UNITS).flatMap((t, i) => [`u_${t}_${["aur", "khar", "thal", "sylv", "barb"][i % 5]}`]), 22, 22, 7, "#62b846")
+contact("_cs_units", Object.keys(UNITS).map((t, i) => [`u_${t}`, nat(PREVIEW_IDS[i % PREVIEW_IDS.length])]), 22, 22, 7, "#62b846")
 contact("_cs_icons", Object.keys(ICONS), 12, 12, 11, "#2a3352")
 contact("_cs_bld", ["b_monument", "b_granary", "b_workshop", "b_market", "b_library", "b_walls", "b_barracks", "b_temple", "b_aqueduct", "b_academy", "b_court", "b_wonder", "em_aur", "em_khar", "em_thal", "em_sylv", "em_barb", "ui_panel", "ui_button", "ui_button_hover", "ui_button_down"], 24, 24, 7, "#2a3352")
 contact("_cs_port", ["p_aur", "p_khar", "p_thal", "p_sylv"], 48, 48, 4, "#222")
@@ -34,15 +37,16 @@ scene("_demo_map", { w: 8 + 6 * 32 + 16 + 8, h: 20 + 5 * 24 + 8 + 8, bg: "#0e122
   }
   const put = (name, q, r, o) => { const [x, y] = hx(q, r); c.stamp(name, x, y - 16, o) }
   const flat = (name, q, r) => { const [x, y] = hx(q, r); c.stamp(name, x, y, { frame: 0 }) }
-  const unit = (name, q, r) => { const [x, y] = hx(q, r); c.stamp(name, x + 5, y + 3) }
+  const unit = (name, n, q, r) => { const [x, y] = hx(q, r); c.stamp(name, x + 5, y + 3, nat(n)) }
+  const grassNat = (n) => nat(n, onGrass.swap)
   put("t_mountain_1", 5, 0); put("t_mountain_2", 5, 1)
   put("f_forest_1", 4, 0, onGrass); put("f_forest_2", 3, 0, onGrass); put("f_forest_1", 5, 2, onGrass)
-  put("city_3_aur", 3, 1, onGrass); for (const d of [0, 1, 2, 3, 4, 5]) flat("border_" + d, 3, 1)
+  put("city_3", 3, 1, grassNat("aur")); for (const d of [0, 1, 2, 3, 4, 5]) flat("border_" + d, 3, 1)
   put("i_farm", 2, 1, onGrass); put("i_pasture", 4, 1, onGrass); put("i_mine", 4, 2, onGrass)
-  put("city_1_khar", 3, 3, onGrass); put("i_lumber", 5, 3, onGrass)
-  put("f_ruins", 2, 3, onGrass); put("f_camp", 4, 4, onGrass); put("f_wonder", 3, 4, onGrass); put("city_2_thal", 5, 4, onGrass)
+  put("city_1", 3, 3, grassNat("khar")); put("i_lumber", 5, 3, onGrass)
+  put("f_ruins", 2, 3, onGrass); put("f_camp", 4, 4, onGrass); put("f_wonder", 3, 4, onGrass); put("city_2", 5, 4, grassNat("thal"))
   flat("r_wheat", 2, 2); flat("r_horses", 3, 2); flat("r_fish", 1, 1); flat("r_gold", 1, 3); flat("r_iron", 4, 2); flat("r_deer", 4, 3); flat("r_stone", 2, 3)
-  unit("u_hoplite_aur", 2, 2); unit("u_horseman_khar", 3, 2); unit("u_archer_thal", 4, 3); unit("u_axeman_barb", 5, 3); unit("u_settler_sylv", 1, 3); unit("u_chariot_aur", 2, 4)
+  unit("u_hoplite", "aur", 2, 2); unit("u_horseman", "khar", 3, 2); unit("u_archer", "thal", 4, 3); unit("u_axeman", "barb", 5, 3); unit("u_settler", "sylv", 1, 3); unit("u_chariot", "aur", 2, 4)
   flat("hex_cursor", 2, 2); flat("hex_move", 1, 2); flat("hex_attack", 3, 2)
   const [fx, fy] = hx(0, 4); c.stamp("fog", fx - 2, fy - 2); const [gx, gy] = hx(0, 3); c.stamp("fog", gx - 2, gy - 2)
 })

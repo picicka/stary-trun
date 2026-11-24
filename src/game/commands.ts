@@ -9,7 +9,7 @@ import {
   planResearch, previewAttack, promote, promoteUnit, roadStep, startWork, stopUnit, unitById, unitsOf, updateVisibility, upgradeBlock, upgradeUnit,
 } from './rules.ts'
 import { endTurn } from './state.ts'
-import { BARB, type BuildItem, type GameState, type JobId } from './types.ts'
+import { barbId, type BuildItem, type GameState, type JobId } from './types.ts'
 
 export type Command =
   /** Pohyb na pole (i na více tahů). `todo` = co udělat po příchodu: práce dělníků, nebo založení města. */
@@ -147,7 +147,7 @@ export function exec(s: GameState, pid: number, c: Command): Result {
     case 'endTurn': endTurn(s); return OK
     case 'war': case 'peace': case 'diplo': {
       const they = s.players[c.vs]
-      if (!they || c.vs === pid || c.vs === BARB || !they.alive) return no()
+      if (!they || c.vs === pid || c.vs === barbId(s) || !they.alive) return no()
       if (c.t === 'war') { if (atWar(s, pid, c.vs)) return no(); declareWar(s, pid, c.vs); return OK }
       if (c.t === 'peace') {
         if (!atWar(s, pid, c.vs)) return no()
@@ -167,7 +167,7 @@ export function exec(s: GameState, pid: number, c: Command): Result {
       if (c.kind === 'sell') return sellResource(s, c.vs, c.arg as ResourceId, pid)
       if (c.kind === 'buy') return buyResource(s, c.vs, c.arg as ResourceId, pid)
       const foe = Number(c.arg)
-      if (!s.players[foe] || foe === pid || foe === c.vs || foe === BARB) return no()
+      if (!s.players[foe] || foe === pid || foe === c.vs || foe === barbId(s)) return no()
       return askAlliance(s, c.vs, foe, pid)
     }
     case 'answer': {

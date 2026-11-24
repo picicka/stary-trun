@@ -29,14 +29,15 @@ pal({
 ramps("kJHGngmh", "kQPjpq", "kZSsz", "kKeA", "kEBblL", "kUTtuWw", "kOoiI", "kCcv", "kRra", "kYyx",
   "kFf", "kDd", "kXV", "k21", "kMN")
 
-const NATIONS = {
+// Jednotky a města se kreslí JEN JEDNOU se zástupnými barvami N/M; barvy národů dosazuje až hra
+// (src/view/nationArt.ts podle NATIONS v src/game/data.ts). Tahle tabulka slouží jen náhledům v demo.px.js.
+const PREVIEW_NATIONS = {
   aur: { N: "#f2c230", M: "#b8791e" },
   khar: { N: "#d6453d", M: "#8a2433" },
   thal: { N: "#3aa0d8", M: "#235a94" },
   sylv: { N: "#a05ad6", M: "#5f2f94" },
   barb: { N: "#5a5a66", M: "#2c2c36" },
 }
-const CITY_NATIONS = ["aur", "khar", "thal", "sylv"]
 
 // ---- hex geometry
 const inHex = (x, y) => { const h = y < 8 ? 1 + 2 * y : y > 23 ? 1 + 2 * (31 - y) : 16; return x >= 16 - h && x < 16 + h }

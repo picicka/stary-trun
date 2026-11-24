@@ -7,6 +7,10 @@ import './style.css'
 import Phaser from 'phaser'
 import { MapScene } from './view/MapScene.ts'
 import { App } from './app.ts'
+import { loadNationArt } from './view/nationArt.ts'
+
+// Ikony jednotek v barvách národů potřebuje už úvodní menu i mapa, proto se čeká před jejich vznikem.
+await loadNationArt().catch(e => console.error('Nepodařilo se připravit barvy národů', e))
 
 const scene = new MapScene()
 const game = new Phaser.Game({

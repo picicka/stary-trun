@@ -9,7 +9,7 @@ import {
   isNaval, traditionReady, tileJobs, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
   type PathMap,
 } from './game/rules.ts'
-import { clearSave, createGame, loadGame, saveGame } from './game/state.ts'
+import { clearSave, createGame, loadGame, saveGame, type GameOptions } from './game/state.ts'
 import type { BuildItem, City, GameState, JobId, Unit } from './game/types.ts'
 import { sfx, unlockAudio } from './audio.ts'
 import { Hud } from './ui/hud.ts'
@@ -55,10 +55,10 @@ export class App implements MapHost {
 
   // ------------------------------------------------------------ start
 
-  /** Nová hra; víc národů = víc lidských hráčů, kteří se střídají u jednoho počítače. */
-  newGame(nations: NationId[], difficulty: Difficulty, scenario: ScenarioId = 'valley'): void {
-    // Pokaždé jiné startovní místo ze tří.
-    this.begin(createGame(nations[0], difficulty, scenario, undefined, Math.floor(Math.random() * 3), nations.slice(1)))
+  /** Nová hra; víc národů v `nations` = víc lidských hráčů, kteří se střídají u jednoho počítače. */
+  newGame(nations: NationId[], difficulty: Difficulty, scenario: ScenarioId = 'valley', opts: GameOptions = {}, seed?: number): void {
+    // Pokaždé jiné startovní místo.
+    this.begin(createGame(nations[0], difficulty, scenario, seed, Math.floor(Math.random() * 8), nations.slice(1), opts))
     if (this.hotseat) this.handover(() => this.hud.showBriefing())
     else this.hud.showBriefing()
   }

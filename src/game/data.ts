@@ -5,18 +5,18 @@ export type ScenarioId = 'valley' | 'islands' | 'random'
 export interface ScenarioDef { name: string; short: string; desc: string; intro: string; inPlace: string; over: string; ruinsWhere: string }
 export const SCENARIOS: Record<ScenarioId, ScenarioDef> = {
   valley: {
-    name: 'Údolí Starého trůnu', short: 'Údolí', desc: 'Ručně navržená mapa: jeden kontinent, tři kouty oddělené horami s průsmyky, ruiny uprostřed. Vyvážená mise pro první hru; ve kterém koutě začnete, je pokaždé jiné.',
-    intro: 'přivádí svůj lid do jednoho ze tří úrodných koutů údolí. Za horami se ale usazují další dva národy se stejným cílem.',
+    name: 'Údolí Starého trůnu', short: 'Údolí', desc: 'Ručně navržená mapa: jeden kontinent, úrodné kouty oddělené horami s průsmyky, ruiny uprostřed. Vyvážená mise pro první hru; ve kterém koutě začnete, je pokaždé jiné.',
+    intro: 'přivádí svůj lid do jednoho z úrodných koutů údolí. Za horami se ale usazují další národy se stejným cílem.',
     inPlace: 'v Údolí', over: 'Nad Údolím Starého trůnu', ruinsWhere: 'uprostřed údolí',
   },
   islands: {
-    name: 'Souostroví Sedmi větrů', short: 'Souostroví', desc: 'Každý národ začíná na jednom ze tří velkých ostrovů (pokaždé na jiném) a všichni už umějí plout. K ruinám, k soupeřům i na menší ostrovy se dostanete jen po moři; piráti tu mají žně.',
-    intro: 'přistává se svým lidem na jednom z velkých ostrovů. Na dalších dvou se usazují soupeři a o prostřední ostrov s ruinami se strhne závod po moři.',
+    name: 'Souostroví Sedmi větrů', short: 'Souostroví', desc: 'Každý národ začíná na jednom z velkých ostrovů (pokaždé na jiném) a všichni už umějí plout. K ruinám, k soupeřům i na menší ostrovy se dostanete jen po moři; piráti tu mají žně.',
+    intro: 'přistává se svým lidem na jednom z velkých ostrovů. Na dalších se usazují soupeři a o prostřední ostrov s ruinami se strhne závod po moři.',
     inPlace: 'v Souostroví', over: 'Nad Souostrovím Sedmi větrů', ruinsWhere: 'na prostředním ostrově',
   },
   random: {
     name: 'Neznámá země', short: 'Neznámá země', desc: 'Pokaždé jiná, náhodně vytvořená země. Nevíte, kde leží moře, hory ani soupeři – průzkum je tu důležitější než kdekoli jinde.',
-    intro: 'vede svůj lid do země, kterou nikdo nezmapoval. Někde v ní hledají nový domov i další dva národy.',
+    intro: 'vede svůj lid do země, kterou nikdo nezmapoval. Někde v ní hledají nový domov i další národy.',
     inPlace: 'v této zemi', over: 'Nad Neznámou zemí', ruinsWhere: 'kdesi mezi vámi a soupeři',
   },
 }
@@ -25,10 +25,11 @@ export const SCENARIO_IDS = Object.keys(SCENARIOS) as ScenarioId[]
 export type TerrainId = 'ocean' | 'coast' | 'grass' | 'plains' | 'desert' | 'hills' | 'mountain'
 export type ResourceId = 'wheat' | 'horses' | 'iron' | 'gold' | 'stone' | 'fish' | 'deer'
 export type ImprovementId = 'farm' | 'mine' | 'pasture' | 'lumber'
-export type NationId = 'aur' | 'khar' | 'thal' | 'sylv' | 'barb'
+export type NationId = 'aur' | 'khar' | 'thal' | 'sylv' | 'tark' | 'zahi' | 'morv' | 'lume' | 'barb'
 export type UnitId =
   | 'settler' | 'worker' | 'scout' | 'warrior' | 'spearman' | 'archer' | 'horseman'
   | 'swordsman' | 'catapult' | 'chariot' | 'axeman' | 'hoplite' | 'hunter' | 'galley' | 'trireme'
+  | 'raider' | 'camel' | 'ballista' | 'templar'
 export type BuildingId =
   | 'monument' | 'granary' | 'workshop' | 'market' | 'library' | 'walls' | 'barracks'
   | 'temple' | 'aqueduct' | 'academy' | 'court' | 'harbor' | 'wonder'
@@ -151,6 +152,10 @@ export const UNITS: Record<UnitId, UnitDef> = {
   chariot: { name: 'Válečný vůz', desc: 'Rychlý střelecký vůz. Nepotřebuje koně.', cost: 54, move: 4, str: 7, ranged: 9, range: 2, mounted: true, tech: 'riding', replaces: 'horseman', nation: 'aur' },
   axeman: { name: 'Sekerník', desc: 'Silnější než šermíř a nepotřebuje železo.', cost: 58, move: 2, str: 16, tech: 'iron', replaces: 'swordsman', nation: 'khar' },
   hoplite: { name: 'Hoplít', desc: 'Odolná falanga, +50 % proti jízdě.', cost: 42, move: 2, str: 13, tech: 'bronze', antiMounted: true, replaces: 'spearman', nation: 'thal' },
+  raider: { name: 'Nájezdník', desc: 'Lehká stepní jízda: levnější a silnější než jezdec. Vyžaduje koně.', cost: 50, move: 4, str: 13, mounted: true, tech: 'riding', needs: 'horses', replaces: 'horseman', nation: 'tark' },
+  camel: { name: 'Velbloudí střelec', desc: 'Střelec v sedle: rychlejší než lučištník, zblízka slabý.', cost: 42, move: 3, str: 6, ranged: 8, range: 2, mounted: true, tech: 'archery', replaces: 'archer', nation: 'zahi' },
+  ballista: { name: 'Balista', desc: 'Obléhací stroj s dostřelem 3 pole, dvojnásobný účinek proti městům.', cost: 76, move: 2, str: 4, ranged: 9, range: 3, tech: 'math', siege: true, replaces: 'catapult', nation: 'morv' },
+  templar: { name: 'Chrámová stráž', desc: 'Pěchota místo válečníka: na vlastním území se brání o 25 % lépe.', cost: 30, move: 2, str: 9, upgrade: ['swordsman', 'spearman'], replaces: 'warrior', nation: 'lume' },
   hunter: { name: 'Lovec', desc: 'Rychlý lučištník s delším rozhledem.', cost: 40, move: 3, str: 6, ranged: 9, range: 2, tech: 'archery', replaces: 'archer', nation: 'sylv', sight: 3 },
   galley: { name: 'Galéra', desc: 'Válečná loď pro boj zblízka. Pluje jen po pobřežních vodách, útočí na lodě a naloděné jednotky.', cost: 46, move: 4, str: 11, tech: 'sailing', naval: true, upgrade: ['trireme'] },
   trireme: { name: 'Triéra', desc: 'Těžká loď se střelci: střílí na 2 pole, i na břeh a na města. Smí na oceán.', cost: 76, move: 5, str: 12, ranged: 11, range: 2, tech: 'navigation', naval: true, ocean: true, sight: 3 },
@@ -217,6 +222,8 @@ export interface NationDef {
   unique: UnitId
   lore: string
   cities: string[]
+  /** Povaha národa, když ho vede počítač. */
+  temper: 'aggressive' | 'builder'
 }
 
 export const NATIONS: Record<NationId, NationDef> = {
@@ -226,7 +233,7 @@ export const NATIONS: Record<NationId, NationDef> = {
     trait: 'Dar řeky', traitDesc: 'Farmy dávají +1 jídlo a města potřebují k růstu o 15 % méně jídla.',
     unique: 'chariot',
     lore: 'Lid z říčních niv, který měří čas podle záplav a slunce. Jejich města rostou rychleji než kterákoli jiná.',
-    cities: ['Aur-Sethet', 'Nehabu', 'Tamarit', 'Sehem', 'Iunet', 'Kepra', 'Meruat', 'Hatanu'],
+    cities: ['Aur-Sethet', 'Nehabu', 'Tamarit', 'Sehem', 'Iunet', 'Kepra', 'Meruat', 'Hatanu'], temper: 'builder',
   },
   khar: {
     name: 'Kharové', adjective: 'kharský', leader: 'Borgun Železná pěst', title: 'Náčelník Devíti štítů',
@@ -234,7 +241,7 @@ export const NATIONS: Record<NationId, NationDef> = {
     trait: 'Synové hor', traitDesc: 'Pahorkatina nezpomaluje pohyb, doly dávají +1 výrobu a v kopcích bojují o 15 % lépe.',
     unique: 'axeman',
     lore: 'Horalé z průsmyků, kováři a nájezdníci. Co nevykutají ze skály, to si vezmou sekerou.',
-    cities: ['Khar-Dum', 'Grimvar', 'Skaldheim', 'Torvak', 'Uldren', 'Brakka', 'Durnholt', 'Varguz'],
+    cities: ['Khar-Dum', 'Grimvar', 'Skaldheim', 'Torvak', 'Uldren', 'Brakka', 'Durnholt', 'Varguz'], temper: 'aggressive',
   },
   thal: {
     name: 'Thalassové', adjective: 'thalasský', leader: 'Meliton Výmluvný', title: 'Archón přístavů',
@@ -242,7 +249,7 @@ export const NATIONS: Record<NationId, NationDef> = {
     trait: 'Vládci vln', traitDesc: 'Začínají s Plavbou. Pobřežní vody dávají +1 zlato, lodě mají +1 pohyb a rodí se zkušené, naloděné jednotky plují rychleji a brání se dvojnásob. Nákup za zlato je o 30 % levnější.',
     unique: 'hoplite',
     lore: 'Kupci a mořeplavci z bílých přístavů. Kde jiní vidí konec světa, oni vidí cestu – a svá města stavějí tam, kde kotví lodě.',
-    cities: ['Thalassa', 'Korinea', 'Myrena', 'Pelagos', 'Aigion', 'Delphara', 'Naxira', 'Halike'],
+    cities: ['Thalassa', 'Korinea', 'Myrena', 'Pelagos', 'Aigion', 'Delphara', 'Naxira', 'Halike'], temper: 'builder',
   },
   sylv: {
     name: 'Sylvané', adjective: 'sylvanský', leader: 'Ysmera Tichá', title: 'Strážkyně Nočního hvozdu',
@@ -250,15 +257,49 @@ export const NATIONS: Record<NationId, NationDef> = {
     trait: 'Lesní stezky', traitDesc: 'Les nezpomaluje pohyb, lesní pole dávají +1 výrobu a v lese se brání o 25 % lépe.',
     unique: 'hunter',
     lore: 'Lid Nočního hvozdu, lovci pod fialovými prapory. Les je jejich hradbou i zbrojnicí.',
-    cities: ['Sylvaren', 'Elowen', 'Mirthal', 'Nyvara', 'Caelwood', 'Thornhal', 'Lunaris', 'Verdan'],
+    cities: ['Sylvaren', 'Elowen', 'Mirthal', 'Nyvara', 'Caelwood', 'Thornhal', 'Lunaris', 'Verdan'], temper: 'aggressive',
+  },
+  tark: {
+    name: 'Tarkové', adjective: 'tarkský', leader: 'Batu Rudý vítr', title: 'Chán Tisíce kopyt',
+    color: 0xf08a2c, colorDark: 0xa8551a, css: '#f59a44',
+    trait: 'Děti stepi', traitDesc: 'Jízdní jednotky mají +1 pohyb a ohrady dávají +1 jídlo.',
+    unique: 'raider',
+    lore: 'Jezdci z nekonečných plání, kteří se rodí v sedle. Jejich stany stojí tam, kde se pasou stáda, a jejich hranice sahají tam, kam dojede kůň.',
+    cities: ['Tark-Ordu', 'Sarai', 'Kumyz', 'Altan', 'Borte', 'Ulgen', 'Kharkol', 'Temuz'], temper: 'aggressive',
+  },
+  zahi: {
+    name: 'Zahirové', adjective: 'zahirský', leader: 'Samira Hvězdná', title: 'Paní karavan',
+    color: 0x2fc7a8, colorDark: 0x1a7f74, css: '#3fd7b8',
+    trait: 'Karavanní stezky', traitDesc: 'Pouštní pole dávají +1 zlato a obchod se surovinami vynáší o 1 zlato za tah víc.',
+    unique: 'camel',
+    lore: 'Kupci z oáz, kteří čtou cestu ve hvězdách. Kde jiní vidí jen písek, oni vedou karavany a počítají zisk.',
+    cities: ['Zahira', 'Qasr-Nur', 'Tamrit', 'Bahar', 'Sidrah', 'Mirzan', 'Wadiya', 'Ashkal'], temper: 'builder',
+  },
+  morv: {
+    name: 'Morvané', adjective: 'morvanský', leader: 'Hradimír Kamenný', title: 'Strážce Bílé zdi',
+    color: 0xe8e6d8, colorDark: 0x9a9788, css: '#eeeadc',
+    trait: 'Kamenné základy', traitDesc: 'Budovy jsou o 15 % levnější, kámen dává +1 výrobu a města se brání o 25 % lépe.',
+    unique: 'ballista',
+    lore: 'Kameníci a stavitelé z bílých lomů. Nespěchají, ale co postaví, to stojí – a kdo se o jejich zdi opře, ten si vyláme zuby.',
+    cities: ['Morvahrad', 'Bělá', 'Kamenec', 'Skalná', 'Vysoká Brána', 'Lomnice', 'Opuka', 'Starý Val'], temper: 'builder',
+  },
+  lume: {
+    name: 'Lumenové', adjective: 'lumenský', leader: 'Iskra Vědoucí', title: 'Opatrovnice Tisíce svitků',
+    color: 0xf06aa8, colorDark: 0xa83a70, css: '#f47fb6',
+    trait: 'Světlo poznání', traitDesc: 'Knihovny a chrámy dávají +2 vědu a +1 kulturu.',
+    unique: 'templar',
+    lore: 'Učenci a mystici z klášterů na útesech. Věří, že říši neudrží meč, ale paměť – a tak zapisují všechno, i své nepřátele.',
+    cities: ['Lumenar', 'Svitava', 'Auriel', 'Tichá Věž', 'Miralis', 'Noctua', 'Sedmihvězd', 'Elysar'], temper: 'builder',
   },
   barb: {
     name: 'Barbaři', adjective: 'barbarský', leader: '', title: '',
     color: 0x5a5a66, colorDark: 0x2c2c36, css: '#8a8a96',
-    trait: '', traitDesc: '', unique: 'warrior', lore: '', cities: [],
+    trait: '', traitDesc: '', unique: 'warrior', lore: '', cities: [], temper: 'aggressive',
   },
 }
-export const PLAYABLE: NationId[] = ['aur', 'khar', 'thal', 'sylv']
+export const PLAYABLE: NationId[] = ['aur', 'khar', 'thal', 'sylv', 'tark', 'zahi', 'morv', 'lume']
+/** Nejvíc národů v jedné hře (bez barbarů). */
+export const MAX_NATIONS = 8
 
 export type Difficulty = 'easy' | 'normal' | 'hard'
 export interface DifficultyDef { name: string; desc: string; aiMult: number; barbEvery: number; aiAggro: number; aiExtra: number }

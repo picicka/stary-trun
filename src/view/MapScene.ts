@@ -5,6 +5,7 @@ import { ROW_H, TILE_W, hexCenter, neighborXY, pixelToHex } from '../game/hex.ts
 import { atWar, hasRoad, idx, inMap, isCivilian, resourceVisible, isEmbarked } from '../game/rules.ts'
 import type { GameEvent, GameState, Unit } from '../game/types.ts'
 import { sfx } from '../audio.ts'
+import { addNationFrames } from './nationArt.ts'
 
 export interface MapHost {
   state: GameState
@@ -49,6 +50,7 @@ export class MapScene extends Phaser.Scene {
   }
 
   create(): void {
+    addNationFrames(this.textures, A) // u_<typ>_<národ>, city_<n>_<národ> přebarvené za běhu
     const mk = (key: string, prefix: string, n: number, rate: number, repeat = -1) => {
       if (this.anims.exists(key)) return
       this.anims.create({ key, frames: this.anims.generateFrameNames(A, { prefix, start: 0, end: n - 1 }), frameRate: rate, repeat })

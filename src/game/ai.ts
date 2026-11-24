@@ -9,7 +9,7 @@ import {
   canWork, hasRoad, hasTech, isEmbarked, resourceCap, resourceVisible, unitsNeeding, upgradeBlock, upgradeCost, upgradeUnit,
   type PathMap,
 } from './rules.ts'
-import { BARB, type BuildItem, type City, type GameState, type Player, type Unit } from './types.ts'
+import { barbId, type BuildItem, type City, type GameState, type Player, type Unit } from './types.ts'
 
 const RESEARCH: Record<string, TechId[]> = {
   builder: ['agriculture', 'pottery', 'mining', 'husbandry', 'archery', 'writing', 'bronze', 'wheel', 'mysticism', 'masonry', 'currency', 'philosophy', 'math', 'astronomy', 'sailing', 'forestry', 'construction', 'iron', 'tactics', 'riding', 'irrigation', 'navigation', 'law'],
@@ -54,7 +54,7 @@ function aiResearch(s: GameState, p: Player): void {
 // ---------------------------------------------------------------- diplomacie
 
 function majors(s: GameState, p: Player): Player[] {
-  return s.players.filter(q => q.id !== p.id && q.id !== BARB && q.alive)
+  return s.players.filter(q => q.id !== p.id && q.id !== barbId(s) && q.alive)
 }
 
 export function warDuration(s: GameState, p: Player): number { return s.turn - p.lastWarTurn }
@@ -99,6 +99,8 @@ function aiDiplomacy(s: GameState, p: Player): void {
     if (q.human && s.difficulty === 'easy' && s.turn < 45 && !qWonder) want = false
     // Dobré vztahy válku oddalují.
     if (want && q.human && p.attitude[q.id] >= 15 && !qWonder && rand(s) < 0.6) want = false
+    // Kdo drží většinu sídel a blíží se vítězství dobytím, proti tomu se zvedne každý, kdo může.
+    if (s.conquest?.by === q.id && myMil >= 2) want = true
     if (want) declareWar(s, p.id, q.id)
   }
   // Žádost o pomoc: soupeř ve válce s jiným národem zve hráče do spojenectví.
@@ -273,7 +275,7 @@ function threatNear(s: GameState, pid: number, x: number, y: number, r: number):
 }
 
 function aiCityBuild(s: GameState, p: Player, c: City): void {
-  if (c.build && c.prod >= itemCost(c.build) * 0.2) return
+  if (c.build && c.prod >= itemCost(c.build, p) * 0.2) return
   const cities = citiesOf(s, p.id)
   const units = unitsOf(s, p.id)
   const mil = units.filter(u => !isCivilian(u) && !isNaval(u) && u.type !== 'scout').length
@@ -468,7 +470,7 @@ function aiMilitary(s: GameState, p: Player): void {
     // Nepřítel poblíž vlastního území má přednost.
     let foe: Unit | null = null, fd = Infinity
     for (const o of s.units) {
-      if (isCivilian(o) && o.owner === BARB) continue
+      if (isCivilian(o) && o.owner === barbId(s)) continue
       if (!atWar(s, pid, o.owner) || !p.visible[idx(s, o.x, o.y)]) continue
       const d = hexDist(u.x, u.y, o.x, o.y)
       const own = near ? hexDist(near.x, near.y, o.x, o.y) : 99
@@ -596,12 +598,12 @@ function explore(s: GameState, p: Player, u: Unit): boolean {
 
 export function barbTurn(s: GameState): void {
   const diff = DIFFICULTY[s.difficulty]
-  updateVisibility(s, BARB)
+  updateVisibility(s, barbId(s))
   // Posily z táborů.
   for (let i = 0; i < s.tiles.length; i++) {
     if (s.tiles[i].special !== 'camp') continue
     const x = i % s.W, y = (i / s.W) | 0
-    const mine = s.units.filter(u => u.owner === BARB && u.home === i)
+    const mine = s.units.filter(u => u.owner === barbId(s) && u.home === i)
     const guard = militaryAt(s, x, y)
     const cap = 2 + (s.turn > 50 ? 1 : 0)
     const due = (s.turn + i) % diff.barbEvery === 0
@@ -610,7 +612,7 @@ export function barbTurn(s: GameState): void {
       if (!spot) for (const n of neighbors(s, x, y)) { if (TERRAIN[s.tiles[idx(s, n[0], n[1])].t].passable && !unitsAt(s, n[0], n[1]).length && !cityAt(s, n[0], n[1])) { spot = n; break } }
       if (spot) {
         const pool: UnitId[] = s.turn < 28 ? ['warrior', 'warrior', 'archer'] : s.turn < 65 ? ['warrior', 'spearman', 'archer', 'spearman'] : ['spearman', 'swordsman', 'archer', 'horseman']
-        const u = makeUnit(s, BARB, pool[randInt(s, pool.length)], spot[0], spot[1])
+        const u = makeUnit(s, barbId(s), pool[randInt(s, pool.length)], spot[0], spot[1])
         u.home = i
         emit({ e: 'spawn', unit: u.id, x: u.x, y: u.y })
       }
@@ -619,7 +621,7 @@ export function barbTurn(s: GameState): void {
   const raidEvery = s.difficulty === 'easy' ? 22 : s.difficulty === 'normal' ? 15 : 11
   if (s.turn >= 30 && s.turn % raidEvery === 0) seaRaid(s)
   const reach = s.difficulty === 'easy' ? 4 : s.difficulty === 'normal' ? 6 : 7
-  for (const u of unitsOf(s, BARB)) {
+  for (const u of unitsOf(s, barbId(s))) {
     if (!s.units.includes(u)) continue
     const water = isWater(s.tiles[idx(s, u.x, u.y)])
     if (u.sea && !water) u.sea = false
@@ -629,7 +631,7 @@ export function barbTurn(s: GameState): void {
       if (tryAttack(s, u, 3)) continue
       let prey: Unit | null = null, pd = Infinity
       if (naval) for (const o of s.units) {
-        if (o.owner === BARB || !isWater(s.tiles[idx(s, o.x, o.y)])) continue
+        if (o.owner === barbId(s) || !isWater(s.tiles[idx(s, o.x, o.y)])) continue
         const d = hexDist(u.x, u.y, o.x, o.y)
         if (d <= 6 && d < pd) { pd = d; prey = o }
       }
@@ -651,7 +653,7 @@ export function barbTurn(s: GameState): void {
     let tx = -1, ty = -1, td = Infinity
     if (s.turn > 6) {
       for (const o of s.units) {
-        if (o.owner === BARB) continue
+        if (o.owner === barbId(s)) continue
         const d = hexDist(u.x, u.y, o.x, o.y) - (isCivilian(o) ? 1 : 0)
         if (d <= reach && d < td) { td = d; tx = o.x; ty = o.y }
       }
@@ -676,7 +678,7 @@ export function barbTurn(s: GameState): void {
 
 /** Nájezd z moře: pirátská galéra a člun s nájezdníky se objeví u pobřežního města. */
 function seaRaid(s: GameState): void {
-  if (unitsOf(s, BARB).filter(isNaval).length >= 3) return
+  if (unitsOf(s, barbId(s)).filter(isNaval).length >= 3) return
   // Cílem jsou města u moře i kousek ve vnitrozemí – nájezdníci k nim dojdou pěšky.
   const targets = s.cities.filter(c => tilesWithin(s, c.x, c.y, 4).some(([x, y]) => s.tiles[idx(s, x, y)].t === 'coast'))
   if (!targets.length) return
@@ -688,11 +690,11 @@ function seaRaid(s: GameState): void {
   if (!spots.length) return
   const first = spots[randInt(s, spots.length)]
   const near = spots.filter(p => hexDist(p[0], p[1], first[0], first[1]) === 1)
-  const ship = makeUnit(s, BARB, 'galley', first[0], first[1])
+  const ship = makeUnit(s, barbId(s), 'galley', first[0], first[1])
   emit({ e: 'spawn', unit: ship.id, x: ship.x, y: ship.y })
   const crew: UnitId[] = s.turn < 55 ? ['warrior'] : s.turn < 85 ? ['spearman', 'warrior'] : ['swordsman', 'spearman']
   crew.slice(0, near.length).forEach((type, k) => {
-    const u = makeUnit(s, BARB, type, near[k][0], near[k][1])
+    const u = makeUnit(s, barbId(s), type, near[k][0], near[k][1])
     u.sea = true
     emit({ e: 'spawn', unit: u.id, x: u.x, y: u.y })
   })

@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createGame, deserialize, serialize } from '../src/game/state.ts'
 import { exec, type Command } from '../src/game/commands.ts'
-import { atWar, availableTechs, checkVictory, citiesOf, drainEvents, score, unitsOf } from '../src/game/rules.ts'
-import { BARB, type GameOver, type GameState } from '../src/game/types.ts'
+import { atWar, availableTechs, checkVictory, citiesOf, CONQUEST_TURNS, drainEvents, foundCity, score, seatCount, unitsOf } from '../src/game/rules.ts'
+import { barbId, type GameOver, type GameState } from '../src/game/types.ts'
 
 const settler = (s: GameState, pid: number) => unitsOf(s, pid).find(u => u.type === 'settler')!
 
@@ -12,7 +12,7 @@ test('více hráčů: lidé mají první místa, zbytek vede počítač', () => 
   assert.deepEqual(two.players.map(p => p.human), [true, true, false, false])
   assert.deepEqual(two.players.map(p => p.nation).slice(0, 2), ['aur', 'khar'])
   assert.equal(two.players[2].nation, 'sylv')
-  assert.equal(two.players[BARB].nation, 'barb')
+  assert.equal(two.players[barbId(two)].nation, 'barb')
   const three = createGame('aur', 'normal', 'valley', undefined, 0, ['khar', 'thal'])
   assert.deepEqual(three.players.map(p => p.human), [true, true, true, false])
   for (const pid of [0, 1, 2]) assert.ok(settler(three, pid), `hráč ${pid} má osadníky`)
@@ -164,4 +164,59 @@ test('uložená hra jednoho hráče ze starší verze se načte', () => {
   assert.equal(t.offers[0].to, 0)
   assert.deepEqual(t.popups, [])
   assert.ok(exec(t, 0, { t: 'endTurn' }).ok)
+})
+
+test('dobytí: většinu cizích sídel je třeba držet pět tahů', () => {
+  const s = createGame('aur', 'normal')
+  for (const pid of [0, 1, 2]) foundCity(s, settler(s, pid))
+  const seat = (pid: number) => s.cities.find(c => c.seat === pid)!
+  // Jedno sídlo ze dvou většina není.
+  seat(1).owner = 0
+  checkVictory(s)
+  assert.equal(s.conquest ?? null, null)
+  assert.deepEqual(seatCount(s, 0), { held: 1, need: 2, total: 2 })
+  // Obě sídla: začíná odpočet, hra ještě nekončí.
+  seat(2).owner = 0
+  checkVictory(s)
+  assert.equal(s.over, null)
+  assert.deepEqual(s.conquest, { by: 0, since: s.turn })
+  assert.ok(s.notes.some(n => n.pid === 0 && n.text.startsWith('Držíte většinu sídelních měst')))
+  // Soupeř sídlo dobude zpět: odpočet končí a příště běží od začátku.
+  s.turn += CONQUEST_TURNS - 1
+  seat(2).owner = 2
+  checkVictory(s)
+  assert.equal(s.conquest, null)
+  seat(2).owner = 0
+  checkVictory(s)
+  s.turn += CONQUEST_TURNS - 1
+  checkVictory(s)
+  assert.equal(s.over, null)
+  s.turn += 1
+  checkVictory(s)
+  const over = s.over as GameOver | null
+  assert.ok(over)
+  assert.equal(over.winner, 0)
+  assert.equal(over.kind, 'conquest')
+})
+
+test('dobytí: bez vlastního sídla většina neplatí a zvítězit může i soupeř vedený počítačem', () => {
+  const s = createGame('aur', 'normal')
+  for (const pid of [0, 1, 2]) foundCity(s, settler(s, pid))
+  const seat = (pid: number) => s.cities.find(c => c.seat === pid)!
+  // Hráč 0 má ještě druhé město, takže ztrátou sídla není vyřazen.
+  s.cities.push({ ...seat(0), id: s.nextId++, seat: -1, capital: false, name: 'Druhé město', x: 1, y: 1, worked: [] })
+  // Drží obě cizí sídla, ale o své přišel: většina se nepočítá.
+  seat(1).owner = 0; seat(2).owner = 0; seat(0).owner = 1
+  checkVictory(s)
+  assert.equal(s.conquest ?? null, null)
+  // Soupeř 1 drží svá i obě cizí sídla.
+  seat(1).owner = 1; seat(2).owner = 1
+  checkVictory(s)
+  assert.equal(s.conquest?.by, 1)
+  assert.ok(s.notes.some(n => n.pid === 0 && n.text.includes('drží většinu sídelních měst')))
+  s.turn += CONQUEST_TURNS
+  checkVictory(s)
+  const over = s.over as GameOver | null
+  assert.ok(over && !over.won)
+  assert.equal(over.winner, 1)
 })

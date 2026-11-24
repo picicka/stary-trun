@@ -157,6 +157,8 @@ export interface GameState {
   over: GameOver | null
   offers: PeaceOffer[]
   deals: Deal[]
+  /** Kdo drží většinu cizích sídelních měst a od kterého tahu (odpočet vítězství dobytím). */
+  conquest?: { by: number; since: number } | null
   /** Kdo vstoupil do kterého věku první (id hráče, index = věk). */
   eraFirst: number[]
   /** Zprávy, které má rozhraní ukázat hráči `pid` v okně (nový věk apod.). */
@@ -175,4 +177,5 @@ export type GameEvent =
   | { e: 'spawn'; unit: number; x: number; y: number }
   | { e: 'sound'; id: string }
 
-export const BARB = 3
+/** Id barbarů: vždy poslední hráč v seznamu, za všemi národy. */
+export const barbId = (s: { players: unknown[] }): number => s.players.length - 1

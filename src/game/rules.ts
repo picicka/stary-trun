@@ -5,7 +5,7 @@ import {
 } from './data.ts'
 import { hexDist, neighborXY } from './hex.ts'
 import { rand } from './rng.ts'
-import { BARB, type BuildItem, type City, type GameEvent, type GameState, type JobId, type Note, type Player, type Tile, type Unit } from './types.ts'
+import { barbId, type BuildItem, type City, type GameEvent, type GameState, type JobId, type Note, type Player, type Tile, type Unit } from './types.ts'
 
 // ---------------------------------------------------------------- události
 
@@ -84,7 +84,7 @@ export function canEnterTile(s: GameState, u: Unit, t: Tile): boolean {
     if (d.naval) return t.t === 'coast' || !!d.ocean
     const p = s.players[u.owner]
     if (!p.human && !u.sea) return false
-    if (u.owner === BARB) return t.t === 'coast'
+    if (u.owner === barbId(s)) return t.t === 'coast'
     return hasTech(p, t.t === 'coast' ? 'sailing' : 'navigation')
   }
   return !d.naval && TERRAIN[t.t].passable
@@ -97,12 +97,12 @@ export function embarkSpeed(p: Player): number { return (hasTech(p, 'navigation'
 export function maxMoves(s: GameState, u: Unit): number {
   const p = s.players[u.owner]
   if (isEmbarked(s, u)) return embarkSpeed(p)
-  return UNITS[u.type].move + (u.promos.includes('march') ? 1 : 0) + (isNaval(u) && p.nation === 'thal' ? 1 : 0) + (isNaval(u) && p.traditions.includes('sea') ? 1 : 0)
+  return UNITS[u.type].move + (u.promos.includes('march') ? 1 : 0) + (UNITS[u.type].mounted && p.nation === 'tark' ? 1 : 0) + (isNaval(u) && p.nation === 'thal' ? 1 : 0) + (isNaval(u) && p.traditions.includes('sea') ? 1 : 0)
 }
 
 export function atWar(s: GameState, a: number, b: number): boolean {
   if (a === b) return false
-  if (a === BARB || b === BARB) return true
+  if (a === barbId(s) || b === barbId(s)) return true
   return s.players[a].war.includes(b)
 }
 
@@ -163,14 +163,16 @@ export function tileYield(s: GameState, i: number, pid: number): Yields {
   const td = TERRAIN[t.t]
   let food = td.food, prod = td.prod, gold = td.gold
   if (t.forest) { food = Math.min(food, 1); prod += 1; if (nation === 'sylv') prod += 1 }
-  if (t.res && resourceVisible(p, t.res)) { const r = RESOURCES[t.res]; food += r.food; prod += r.prod; gold += r.gold }
+  if (t.res && resourceVisible(p, t.res)) { const r = RESOURCES[t.res]; food += r.food; prod += r.prod; gold += r.gold; if (t.res === 'stone' && nation === 'morv') prod += 1 }
   if (t.imp) {
     const im = IMPROVEMENTS[t.imp]
     food += im.food; prod += im.prod; gold += im.gold
     if (t.imp === 'farm') { if (nation === 'aur') food += 1; if (hasTech(p, 'irrigation')) food += 1 }
     if (t.imp === 'mine' && nation === 'khar') prod += 1
+    if (t.imp === 'pasture' && nation === 'tark') food += 1
   }
   if (t.t === 'coast' && nation === 'thal') gold += 1
+  if (t.t === 'desert' && nation === 'zahi') gold += 1
   if (t.river && td.land) gold += 1
   return { food, prod, gold }
 }
@@ -223,11 +225,12 @@ export function cityYields(s: GameState, c: City): CityYields {
   if (has('granary')) food += 2
   if (has('workshop')) prod += 2
   if (has('library')) sci += 2 + Math.floor(c.pop / 2)
+  if (p.nation === 'lume') sci += (has('library') ? 2 : 0) + (has('temple') ? 2 : 0)
   if (has('temple')) gold += 1
   if (has('academy')) sci = Math.round((sci + 3) * 1.25)
   if (has('court')) gold += 4
   if (has('market')) gold = Math.round((gold + 2) * 1.25)
-  if (!p.human && c.owner !== BARB) {
+  if (!p.human && c.owner !== barbId(s)) {
     const m = DIFFICULTY[s.difficulty].aiMult
     prod = Math.max(1, Math.round(prod * m)); sci = Math.max(1, Math.round(sci * m)); food = Math.round(food * (0.5 + m / 2))
   }
@@ -242,6 +245,7 @@ export function cultureSources(c: City, p?: Player, turn = 0): [string, number][
   if (c.capital) out.push(['Hlavní město', 1])
   if (c.buildings.includes('monument')) out.push(['Monument', 2])
   if (c.buildings.includes('temple')) out.push(['Chrám', 3])
+  if (p?.nation === 'lume') { const n = Number(c.buildings.includes('library')) + Number(c.buildings.includes('temple')); if (n) out.push(['Světlo poznání', n]) }
   if (c.buildings.includes('wonder')) out.push(['Sluneční chrám', 4])
   return out
 }
@@ -323,8 +327,8 @@ export function updateVisibility(s: GameState, pid: number): void {
   for (const u of s.units) if (u.owner === pid) see(u.x, u.y, UNITS[u.type].sight ?? 2)
   for (const c of s.cities) if (c.owner === pid) see(c.x, c.y, c.radius + 1)
   // Setkání s jinými národy.
-  if (pid !== BARB) {
-    for (const u of s.units) if (u.owner !== pid && u.owner !== BARB && p.visible[idx(s, u.x, u.y)]) meet(s, pid, u.owner)
+  if (pid !== barbId(s)) {
+    for (const u of s.units) if (u.owner !== pid && u.owner !== barbId(s) && p.visible[idx(s, u.x, u.y)]) meet(s, pid, u.owner)
     for (const c of s.cities) if (c.owner !== pid && p.visible[idx(s, c.x, c.y)]) meet(s, pid, c.owner)
   }
 }
@@ -472,7 +476,7 @@ export function pathTurns(s: GameState, u: Unit, path: [number, number][]): numb
   let turns = 0, moves = u.moves
   let cur = idx(s, u.x, u.y)
   const pl = s.players[u.owner]
-  const speed = (i: number) => (!isNaval(u) && isWater(s.tiles[i]) ? embarkSpeed(pl) : UNITS[u.type].move + (u.promos.includes('march') ? 1 : 0) + (isNaval(u) && pl.nation === 'thal' ? 1 : 0) + (isNaval(u) && pl.traditions.includes('sea') ? 1 : 0))
+  const speed = (i: number) => (!isNaval(u) && isWater(s.tiles[i]) ? embarkSpeed(pl) : UNITS[u.type].move + (u.promos.includes('march') ? 1 : 0) + (UNITS[u.type].mounted && pl.nation === 'tark' ? 1 : 0) + (isNaval(u) && pl.nation === 'thal' ? 1 : 0) + (isNaval(u) && pl.traditions.includes('sea') ? 1 : 0))
   for (const [x, y] of path) {
     const ni = idx(s, x, y)
     if (moves <= 0) { turns++; moves = speed(cur) }
@@ -553,7 +557,7 @@ function arrive(s: GameState, u: Unit): void {
   if (!isCivilian(u)) {
     for (const o of unitsAt(s, u.x, u.y)) {
       if (o.owner !== u.owner && isCivilian(o)) {
-        if (o.type === 'worker' && u.owner !== BARB) {
+        if (o.type === 'worker' && u.owner !== barbId(s)) {
           note(s, o.owner, 'Vaši dělníci byli zajati!', 'bad', o.x, o.y)
           note(s, u.owner, 'Zajali jste nepřátelské dělníky.', 'good', o.x, o.y)
           o.owner = u.owner; clearOrders(o); stopUnit(o); o.auto = false; o.sea = false; o.moves = 0
@@ -563,11 +567,11 @@ function arrive(s: GameState, u: Unit): void {
         }
       }
     }
-    if (t.special === 'camp' && u.owner !== BARB) {
+    if (t.special === 'camp' && u.owner !== barbId(s)) {
       t.special = null
       const pl = s.players[u.owner]
       pl.gold += 35
-      for (const b of s.units) if (b.owner === BARB && b.home === idx(s, u.x, u.y)) b.home = -1
+      for (const b of s.units) if (b.owner === barbId(s) && b.home === idx(s, u.x, u.y)) b.home = -1
       note(s, u.owner, 'Barbarský tábor vypálen! Kořist: 35 zlata.', 'good', u.x, u.y)
       emit({ e: 'sound', id: 'camp' })
       if (pl.human) {
@@ -580,7 +584,7 @@ function arrive(s: GameState, u: Unit): void {
       }
     }
   }
-  if (t.special === 'ruins' && u.owner !== BARB) {
+  if (t.special === 'ruins' && u.owner !== barbId(s)) {
     t.special = null
     s.mission.ruinsBy = u.owner
     const pl = s.players[u.owner]
@@ -612,7 +616,7 @@ export function grantTech(s: GameState, p: Player, t: TechId): void {
   p.techQueue = p.techQueue.filter(q => q !== t)
   nextResearch(p)
   if (p.human) emit({ e: 'sound', id: 'tech' })
-  if (p.id === BARB) return
+  if (p.id === barbId(s)) return
   if (p.human) {
     // Která vojska teď půjde přezbrojit.
     // Nově viditelné suroviny (železo po objevu bronzu).
@@ -706,6 +710,7 @@ export function cityStrength(s: GameState, c: City): number {
   let v = 7 + c.pop * 1.2 + s.players[c.owner].techs.length * 0.25
   if (c.buildings.includes('walls')) v *= 1.5
   if (s.players[c.owner].traditions.includes('militia')) v *= 1.25
+  if (s.players[c.owner].nation === 'morv') v *= 1.25
   const g = militaryAt(s, c.x, c.y)
   if (g && g.owner === c.owner) v += UNITS[g.type].str * 0.3
   return v
@@ -758,7 +763,12 @@ export function foundCity(s: GameState, u: Unit): City | null {
   return c
 }
 
-export function itemCost(it: BuildItem): number { return it.kind === 'unit' ? UNITS[it.id].cost : BUILDINGS[it.id].cost }
+/** Cena položky ve výrobě; s hráčem `p` včetně slevy jeho národa (Morvané stavějí budovy o 15 % levněji). */
+export function itemCost(it: BuildItem, p?: Player): number {
+  if (it.kind === 'unit') return UNITS[it.id].cost
+  const cost = BUILDINGS[it.id].cost
+  return p?.nation === 'morv' && it.id !== 'wonder' ? Math.round(cost * 0.85) : cost
+}
 export function itemName(it: BuildItem): string { return it.kind === 'unit' ? UNITS[it.id].name : BUILDINGS[it.id].name }
 
 export function canBuildUnit(s: GameState, c: City, id: UnitId): boolean {
@@ -852,7 +862,7 @@ function nextQueued(s: GameState, c: City): BuildItem | null {
 
 export function buyCost(s: GameState, c: City): number {
   if (!c.build) return 0
-  const left = Math.max(0, itemCost(c.build) - c.prod)
+  const left = Math.max(0, itemCost(c.build, s.players[c.owner]) - c.prod)
   const m = s.players[c.owner].nation === 'thal' ? 0.7 : 1
   return Math.ceil(left * 2.6 * m)
 }
@@ -867,7 +877,7 @@ export function canBuy(s: GameState, c: City): boolean {
 export function buy(s: GameState, c: City): boolean {
   if (!canBuy(s, c)) return false
   s.players[c.owner].gold -= buyCost(s, c)
-  c.prod = itemCost(c.build!)
+  c.prod = itemCost(c.build!, s.players[c.owner])
   completeBuild(s, c)
   return true
 }
@@ -917,7 +927,7 @@ function completeBuild(s: GameState, c: City): boolean {
     if (civ || s.players[c.owner].human || c.queue.length) c.build = nextQueued(s, c)
   } else {
     c.buildings.push(it.id)
-    c.prod -= BUILDINGS[it.id].cost
+    c.prod -= itemCost(it, s.players[c.owner])
     c.build = nextQueued(s, c)
     note(s, c.owner, `${c.name}: dokončena stavba ${BUILDINGS[it.id].name}.`, 'good', c.x, c.y)
     if (it.id === 'walls') c.hp = Math.min(cityMaxHp(c), c.hp + 60)
@@ -961,7 +971,7 @@ function processCity(s: GameState, c: City): void {
   }
   if (c.build) {
     c.prod += y.prod
-    if (c.prod >= itemCost(c.build)) completeBuild(s, c)
+    if (c.prod >= itemCost(c.build, p)) completeBuild(s, c)
   } else {
     // Bez zadání se výroba mění na zlato.
     p.gold += Math.floor(y.prod / 2)
@@ -1083,6 +1093,8 @@ export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): numb
     m += TERRAIN[t.t].defense
     if (t.forest) m += nation === 'sylv' ? 0.5 : 0.25
     if (u.fortified) m += 0.25
+    // Chrámová stráž brání domov.
+    if (u.type === 'templar' && t.owner === u.owner) m += 0.25
   }
   if (nation === 'khar' && t.t === 'hills') m += 0.15
   if (u.promos.includes(ctx.defending ? 'guard' : 'drill')) m += ctx.defending ? 0.2 : 0.15
@@ -1273,7 +1285,7 @@ function captureCity(s: GameState, c: City, by: Unit): void {
   const oldP = s.players[old], newP = s.players[by.owner]
   // Posádka i civilisté ve městě padnou.
   for (const o of unitsAt(s, c.x, c.y)) if (o.owner === old) killUnit(s, o)
-  if (by.owner === BARB) {
+  if (by.owner === barbId(s)) {
     // Barbaři města nedrží – vyplení je.
     c.hp = Math.floor(cityMaxHp(c) / 2)
     c.pop = Math.max(1, c.pop - 1)
@@ -1313,7 +1325,7 @@ function captureCity(s: GameState, c: City, by: Unit): void {
 
 function checkElimination(s: GameState, pid: number): void {
   const p = s.players[pid]
-  if (!p.alive || pid === BARB) return
+  if (!p.alive || pid === barbId(s)) return
   if (citiesOf(s, pid).length > 0) return
   if (s.units.some(u => u.owner === pid && u.type === 'settler')) return
   p.alive = false
@@ -1373,9 +1385,32 @@ export function score(s: GameState, pid: number): number {
   return Math.round(v)
 }
 
+/** Kolik tahů je třeba držet většinu cizích sídel k vítězství dobytím. */
+export const CONQUEST_TURNS = 5
+
+/** Původní sídelní města soupeřů hráče `pid`: kolik jich je a kolik jich hráč drží. */
+export function seatCount(s: GameState, pid: number): { held: number; need: number; total: number } {
+  const seats = s.cities.filter(c => c.seat >= 0 && c.seat !== pid)
+  return { held: seats.filter(c => c.owner === pid).length, need: Math.floor(seats.length / 2) + 1, total: seats.length }
+}
+
+function holdsMajority(s: GameState, pid: number): boolean {
+  const own = s.cities.find(c => c.seat === pid)
+  if (!own || own.owner !== pid) return false
+  const n = seatCount(s, pid)
+  return n.total > 0 && n.held >= n.need
+}
+
+function conquered(s: GameState, w: Player): void {
+  const sc = SCENARIOS[s.scenario], name = NATIONS[w.nation].name
+  s.over = w.human
+    ? { won: true, winner: w.id, kind: 'conquest', title: 'Vítězství – dobytí', text: `Sídla vašich soupeřů padla. ${sc.name} má jediného vládce a ${name} píší jeho zákony.`, other: `Sídla soupeřů padla. ${sc.name} má jediného vládce a zákony tu píší ${name}.` }
+    : { won: false, winner: w.id, kind: 'defeat', title: 'Porážka', text: `Sídla národů padla. ${sc.name} má jediného vládce a zákony tu píší ${name}.` }
+}
+
 export function checkVictory(s: GameState): void {
   if (s.over) return
-  const majors = s.players.filter(p => p.id !== BARB)
+  const majors = s.players.filter(p => p.id !== barbId(s))
   const sc = SCENARIOS[s.scenario]
   const nm = (p: Player) => NATIONS[p.nation].name
   // Div: kdo dostaví Sluneční chrám, vyhrává.
@@ -1394,14 +1429,18 @@ export function checkVictory(s: GameState): void {
     s.over = { won: false, winner: -1, kind: 'defeat', title: 'Porážka', text: 'Vaše poslední město padlo. Kronikáři o vašem lidu napíší jen krátkou poznámku.' }
     return
   }
-  // Dobytí: hráč drží sídelní města všech soupeřů.
-  for (const h of alive) {
-    const seatsHeld = majors.every(r => { if (r.id === h.id || !r.alive) return true; const c = s.cities.find(ct => ct.seat === r.id); return c ? c.owner === h.id : false })
-    if (seatsHeld && s.cities.some(c => c.owner === h.id)) {
-      s.over = { won: true, winner: h.id, kind: 'conquest', title: 'Vítězství – dobytí', text: `Sídla vašich soupeřů padla. ${sc.name} má jediného vládce a ${nm(h)} píší jeho zákony.`, other: `Sídla soupeřů padla. ${sc.name} má jediného vládce a zákony tu píší ${nm(h)}.` }
-      return
-    }
-  }
+  // Poslední národ na mapě vítězí hned.
+  const standing = majors.filter(p => p.alive)
+  if (standing.length === 1 && s.cities.some(c => c.owner === standing[0].id)) { conquered(s, standing[0]); return }
+  // Dobytí: národ drží vlastní sídlo a nadpoloviční většinu cizích sídelních měst po CONQUEST_TURNS tahů.
+  const holder = majors.find(p => p.alive && holdsMajority(s, p.id))
+  if (!holder) {
+    if (s.conquest) noteAll(s, `${nm(s.players[s.conquest.by])} přišli o většinu sídelních měst. Odpočet dobytí končí.`, 'info', undefined, undefined, { [s.conquest.by]: 'Přišli jste o většinu sídelních měst. Odpočet dobytí končí.' })
+    s.conquest = null
+  } else if (s.conquest?.by !== holder.id) {
+    s.conquest = { by: holder.id, since: s.turn }
+    noteAll(s, `${nm(holder)} drží většinu sídelních měst! Udrží-li je ${CONQUEST_TURNS} tahů, zvítězí dobytím.`, 'war', undefined, undefined, { [holder.id]: `Držíte většinu sídelních měst. Udržte je ${CONQUEST_TURNS} tahů a zvítězíte dobytím.` })
+  } else if (s.turn - s.conquest.since >= CONQUEST_TURNS) { conquered(s, holder); return }
   if (s.turn > s.maxTurns) {
     // Sláva: nejvyšší skóre; při shodě má přednost lidský hráč.
     const rank = majors.filter(p => p.alive).map(r => ({ r, v: score(s, r.id) })).sort((a, b) => b.v - a.v || Number(b.r.human) - Number(a.r.human) || a.r.id - b.r.id)
@@ -1466,7 +1505,7 @@ export function endPlayerTurn(s: GameState, pid: number): void {
       }
     }
   }
-  if (pid === BARB) return
+  if (pid === barbId(s)) return
   // Obchodní smlouvy: vyprší časem, nebo když prodávající o surovinu přijde.
   s.deals = s.deals.filter(d => {
     if (d.seller !== pid) return true

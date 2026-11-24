@@ -223,8 +223,8 @@
   },
   "t_ocean_1": {
    "frame": {
-    "x": 374,
-    "y": 0,
+    "x": 0,
+    "y": 34,
     "w": 32,
     "h": 32
    },
@@ -244,8 +244,8 @@
   },
   "t_ocean_2": {
    "frame": {
-    "x": 408,
-    "y": 0,
+    "x": 34,
+    "y": 34,
     "w": 32,
     "h": 32
    },
@@ -265,8 +265,8 @@
   },
   "t_ocean_3": {
    "frame": {
-    "x": 442,
-    "y": 0,
+    "x": 68,
+    "y": 34,
     "w": 32,
     "h": 32
    },
@@ -286,7 +286,7 @@
   },
   "t_coast_0": {
    "frame": {
-    "x": 0,
+    "x": 102,
     "y": 34,
     "w": 32,
     "h": 32
@@ -307,7 +307,7 @@
   },
   "t_coast_1": {
    "frame": {
-    "x": 34,
+    "x": 136,
     "y": 34,
     "w": 32,
     "h": 32
@@ -328,7 +328,7 @@
   },
   "t_coast_2": {
    "frame": {
-    "x": 68,
+    "x": 170,
     "y": 34,
     "w": 32,
     "h": 32
@@ -349,7 +349,7 @@
   },
   "t_coast_3": {
    "frame": {
-    "x": 102,
+    "x": 204,
     "y": 34,
     "w": 32,
     "h": 32
@@ -370,7 +370,7 @@
   },
   "t_mountain_1": {
    "frame": {
-    "x": 136,
+    "x": 238,
     "y": 34,
     "w": 32,
     "h": 48
@@ -390,7 +390,7 @@
   },
   "t_mountain_2": {
    "frame": {
-    "x": 170,
+    "x": 272,
     "y": 34,
     "w": 32,
     "h": 48
@@ -410,7 +410,7 @@
   },
   "f_forest_1": {
    "frame": {
-    "x": 204,
+    "x": 306,
     "y": 34,
     "w": 32,
     "h": 48
@@ -430,7 +430,7 @@
   },
   "f_forest_2": {
    "frame": {
-    "x": 238,
+    "x": 340,
     "y": 34,
     "w": 32,
     "h": 48
@@ -450,126 +450,6 @@
   },
   "f_ruins": {
    "frame": {
-    "x": 272,
-    "y": 34,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
-  "f_camp": {
-   "frame": {
-    "x": 306,
-    "y": 34,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
-  "f_wonder": {
-   "frame": {
-    "x": 340,
-    "y": 34,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
-  "i_farm": {
-   "frame": {
-    "x": 374,
-    "y": 34,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
-  "i_mine": {
-   "frame": {
-    "x": 408,
-    "y": 34,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
-  "i_pasture": {
-   "frame": {
-    "x": 442,
-    "y": 34,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
-  "i_lumber": {
-   "frame": {
     "x": 0,
     "y": 84,
     "w": 32,
@@ -588,7 +468,7 @@
     "h": 48
    }
   },
-  "city_1_aur": {
+  "f_camp": {
    "frame": {
     "x": 34,
     "y": 84,
@@ -608,7 +488,7 @@
     "h": 48
    }
   },
-  "city_2_aur": {
+  "f_wonder": {
    "frame": {
     "x": 68,
     "y": 84,
@@ -628,7 +508,7 @@
     "h": 48
    }
   },
-  "city_3_aur": {
+  "i_farm": {
    "frame": {
     "x": 102,
     "y": 84,
@@ -648,7 +528,7 @@
     "h": 48
    }
   },
-  "city_1_khar": {
+  "i_mine": {
    "frame": {
     "x": 136,
     "y": 84,
@@ -668,7 +548,7 @@
     "h": 48
    }
   },
-  "city_2_khar": {
+  "i_pasture": {
    "frame": {
     "x": 170,
     "y": 84,
@@ -688,7 +568,7 @@
     "h": 48
    }
   },
-  "city_3_khar": {
+  "i_lumber": {
    "frame": {
     "x": 204,
     "y": 84,
@@ -708,7 +588,7 @@
     "h": 48
    }
   },
-  "city_1_thal": {
+  "city_1": {
    "frame": {
     "x": 238,
     "y": 84,
@@ -728,7 +608,7 @@
     "h": 48
    }
   },
-  "city_2_thal": {
+  "city_2": {
    "frame": {
     "x": 272,
     "y": 84,
@@ -748,7 +628,7 @@
     "h": 48
    }
   },
-  "city_3_thal": {
+  "city_3": {
    "frame": {
     "x": 306,
     "y": 84,
@@ -768,69 +648,9 @@
     "h": 48
    }
   },
-  "city_1_sylv": {
-   "frame": {
-    "x": 340,
-    "y": 84,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
-  "city_2_sylv": {
-   "frame": {
-    "x": 374,
-    "y": 84,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
-  "city_3_sylv": {
-   "frame": {
-    "x": 408,
-    "y": 84,
-    "w": 32,
-    "h": 48
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 48
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 48
-   }
-  },
   "shore_0": {
    "frame": {
-    "x": 442,
+    "x": 340,
     "y": 84,
     "w": 32,
     "h": 32
@@ -1070,8 +890,8 @@
   },
   "r_deer": {
    "frame": {
-    "x": 374,
-    "y": 134,
+    "x": 0,
+    "y": 168,
     "w": 32,
     "h": 32
    },
@@ -1090,8 +910,8 @@
   },
   "hex_mask": {
    "frame": {
-    "x": 408,
-    "y": 134,
+    "x": 34,
+    "y": 168,
     "w": 32,
     "h": 32
    },
@@ -1110,8 +930,8 @@
   },
   "hex_cursor_0": {
    "frame": {
-    "x": 442,
-    "y": 134,
+    "x": 68,
+    "y": 168,
     "w": 32,
     "h": 32
    },
@@ -1131,7 +951,7 @@
   },
   "hex_cursor_1": {
    "frame": {
-    "x": 0,
+    "x": 102,
     "y": 168,
     "w": 32,
     "h": 32
@@ -1152,7 +972,7 @@
   },
   "hex_move": {
    "frame": {
-    "x": 34,
+    "x": 136,
     "y": 168,
     "w": 32,
     "h": 32
@@ -1172,7 +992,7 @@
   },
   "hex_attack": {
    "frame": {
-    "x": 68,
+    "x": 170,
     "y": 168,
     "w": 32,
     "h": 32
@@ -1192,7 +1012,7 @@
   },
   "hex_worked": {
    "frame": {
-    "x": 102,
+    "x": 204,
     "y": 168,
     "w": 32,
     "h": 32
@@ -1212,7 +1032,7 @@
   },
   "border_0": {
    "frame": {
-    "x": 136,
+    "x": 238,
     "y": 168,
     "w": 32,
     "h": 32
@@ -1232,7 +1052,7 @@
   },
   "border_1": {
    "frame": {
-    "x": 170,
+    "x": 272,
     "y": 168,
     "w": 32,
     "h": 32
@@ -1252,7 +1072,7 @@
   },
   "border_2": {
    "frame": {
-    "x": 204,
+    "x": 306,
     "y": 168,
     "w": 32,
     "h": 32
@@ -1272,7 +1092,7 @@
   },
   "border_3": {
    "frame": {
-    "x": 238,
+    "x": 340,
     "y": 168,
     "w": 32,
     "h": 32
@@ -1292,126 +1112,6 @@
   },
   "border_4": {
    "frame": {
-    "x": 272,
-    "y": 168,
-    "w": 32,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 32
-   }
-  },
-  "border_5": {
-   "frame": {
-    "x": 306,
-    "y": 168,
-    "w": 32,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 32
-   }
-  },
-  "road_0": {
-   "frame": {
-    "x": 340,
-    "y": 168,
-    "w": 32,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 32
-   }
-  },
-  "road_1": {
-   "frame": {
-    "x": 374,
-    "y": 168,
-    "w": 32,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 32
-   }
-  },
-  "road_2": {
-   "frame": {
-    "x": 408,
-    "y": 168,
-    "w": 32,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 32
-   }
-  },
-  "road_3": {
-   "frame": {
-    "x": 442,
-    "y": 168,
-    "w": 32,
-    "h": 32
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 32,
-    "h": 32
-   },
-   "sourceSize": {
-    "w": 32,
-    "h": 32
-   }
-  },
-  "road_4": {
-   "frame": {
     "x": 0,
     "y": 202,
     "w": 32,
@@ -1430,7 +1130,7 @@
     "h": 32
    }
   },
-  "road_5": {
+  "border_5": {
    "frame": {
     "x": 34,
     "y": 202,
@@ -1450,7 +1150,7 @@
     "h": 32
    }
   },
-  "road_c": {
+  "road_0": {
    "frame": {
     "x": 68,
     "y": 202,
@@ -1470,7 +1170,7 @@
     "h": 32
    }
   },
-  "river_0": {
+  "road_1": {
    "frame": {
     "x": 102,
     "y": 202,
@@ -1490,7 +1190,7 @@
     "h": 32
    }
   },
-  "river_1": {
+  "road_2": {
    "frame": {
     "x": 136,
     "y": 202,
@@ -1510,7 +1210,7 @@
     "h": 32
    }
   },
-  "river_2": {
+  "road_3": {
    "frame": {
     "x": 170,
     "y": 202,
@@ -1530,7 +1230,7 @@
     "h": 32
    }
   },
-  "river_3": {
+  "road_4": {
    "frame": {
     "x": 204,
     "y": 202,
@@ -1550,7 +1250,7 @@
     "h": 32
    }
   },
-  "river_4": {
+  "road_5": {
    "frame": {
     "x": 238,
     "y": 202,
@@ -1570,7 +1270,7 @@
     "h": 32
    }
   },
-  "river_5": {
+  "road_c": {
    "frame": {
     "x": 272,
     "y": 202,
@@ -1590,7 +1290,7 @@
     "h": 32
    }
   },
-  "mark_worked": {
+  "river_0": {
    "frame": {
     "x": 306,
     "y": 202,
@@ -1610,10 +1310,130 @@
     "h": 32
    }
   },
-  "ic_tip": {
+  "river_1": {
    "frame": {
     "x": 340,
     "y": 202,
+    "w": 32,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 32,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 32,
+    "h": 32
+   }
+  },
+  "river_2": {
+   "frame": {
+    "x": 0,
+    "y": 236,
+    "w": 32,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 32,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 32,
+    "h": 32
+   }
+  },
+  "river_3": {
+   "frame": {
+    "x": 34,
+    "y": 236,
+    "w": 32,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 32,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 32,
+    "h": 32
+   }
+  },
+  "river_4": {
+   "frame": {
+    "x": 68,
+    "y": 236,
+    "w": 32,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 32,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 32,
+    "h": 32
+   }
+  },
+  "river_5": {
+   "frame": {
+    "x": 102,
+    "y": 236,
+    "w": 32,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 32,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 32,
+    "h": 32
+   }
+  },
+  "mark_worked": {
+   "frame": {
+    "x": 136,
+    "y": 236,
+    "w": 32,
+    "h": 32
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 32,
+    "h": 32
+   },
+   "sourceSize": {
+    "w": 32,
+    "h": 32
+   }
+  },
+  "ic_tip": {
+   "frame": {
+    "x": 170,
+    "y": 236,
     "w": 12,
     "h": 12
    },
@@ -1632,8 +1452,8 @@
   },
   "tool_pick": {
    "frame": {
-    "x": 354,
-    "y": 202,
+    "x": 184,
+    "y": 236,
     "w": 11,
     "h": 13
    },
@@ -1652,8 +1472,8 @@
   },
   "tool_hoe": {
    "frame": {
-    "x": 367,
-    "y": 202,
+    "x": 197,
+    "y": 236,
     "w": 9,
     "h": 13
    },
@@ -1672,8 +1492,8 @@
   },
   "tool_hammer": {
    "frame": {
-    "x": 378,
-    "y": 202,
+    "x": 208,
+    "y": 236,
     "w": 9,
     "h": 12
    },
@@ -1692,7 +1512,7 @@
   },
   "tool_shovel": {
    "frame": {
-    "x": 0,
+    "x": 219,
     "y": 236,
     "w": 7,
     "h": 14
@@ -1712,7 +1532,7 @@
   },
   "tool_saw": {
    "frame": {
-    "x": 9,
+    "x": 228,
     "y": 236,
     "w": 15,
     "h": 7
@@ -1732,8 +1552,8 @@
   },
   "fog": {
    "frame": {
-    "x": 26,
-    "y": 236,
+    "x": 0,
+    "y": 270,
     "w": 36,
     "h": 36
    },
@@ -1752,8 +1572,8 @@
   },
   "path_dot": {
    "frame": {
-    "x": 64,
-    "y": 236,
+    "x": 38,
+    "y": 270,
     "w": 6,
     "h": 6
    },
@@ -1770,10 +1590,10 @@
     "h": 6
    }
   },
-  "u_settler_aur": {
+  "u_settler": {
    "frame": {
-    "x": 72,
-    "y": 236,
+    "x": 46,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1790,10 +1610,10 @@
     "h": 22
    }
   },
-  "u_settler_khar": {
+  "u_worker": {
    "frame": {
-    "x": 96,
-    "y": 236,
+    "x": 70,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1810,10 +1630,10 @@
     "h": 22
    }
   },
-  "u_settler_thal": {
+  "u_scout": {
    "frame": {
-    "x": 120,
-    "y": 236,
+    "x": 94,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1830,10 +1650,10 @@
     "h": 22
    }
   },
-  "u_settler_sylv": {
+  "u_warrior": {
    "frame": {
-    "x": 144,
-    "y": 236,
+    "x": 118,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1850,10 +1670,10 @@
     "h": 22
    }
   },
-  "u_settler_barb": {
+  "u_spearman": {
    "frame": {
-    "x": 168,
-    "y": 236,
+    "x": 142,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1870,10 +1690,10 @@
     "h": 22
    }
   },
-  "u_worker_aur": {
+  "u_archer": {
    "frame": {
-    "x": 192,
-    "y": 236,
+    "x": 166,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1890,10 +1710,10 @@
     "h": 22
    }
   },
-  "u_worker_khar": {
+  "u_swordsman": {
    "frame": {
-    "x": 216,
-    "y": 236,
+    "x": 190,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1910,10 +1730,10 @@
     "h": 22
    }
   },
-  "u_worker_thal": {
+  "u_axeman": {
    "frame": {
-    "x": 240,
-    "y": 236,
+    "x": 214,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1930,10 +1750,10 @@
     "h": 22
    }
   },
-  "u_worker_sylv": {
+  "u_hoplite": {
    "frame": {
-    "x": 264,
-    "y": 236,
+    "x": 238,
+    "y": 270,
     "w": 22,
     "h": 22
    },
@@ -1950,10 +1770,10 @@
     "h": 22
    }
   },
-  "u_worker_barb": {
+  "u_hunter": {
    "frame": {
-    "x": 288,
-    "y": 236,
+    "x": 0,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -1970,30 +1790,10 @@
     "h": 22
    }
   },
-  "u_scout_aur": {
-   "frame": {
-    "x": 0,
-    "y": 274,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_scout_khar": {
+  "u_horseman": {
    "frame": {
     "x": 24,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2010,10 +1810,10 @@
     "h": 22
    }
   },
-  "u_scout_thal": {
+  "u_chariot": {
    "frame": {
     "x": 48,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2030,10 +1830,10 @@
     "h": 22
    }
   },
-  "u_scout_sylv": {
+  "u_catapult": {
    "frame": {
     "x": 72,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2050,10 +1850,10 @@
     "h": 22
    }
   },
-  "u_scout_barb": {
+  "u_galley": {
    "frame": {
     "x": 96,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2070,10 +1870,10 @@
     "h": 22
    }
   },
-  "u_warrior_aur": {
+  "u_trireme": {
    "frame": {
     "x": 120,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2090,10 +1890,10 @@
     "h": 22
    }
   },
-  "u_warrior_khar": {
+  "u_boat": {
    "frame": {
     "x": 144,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2110,10 +1910,10 @@
     "h": 22
    }
   },
-  "u_warrior_thal": {
+  "u_raider": {
    "frame": {
     "x": 168,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2130,10 +1930,10 @@
     "h": 22
    }
   },
-  "u_warrior_sylv": {
+  "u_camel": {
    "frame": {
     "x": 192,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2150,10 +1950,10 @@
     "h": 22
    }
   },
-  "u_warrior_barb": {
+  "u_ballista": {
    "frame": {
     "x": 216,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2170,10 +1970,10 @@
     "h": 22
    }
   },
-  "u_spearman_aur": {
+  "u_templar": {
    "frame": {
     "x": 240,
-    "y": 274,
+    "y": 308,
     "w": 22,
     "h": 22
    },
@@ -2190,1270 +1990,10 @@
     "h": 22
    }
   },
-  "u_spearman_khar": {
+  "u_workerb": {
    "frame": {
-    "x": 264,
-    "y": 274,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_spearman_thal": {
-   "frame": {
-    "x": 288,
-    "y": 274,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_spearman_sylv": {
-   "frame": {
-    "x": 312,
-    "y": 274,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_spearman_barb": {
-   "frame": {
-    "x": 0,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_archer_aur": {
-   "frame": {
-    "x": 24,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_archer_khar": {
-   "frame": {
-    "x": 48,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_archer_thal": {
-   "frame": {
-    "x": 72,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_archer_sylv": {
-   "frame": {
-    "x": 96,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_archer_barb": {
-   "frame": {
-    "x": 120,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_swordsman_aur": {
-   "frame": {
-    "x": 144,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_swordsman_khar": {
-   "frame": {
-    "x": 168,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_swordsman_thal": {
-   "frame": {
-    "x": 192,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_swordsman_sylv": {
-   "frame": {
-    "x": 216,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_swordsman_barb": {
-   "frame": {
-    "x": 240,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_axeman_aur": {
-   "frame": {
-    "x": 264,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_axeman_khar": {
-   "frame": {
-    "x": 288,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_axeman_thal": {
-   "frame": {
-    "x": 312,
-    "y": 298,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_axeman_sylv": {
-   "frame": {
-    "x": 0,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_axeman_barb": {
-   "frame": {
-    "x": 24,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hoplite_aur": {
-   "frame": {
-    "x": 48,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hoplite_khar": {
-   "frame": {
-    "x": 72,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hoplite_thal": {
-   "frame": {
-    "x": 96,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hoplite_sylv": {
-   "frame": {
-    "x": 120,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hoplite_barb": {
-   "frame": {
-    "x": 144,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hunter_aur": {
-   "frame": {
-    "x": 168,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hunter_khar": {
-   "frame": {
-    "x": 192,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hunter_thal": {
-   "frame": {
-    "x": 216,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hunter_sylv": {
-   "frame": {
-    "x": 240,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hunter_barb": {
-   "frame": {
-    "x": 264,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_horseman_aur": {
-   "frame": {
-    "x": 288,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_horseman_khar": {
-   "frame": {
-    "x": 312,
-    "y": 322,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_horseman_thal": {
-   "frame": {
-    "x": 0,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_horseman_sylv": {
-   "frame": {
-    "x": 24,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_horseman_barb": {
-   "frame": {
-    "x": 48,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_chariot_aur": {
-   "frame": {
-    "x": 72,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_chariot_khar": {
-   "frame": {
-    "x": 96,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_chariot_thal": {
-   "frame": {
-    "x": 120,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_chariot_sylv": {
-   "frame": {
-    "x": 144,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_chariot_barb": {
-   "frame": {
-    "x": 168,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_catapult_aur": {
-   "frame": {
-    "x": 192,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_catapult_khar": {
-   "frame": {
-    "x": 216,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_catapult_thal": {
-   "frame": {
-    "x": 240,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_catapult_sylv": {
-   "frame": {
-    "x": 264,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_catapult_barb": {
-   "frame": {
-    "x": 288,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_galley_aur": {
-   "frame": {
-    "x": 312,
-    "y": 346,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_galley_khar": {
-   "frame": {
-    "x": 0,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_galley_thal": {
-   "frame": {
-    "x": 24,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_galley_sylv": {
-   "frame": {
-    "x": 48,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_galley_barb": {
-   "frame": {
-    "x": 72,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_trireme_aur": {
-   "frame": {
-    "x": 96,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_trireme_khar": {
-   "frame": {
-    "x": 120,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_trireme_thal": {
-   "frame": {
-    "x": 144,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_trireme_sylv": {
-   "frame": {
-    "x": 168,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_trireme_barb": {
-   "frame": {
-    "x": 192,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_boat_aur": {
-   "frame": {
-    "x": 216,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_boat_khar": {
-   "frame": {
-    "x": 240,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_boat_thal": {
-   "frame": {
-    "x": 264,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_boat_sylv": {
-   "frame": {
-    "x": 288,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_boat_barb": {
-   "frame": {
-    "x": 312,
-    "y": 370,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_workerb_aur": {
-   "frame": {
-    "x": 0,
-    "y": 394,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_workerb_khar": {
-   "frame": {
-    "x": 24,
-    "y": 394,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_workerb_thal": {
-   "frame": {
-    "x": 48,
-    "y": 394,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_workerb_sylv": {
-   "frame": {
-    "x": 72,
-    "y": 394,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
     "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_workerb_barb": {
-   "frame": {
-    "x": 96,
-    "y": 394,
+    "y": 332,
     "w": 22,
     "h": 22
    },
@@ -3472,8 +2012,8 @@
   },
   "fx_hit_0": {
    "frame": {
-    "x": 120,
-    "y": 394,
+    "x": 24,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3493,8 +2033,8 @@
   },
   "fx_hit_1": {
    "frame": {
-    "x": 138,
-    "y": 394,
+    "x": 42,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3514,8 +2054,8 @@
   },
   "fx_hit_2": {
    "frame": {
-    "x": 156,
-    "y": 394,
+    "x": 60,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3535,8 +2075,8 @@
   },
   "fx_hit_3": {
    "frame": {
-    "x": 174,
-    "y": 394,
+    "x": 78,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3556,8 +2096,8 @@
   },
   "fx_hit_4": {
    "frame": {
-    "x": 192,
-    "y": 394,
+    "x": 96,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3577,8 +2117,8 @@
   },
   "fx_smoke_0": {
    "frame": {
-    "x": 210,
-    "y": 394,
+    "x": 114,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3598,8 +2138,8 @@
   },
   "fx_smoke_1": {
    "frame": {
-    "x": 228,
-    "y": 394,
+    "x": 132,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3619,8 +2159,8 @@
   },
   "fx_smoke_2": {
    "frame": {
-    "x": 246,
-    "y": 394,
+    "x": 150,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3640,8 +2180,8 @@
   },
   "fx_smoke_3": {
    "frame": {
-    "x": 264,
-    "y": 394,
+    "x": 168,
+    "y": 332,
     "w": 16,
     "h": 16
    },
@@ -3661,8 +2201,8 @@
   },
   "fx_arrow": {
    "frame": {
-    "x": 0,
-    "y": 418,
+    "x": 186,
+    "y": 332,
     "w": 9,
     "h": 3
    },
@@ -3681,8 +2221,8 @@
   },
   "fx_rock": {
    "frame": {
-    "x": 11,
-    "y": 418,
+    "x": 0,
+    "y": 356,
     "w": 5,
     "h": 5
    },
@@ -3705,8 +2245,8 @@
   "image": "atlas.png",
   "format": "RGBA8888",
   "size": {
-   "w": 474,
-   "h": 423
+   "w": 372,
+   "h": 361
   },
   "scale": "1",
   "frameTags": [
@@ -3724,20 +2264,20 @@
    },
    {
     "name": "hex_cursor",
-    "from": 55,
-    "to": 56,
+    "from": 46,
+    "to": 47,
     "direction": "forward"
    },
    {
     "name": "fx_hit",
-    "from": 173,
-    "to": 177,
+    "from": 100,
+    "to": 104,
     "direction": "forward"
    },
    {
     "name": "fx_smoke",
-    "from": 178,
-    "to": 181,
+    "from": 105,
+    "to": 108,
     "direction": "forward"
    }
   ]

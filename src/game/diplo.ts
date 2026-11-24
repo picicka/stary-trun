@@ -33,8 +33,9 @@ export function giveGold(s: GameState, aiId: number, me = 0): Reply {
 }
 
 /** Cena, za kterou soupeř surovinu koupí / prodá (zlato za tah). */
-export function salePrice(p: Player, me = 0): number { return p.attitude[me] >= 30 ? 4 : 3 }
-export function buyPrice(p: Player, me = 0): number { return p.attitude[me] >= 30 ? 3 : p.attitude[me] <= -15 ? 6 : 4 }
+/** `my` = hráč, který obchoduje (Zahirové mají o 1 zlato za tah výhodnější ceny). */
+export function salePrice(p: Player, me = 0, my?: Player): number { return (p.attitude[me] >= 30 ? 4 : 3) + (my?.nation === 'zahi' ? 1 : 0) }
+export function buyPrice(p: Player, me = 0, my?: Player): number { return (p.attitude[me] >= 30 ? 3 : p.attitude[me] <= -15 ? 6 : 4) - (my?.nation === 'zahi' ? 1 : 0) }
 
 /** Může hráč soupeři surovinu prodat? Vrací důvod, proč ne, nebo null. */
 export function saleBlock(s: GameState, aiId: number, r: ResourceId, me = 0): string | null {
@@ -43,7 +44,7 @@ export function saleBlock(s: GameState, aiId: number, r: ResourceId, me = 0): st
   if (!ownsResource(s, me, r)) return `Nemáte vlastní zdroj (${RESOURCES[r].name.toLowerCase()} s vylepšením).`
   if (resourceFree(s, me, r) < UNITS_PER_SOURCE) return 'Nemáte volný zdroj – všechny živí vaše vlastní jednotky.'
   if (resourceFree(s, aiId, r) > 0) return 'Vlastní zdroje jim zatím stačí.'
-  if (playerIncome(s, aiId).gold < salePrice(p, me) && p.gold < 40) return 'Nemají čím platit.'
+  if (playerIncome(s, aiId).gold < salePrice(p, me, s.players[me]) && p.gold < 40) return 'Nemají čím platit.'
   return null
 }
 
@@ -60,9 +61,9 @@ export function sellResource(s: GameState, aiId: number, r: ResourceId, me = 0):
   const why = saleBlock(s, aiId, r, me)
   if (why) return { ok: false, text: why }
   const p = s.players[aiId]
-  s.deals.push({ seller: me, buyer: aiId, res: r, gpt: salePrice(p, me), until: s.turn + DEAL_TURNS })
+  s.deals.push({ seller: me, buyer: aiId, res: r, gpt: salePrice(p, me, s.players[me]), until: s.turn + DEAL_TURNS })
   warm(p, me, 6)
-  note(s, me, `Obchod uzavřen: ${name(p)} kupují ${RESOURCES[r].name.toLowerCase()} za ${salePrice(p, me)} zlata za tah na ${DEAL_TURNS} tahů.`, 'good')
+  note(s, me, `Obchod uzavřen: ${name(p)} kupují ${RESOURCES[r].name.toLowerCase()} za ${salePrice(p, me, s.players[me])} zlata za tah na ${DEAL_TURNS} tahů.`, 'good')
   return { ok: true, text: 'Obchod uzavřen.' }
 }
 
@@ -70,9 +71,9 @@ export function buyResource(s: GameState, aiId: number, r: ResourceId, me = 0): 
   const why = buyBlock(s, aiId, r, me)
   if (why) return { ok: false, text: why }
   const p = s.players[aiId]
-  s.deals.push({ seller: aiId, buyer: me, res: r, gpt: buyPrice(p, me), until: s.turn + DEAL_TURNS })
+  s.deals.push({ seller: aiId, buyer: me, res: r, gpt: buyPrice(p, me, s.players[me]), until: s.turn + DEAL_TURNS })
   warm(p, me, 4)
-  note(s, me, `Obchod uzavřen: kupujete ${RESOURCES[r].name.toLowerCase()} od národa ${name(p)} za ${buyPrice(p, me)} zlata za tah na ${DEAL_TURNS} tahů.`, 'good')
+  note(s, me, `Obchod uzavřen: kupujete ${RESOURCES[r].name.toLowerCase()} od národa ${name(p)} za ${buyPrice(p, me, s.players[me])} zlata za tah na ${DEAL_TURNS} tahů.`, 'good')
   return { ok: true, text: 'Obchod uzavřen.' }
 }
 
