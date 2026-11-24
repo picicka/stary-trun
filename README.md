@@ -6,6 +6,7 @@ Hexová tahová 4X strategie v pixel artu, která běží v prohlížeči. Origi
 
 - Tři scénáře: ručně navržené Údolí Starého trůnu, Souostroví Sedmi větrů a pokaždé jiná Neznámá země.
 - Čtyři národy, každý s vlastností a unikátní jednotkou; dva soupeři řízení počítačem a barbaři včetně pirátů.
+- Hra pro 2–3 hráče u jednoho počítače: táhne se po řadě, mezi tahy mapu zakryje opona; volná místa vede počítač.
 - Města s frontou výroby, dělníci, cesty a řeky, 23 technologií, lodě a nalodění, povyšování jednotek.
 - Diplomacie: válka a mír, obchod se surovinami, spojenectví.
 - Tři cesty k vítězství: dobytí, div světa, nebo nejvyšší skóre po 120 tazích.

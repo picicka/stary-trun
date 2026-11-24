@@ -99,22 +99,23 @@ export interface Player {
   lastWarTurn: number
   peaceUntil: number[]
   cityNames: number
-  /** Vztah soupeře k hráči (−100 až 100). */
-  attitude: number
+  /** Vztah soupeře k jednotlivým hráčům (−100 až 100), index = id hráče. */
+  attitude: number[]
   /** Nastřádaná kultura národa na další tradici. */
   culture: number
   traditions: TraditionId[]
   era: number
   /** Do tohoto tahu trvá zlatý věk (+1 výroba, zlato a kultura v každém městě). */
   goldenUntil: number
-  /** Do tohoto tahu soupeř hráče nenapadne (spojenectví). */
-  pactUntil: number
+  /** Do tohoto tahu soupeř daného hráče nenapadne (spojenectví), index = id hráče. */
+  pactUntil: number[]
 }
 
 /** Obchod se surovinou: prodávající dostává `gpt` zlata za tah, kupující má k surovině přístup. */
 export interface Deal { seller: number; buyer: number; res: ResourceId; gpt: number; until: number }
 
-export interface Note { turn: number; text: string; kind: 'info' | 'good' | 'bad' | 'war'; x?: number; y?: number }
+/** Zpráva pro hráče `pid`. */
+export interface Note { pid: number; turn: number; text: string; kind: 'info' | 'good' | 'bad' | 'war'; x?: number; y?: number }
 
 export interface Mission {
   ruinsBy: number
@@ -123,11 +124,16 @@ export interface Mission {
   questCamps: boolean
   questRuins: boolean
   wonderBy: number
+  /** Kdo splnil vedlejší úkol (id hráče), kvůli skóre. */
+  citiesBy?: number
+  campsBy?: number
 }
 
-export interface GameOver { won: boolean; kind: 'conquest' | 'wonder' | 'score' | 'defeat'; title: string; text: string }
+/** Konec hry. `title` a `text` platí pro vítěze (nebo pro poražené, když nevyhrál člověk); `other` čtou lidští hráči, kteří nevyhráli. */
+export interface GameOver { won: boolean; winner: number; kind: 'conquest' | 'wonder' | 'score' | 'defeat'; title: string; text: string; other?: string }
 
-export interface PeaceOffer { from: number; kind?: 'peace' | 'ally'; vs?: number }
+/** Nabídka od `from` hráči `to`: mír, nebo pozvání do války proti `vs`. */
+export interface PeaceOffer { from: number; to: number; kind?: 'peace' | 'ally'; vs?: number }
 
 export interface GameState {
   version: number
@@ -135,6 +141,8 @@ export interface GameState {
   scenario: ScenarioId
   rng: number
   turn: number
+  /** Lidský hráč, který je právě na tahu. */
+  cur: number
   maxTurns: number
   difficulty: Difficulty
   W: number
@@ -151,8 +159,8 @@ export interface GameState {
   deals: Deal[]
   /** Kdo vstoupil do kterého věku první (id hráče, index = věk). */
   eraFirst: number[]
-  /** Zpráva, kterou má rozhraní ukázat hráči v okně (nový věk apod.). */
-  popup: { title: string; text: string } | null
+  /** Zprávy, které má rozhraní ukázat hráči `pid` v okně (nový věk apod.). */
+  popups: { pid: number; title: string; text: string }[]
   tutorial: string[]
 }
 

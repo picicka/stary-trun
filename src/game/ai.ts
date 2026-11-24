@@ -59,11 +59,11 @@ function majors(s: GameState, p: Player): Player[] {
 
 export function warDuration(s: GameState, p: Player): number { return s.turn - p.lastWarTurn }
 
-/** Přijme AI nabídku míru od hráče? */
-export function aiAcceptsPeace(s: GameState, aiId: number): boolean {
+/** Přijme AI nabídku míru od hráče `from`? */
+export function aiAcceptsPeace(s: GameState, aiId: number, from = 0): boolean {
   const p = s.players[aiId]
   if (warDuration(s, p) < 6) return false
-  const mine = militaryPower(s, aiId), theirs = militaryPower(s, 0)
+  const mine = militaryPower(s, aiId), theirs = militaryPower(s, from)
   if (mine < theirs * 1.35) return true
   return warDuration(s, p) >= 20
 }
@@ -79,14 +79,14 @@ function aiDiplomacy(s: GameState, p: Player): void {
       const dur = warDuration(s, p)
       if (dur >= 10 && (mine < theirs * 0.9 || dur >= 26)) {
         if (q.human) {
-          if (!s.offers.some(o => o.from === p.id) && s.turn % 4 === p.id % 4) s.offers.push({ from: p.id })
+          if (!s.offers.some(o => o.from === p.id && o.to === q.id) && s.turn % 4 === p.id % 4) s.offers.push({ from: p.id, to: q.id })
         } else if (militaryPower(s, q.id) < mine * 1.6 || dur >= 26) makePeace(s, p.id, q.id)
       }
       continue
     }
     if (s.turn < (p.peaceUntil[q.id] ?? 0)) continue
     // Spojenec ani přítel hráče nenapadne.
-    if (q.human && (s.turn < p.pactUntil || p.attitude >= 40)) continue
+    if (q.human && (s.turn < p.pactUntil[q.id] || p.attitude[q.id] >= 40)) continue
     if (p.war.length > 0) continue
     let want = false
     // Soupeř, který staví div, je hrozbou pro každého.
@@ -98,14 +98,14 @@ function aiDiplomacy(s: GameState, p: Player): void {
     // Na lehké obtížnosti dostane hráč na začátku klid.
     if (q.human && s.difficulty === 'easy' && s.turn < 45 && !qWonder) want = false
     // Dobré vztahy válku oddalují.
-    if (want && q.human && p.attitude >= 15 && !qWonder && rand(s) < 0.6) want = false
+    if (want && q.human && p.attitude[q.id] >= 15 && !qWonder && rand(s) < 0.6) want = false
     if (want) declareWar(s, p.id, q.id)
   }
   // Žádost o pomoc: soupeř ve válce s jiným národem zve hráče do spojenectví.
-  const me = s.players[0]
-  if (me.alive && p.met.includes(0) && !atWar(s, p.id, 0) && p.attitude >= 0 && s.turn % 9 === p.id % 9 && !s.offers.some(o => o.from === p.id)) {
-    const foe = majors(s, p).find(q => !q.human && atWar(s, p.id, q.id) && me.met.includes(q.id) && !atWar(s, 0, q.id))
-    if (foe && warDuration(s, p) >= 3) s.offers.push({ from: p.id, kind: 'ally', vs: foe.id })
+  for (const me of s.players) {
+    if (!me.human || !me.alive || !p.met.includes(me.id) || atWar(s, p.id, me.id) || p.attitude[me.id] < 0 || s.turn % 9 !== p.id % 9 || s.offers.some(o => o.from === p.id && o.to === me.id)) continue
+    const foe = majors(s, p).find(q => q.id !== me.id && atWar(s, p.id, q.id) && me.met.includes(q.id) && !atWar(s, me.id, q.id))
+    if (foe && warDuration(s, p) >= 3) s.offers.push({ from: p.id, to: me.id, kind: 'ally', vs: foe.id })
   }
 }
 
@@ -553,18 +553,18 @@ function aiNavy(s: GameState, p: Player): void {
 }
 
 /** Automatika hráčových jednotek: dělníci vylepšují pole, ostatní zkoumají mapu. */
-export function autoUnits(s: GameState): void {
-  const p = s.players[0]
+export function autoUnits(s: GameState, pid = 0): void {
+  const p = s.players[pid]
   const claimed = new Set<number>()
-  for (const u of unitsOf(s, 0)) {
+  for (const u of unitsOf(s, pid)) {
     if (!u.auto || !s.units.includes(u)) continue
     if (u.type === 'worker') {
       // Rozdělaná práce jiných dělníků se nedubluje.
-      for (const o of unitsOf(s, 0)) if (o !== u && o.type === 'worker' && o.work) claimed.add(idx(s, o.x, o.y))
+      for (const o of unitsOf(s, pid)) if (o !== u && o.type === 'worker' && o.work) claimed.add(idx(s, o.x, o.y))
       aiWorker(s, p, u, claimed)
     } else if (!explore(s, p, u)) {
       u.auto = false; u.fortified = false
-      note(s, 0, `${UNITS[u.type].name}: není už co zkoumat, automatický průzkum končí.`, 'info', u.x, u.y)
+      note(s, pid, `${UNITS[u.type].name}: není už co zkoumat, automatický průzkum končí.`, 'info', u.x, u.y)
     }
   }
 }
@@ -696,7 +696,7 @@ function seaRaid(s: GameState): void {
     u.sea = true
     emit({ e: 'spawn', unit: u.id, x: u.x, y: u.y })
   })
-  if (c.owner === 0) note(s, 0, `Piráti! U města ${c.name} se objevily nepřátelské lodě s nájezdníky.`, 'bad', first[0], first[1])
+  note(s, c.owner, `Piráti! U města ${c.name} se objevily nepřátelské lodě s nájezdníky.`, 'bad', first[0], first[1])
 }
 
 /** Tip pro hráče: co by ve městě stavěl rozvážný stavitel. Stav hry nemění. */

@@ -8,6 +8,8 @@ import { sfx } from '../audio.ts'
 
 export interface MapHost {
   state: GameState
+  /** Hráč, z jehož pohledu se mapa kreslí. */
+  me: number
   onTileClick(x: number, y: number, right: boolean, shift: boolean): void
   onHover(x: number, y: number): void
   onCameraMove(): void
@@ -267,7 +269,7 @@ export class MapScene extends Phaser.Scene {
 
   private syncTile(i: number): void {
     const s = this.host.state
-    const me = s.players[0]
+    const me = s.players[this.host.me]
     const t = s.tiles[i]
     const [x, y, px, py] = this.tilePos(i)
     const city = s.cities.find(c => c.x === x && c.y === y)
@@ -326,7 +328,7 @@ export class MapScene extends Phaser.Scene {
   syncAll(): void {
     if (!this.ready || !this.host?.state) return
     const s = this.host.state
-    const me = s.players[0]
+    const me = s.players[this.host.me]
     this.wonderTile = this.findWonderTile()
     for (let i = 0; i < s.tiles.length; i++) {
       const [x, y, px, py] = this.tilePos(i)
@@ -355,7 +357,7 @@ export class MapScene extends Phaser.Scene {
 
   private syncBorders(): void {
     const s = this.host.state
-    const me = s.players[0]
+    const me = s.players[this.host.me]
     let sig = ''
     for (let i = 0; i < s.tiles.length; i++) sig += me.explored[i] ? s.tiles[i].owner + 1 : 'x'
     if (sig === this.borderSig) return
@@ -472,7 +474,7 @@ export class MapScene extends Phaser.Scene {
 
   private unitVisible(u: Unit): boolean {
     const s = this.host.state
-    return u.owner === 0 || !!s.players[0].visible[idx(s, u.x, u.y)]
+    return u.owner === this.host.me || !!s.players[this.host.me].visible[idx(s, u.x, u.y)]
   }
 
   private makeUnitView(u: Unit): UnitView {
@@ -500,9 +502,9 @@ export class MapScene extends Phaser.Scene {
       v.bar.width = Math.max(1, Math.round(14 * u.hp / 100))
       v.bar.fillColor = u.hp > 60 ? 0x5fd35f : u.hp > 30 ? 0xf2c230 : 0xe0453d
     }
-    const spent = u.owner === 0 && u.moves <= 0
+    const spent = u.owner === this.host.me && u.moves <= 0
     v.spr.setTint(spent ? 0xa9adbd : 0xffffff)
-    v.spr.setAlpha(u.owner === 0 && (u.sleep || u.fortified) ? 0.88 : 1)
+    v.spr.setAlpha(u.owner === this.host.me && (u.sleep || u.fortified) ? 0.88 : 1)
     this.animateWork(v, u.work && v.c.visible ? u.work : null)
   }
 
@@ -630,7 +632,7 @@ export class MapScene extends Phaser.Scene {
 
   private seen(x: number, y: number): boolean {
     const s = this.host.state
-    return !!s.players[0].visible[idx(s, x, y)]
+    return !!s.players[this.host.me].visible[idx(s, x, y)]
   }
 
   private fx(key: string, frame: string, x: number, y: number, scale = 1): void {
@@ -653,9 +655,9 @@ export class MapScene extends Phaser.Scene {
         if (ev.e === 'sound') { sfx(ev.id); continue }
         if (ev.e === 'move') {
           const v = this.units.get(ev.unit)
-          const vis = ev.owner === 0 || ev.path.some(p => this.seen(p[0], p[1]))
+          const vis = ev.owner === this.host.me || ev.path.some(p => this.seen(p[0], p[1]))
           if (!v || !vis) continue
-          if (ev.owner === 0) sfx('move')
+          if (ev.owner === this.host.me) sfx('move')
           v.c.setVisible(true)
           for (let k = 1; k < ev.path.length; k++) {
             const [cx, cy] = hexCenter(ev.path[k][0], ev.path[k][1])
@@ -664,12 +666,12 @@ export class MapScene extends Phaser.Scene {
             await this.tween({ targets: v.c, x: cx, y: cy - 2, duration: 95 * sp, ease: 'Sine.easeInOut' })
           }
         } else if (ev.e === 'attack') {
-          const vis = this.seen(ev.to[0], ev.to[1]) || this.seen(ev.from[0], ev.from[1]) || ev.owner === 0
+          const vis = this.seen(ev.to[0], ev.to[1]) || this.seen(ev.from[0], ev.from[1]) || ev.owner === this.host.me
           if (!vis) continue
           const v = this.units.get(ev.unit)
           const [fx, fy] = hexCenter(ev.from[0], ev.from[1])
           const [tx, ty] = hexCenter(ev.to[0], ev.to[1])
-          if (ev.owner !== 0 && !this.inView(ev.to[0], ev.to[1], 10)) { this.centerOn(ev.to[0], ev.to[1]); await this.wait(280) }
+          if (ev.owner !== this.host.me && !this.inView(ev.to[0], ev.to[1], 10)) { this.centerOn(ev.to[0], ev.to[1]); await this.wait(280) }
           if (v) v.spr.setFlipX(tx < fx)
           if (ev.ranged) {
             sfx('shoot')
@@ -720,7 +722,7 @@ export class MapScene extends Phaser.Scene {
         } else if (ev.e === 'capture') {
           if (!this.seen(ev.x, ev.y)) continue
           const [cx, cy] = hexCenter(ev.x, ev.y)
-          sfx(ev.by === 0 ? 'fanfare' : 'war')
+          sfx(ev.by === this.host.me ? 'fanfare' : 'war')
           this.fx('smoke', 'fx_smoke_0', cx, cy - 6)
           this.cameras.main.shake(200, 0.004)
           await this.wait(300 * sp)
@@ -745,6 +747,6 @@ export class MapScene extends Phaser.Scene {
     for (const u of s.units) if (!this.units.has(u.id)) { const v = this.makeUnitView(u); v.key = this.frameOf(u); this.placeUnit(u, v); v.c.setVisible(false) }
   }
 
-  hostile(u: Unit): boolean { return atWar(this.host.state, 0, u.owner) }
+  hostile(u: Unit): boolean { return atWar(this.host.state, this.host.me, u.owner) }
   unitName(u: Unit): string { return UNITS[u.type].name }
 }

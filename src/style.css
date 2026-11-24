@@ -318,4 +318,7 @@ button[data-tip], .build[data-tip], .tech.avail[data-tip], [data-a][data-tip] { 
 #topbar .resic { width: 34px; height: 26px; background-size: 64px 64px; background-position: -4px -25px; }
 /* okna musí být nad hlavním menu (návod spuštěný z úvodní obrazovky) */
 #modal { z-index: 30; }
+/* Předání počítače dalšímu hráči: mapa je celá zakrytá. */
+#modal.curtain { background: #0b1020; }
+.card.taken { opacity: .38; filter: grayscale(.8); cursor: default; }
 #topbar .stat.res.full small { color: var(--gold); }

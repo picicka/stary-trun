@@ -1,16 +1,16 @@
 // Ovladač hry: drží stav, výběr a propojuje pravidla, mapu a rozhraní.
 import { IMPROVEMENTS, NATIONS, UNITS, type Difficulty, type ImprovementId, type NationId, type TechId } from './game/data.ts'
-import { aiAcceptsPeace, adviseBuild, siteScore } from './game/ai.ts'
-import { answerAlly, askAlliance, buyResource, giveGold, sellResource } from './game/diplo.ts'
-import type { PromoId, ResourceId, ScenarioId, TraditionId } from './game/data.ts'
+import { siteScore } from './game/ai.ts'
+import { exec, type Command, type Result } from './game/commands.ts'
+import type { PromoId, ScenarioId, TraditionId } from './game/data.ts'
 import { hexDist } from './game/hex.ts'
 import {
-  atWar, attack, availableTechs, buy, canFoundCity, cityAt, cityById, citiesOf, cityWorkable, declareWar, dequeue, drainEvents, enqueue, foundCity, idx, isCivilian, isEmbarked,
-  isNaval, planResearch, adoptTradition, traditionReady, promoteUnit, roadStep, tileJobs, upgradeUnit, upgradeBlock, canWork, killUnit, makePeace, moveUnit, note, pathMap, pathTo, pathTurns, previewAttack, promote, reachable, startWork, stopUnit, tilesWithin, unitById, unitsAt, unitsOf,
-  updateVisibility, type PathMap,
+  atWar, availableTechs, canFoundCity, cityAt, cityById, citiesOf, cityWorkable, drainEvents, idx, isCivilian, isEmbarked,
+  isNaval, traditionReady, tileJobs, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
+  type PathMap,
 } from './game/rules.ts'
-import { clearSave, createGame, endTurn, loadGame, saveGame } from './game/state.ts'
-import type { BuildItem, City, GameState, Unit } from './game/types.ts'
+import { clearSave, createGame, loadGame, saveGame } from './game/state.ts'
+import type { BuildItem, City, GameState, JobId, Unit } from './game/types.ts'
 import { sfx, unlockAudio } from './audio.ts'
 import { Hud } from './ui/hud.ts'
 import type { MapHost, MapScene } from './view/MapScene.ts'
@@ -19,6 +19,8 @@ export type Attention = { kind: 'research' } | { kind: 'tradition' } | { kind: '
 
 export class App implements MapHost {
   state!: GameState
+  /** Hráč, který se na hru dívá a zadává rozkazy (u jednoho počítače se střídá). */
+  me = 0
   scene: MapScene
   hud: Hud
   selUnit = -1
@@ -53,32 +55,87 @@ export class App implements MapHost {
 
   // ------------------------------------------------------------ start
 
-  newGame(nation: NationId, difficulty: Difficulty, scenario: ScenarioId = 'valley'): void {
+  /** Nová hra; víc národů = víc lidských hráčů, kteří se střídají u jednoho počítače. */
+  newGame(nations: NationId[], difficulty: Difficulty, scenario: ScenarioId = 'valley'): void {
     // Pokaždé jiné startovní místo ze tří.
-    this.begin(createGame(nation, difficulty, scenario, undefined, Math.floor(Math.random() * 3)))
-    this.hud.showBriefing()
+    this.begin(createGame(nations[0], difficulty, scenario, undefined, Math.floor(Math.random() * 3), nations.slice(1)))
+    if (this.hotseat) this.handover(() => this.hud.showBriefing())
+    else this.hud.showBriefing()
   }
 
   continueGame(): boolean {
     const s = loadGame()
     if (!s) return false
     this.begin(s)
+    if (this.hotseat) this.handover()
     return true
+  }
+
+  /** Hraje víc lidí u jednoho počítače? */
+  get hotseat(): boolean { return this.state.players.filter(p => p.human).length > 1 }
+  /** Je místní hráč na tahu? */
+  get myTurn(): boolean { return this.state.cur === this.me }
+  get player() { return this.state.players[this.me] }
+
+  /** Provede příkaz místního hráče – jediná cesta, kterou rozhraní mění stav hry. */
+  cmd(c: Command): Result { return exec(this.state, this.me, c) }
+
+  /** Uloží hru a překreslí rozhraní po příkazu bez animace. */
+  private commit(): void { saveGame(this.state); this.refresh() }
+
+  /** Předání počítače dalšímu hráči: zakryje mapu a po potvrzení přepne pohled. */
+  private handover(then?: () => void): void {
+    this.selUnit = -1; this.selCity = -1
+    this.hud.showHandover(this.state.cur, () => { this.takeSeat(); then?.() })
+  }
+
+  /** Hráč na tahu usedá k počítači: mapa, mlha a zprávy se přepnou na něj. */
+  private takeSeat(): void {
+    this.me = this.state.cur
+    this.selUnit = -1; this.selCity = -1
+    const go = () => {
+      this.scene.reset()
+      this.focusHome()
+      this.refresh()
+      this.showPopups()
+      this.hud.checkOffers()
+    }
+    if (this.scene.scene.isActive()) go()
+    else this.scene.events.once('ready', go)
+  }
+
+  private focusHome(): void {
+    const s = this.state
+    const cap = citiesOf(s, this.me).find(c => c.capital) ?? citiesOf(s, this.me)[0]
+    const first = cap ? this.idleUnits()[0] : unitsOf(s, this.me).find(v => v.type === 'settler') ?? unitsOf(s, this.me)[0]
+    if (first) this.selUnit = first.id
+    const at = first && !cap ? first : cap
+    if (at) this.scene.centerOn(at.x, at.y, false)
+  }
+
+  /** Ukáže okna určená místnímu hráči (nový věk apod.). */
+  private showPopups(): void {
+    const s = this.state
+    const pop = s.popups.find(o => o.pid === this.me)
+    if (!pop) return
+    s.popups = s.popups.filter(o => o.pid !== this.me)
+    this.hud.showPopup(pop.title, pop.text)
   }
 
   private begin(s: GameState): void {
     this.state = s
+    this.me = s.players[s.cur]?.human ? s.cur : 0
     this.inGame = true
     this.selUnit = -1; this.selCity = -1
     drainEvents()
     const go = () => {
       this.scene.reset()
-      const cap = citiesOf(s, 0).find(c => c.capital) ?? citiesOf(s, 0)[0]
-      const u = unitsOf(s, 0)[0]
+      const cap = citiesOf(s, this.me).find(c => c.capital) ?? citiesOf(s, this.me)[0]
+      const u = unitsOf(s, this.me)[0]
       if (cap) this.scene.centerOn(cap.x, cap.y, false)
       else if (u) this.scene.centerOn(u.x, u.y, false)
       this.hud.enterGame()
-      const first = unitsOf(s, 0).find(v => v.type === 'settler')
+      const first = unitsOf(s, this.me).find(v => v.type === 'settler')
       if (first && !cap) this.select(first)
       this.refresh()
     }
@@ -115,31 +172,31 @@ export class App implements MapHost {
     if (!this.unit || this.unit.type !== 'worker') this.roadMode = false
     const u = this.unit
     const c = this.city
-    if (c && c.owner === 0) {
+    if (c && c.owner === this.me) {
       this.scene.showWorked(c.worked, cityWorkable(this.state, c))
       this.scene.showCityRing(c.x, c.y)
       this.scene.showWorked(c.worked, cityWorkable(this.state, c))
       return
     }
-    if (!u || u.owner !== 0) { this.selUnit = -1; this.scene.showSelection(null, [], []); return }
+    if (!u || u.owner !== this.me) { this.selUnit = -1; this.scene.showSelection(null, [], []); return }
     const s = this.state
-    for (const i of reachable(s, u)) if (s.players[0].explored[i]) this.reach.add(i)
+    for (const i of reachable(s, u)) if (s.players[this.me].explored[i]) this.reach.add(i)
     const d = UNITS[u.type]
     for (const [x, y] of tilesWithin(s, u.x, u.y, d.ranged ? d.range! : 1)) {
       const pv = previewAttack(s, u, x, y)
-      if (pv && s.players[0].visible[idx(s, x, y)]) { this.targets.add(idx(s, x, y)); this.reach.delete(idx(s, x, y)) }
+      if (pv && s.players[this.me].visible[idx(s, x, y)]) { this.targets.add(idx(s, x, y)); this.reach.delete(idx(s, x, y)) }
     }
-    this.pm = pathMap(s, u, undefined, s.players[0])
+    this.pm = pathMap(s, u, undefined, s.players[this.me])
     this.scene.showSelection(u, [...this.reach], [...this.targets])
     if (this.hints && u.type === 'worker' && !u.work) {
       let best = -1, bv = -Infinity
       for (let i = 0; i < s.tiles.length; i++) {
-        if (s.tiles[i].owner !== 0 || !s.players[0].explored[i]) continue
-        const j = tileJobs(s, i, 0).find(o => o.ok && o.job !== 'road')
+        if (s.tiles[i].owner !== this.me || !s.players[this.me].explored[i]) continue
+        const j = tileJobs(s, i, this.me).find(o => o.ok && o.job !== 'road')
         if (!j || this.pm.dist[i] === Infinity) continue
         this.jobs.set(i, j.job)
         // Nejvíc se vyplatí surovina a pole, které město už obdělává; blízkost rozhoduje při shodě.
-        const v = (s.tiles[i].res ? 6 : 0) + (s.cities.some(c => c.owner === 0 && c.worked.includes(i)) ? 4 : 0) - this.pm.dist[i] * 1.2
+        const v = (s.tiles[i].res ? 6 : 0) + (s.cities.some(c => c.owner === this.me && c.worked.includes(i)) ? 4 : 0) - this.pm.dist[i] * 1.2
         if (v > bv) { bv = v; best = i }
       }
       this.scene.showJobs([...this.jobs].map(([i, job]) => ({ i, job })), best)
@@ -148,8 +205,8 @@ export class App implements MapHost {
       // Nejlepší známá místa v dosahu několika tahů, dost daleko od sebe.
       const cand: [number, number][] = []
       for (let i = 0; i < s.tiles.length; i++) {
-        if (!s.players[0].explored[i] || this.pm.dist[i] === Infinity || this.pm.dist[i] > 12) continue
-        const sc = siteScore(s, 0, i % s.W, (i / s.W) | 0)
+        if (!s.players[this.me].explored[i] || this.pm.dist[i] === Infinity || this.pm.dist[i] > 12) continue
+        const sc = siteScore(s, this.me, i % s.W, (i / s.W) | 0)
         // Vzdálenější místo musí být o to lepší; pole, kde osadníci stojí, má malou výhodu.
         if (sc >= 44) cand.push([i, sc - this.pm.dist[i] * 1.2 + (this.pm.dist[i] === 0 ? 2 : 0)])
       }
@@ -159,9 +216,9 @@ export class App implements MapHost {
         if (picked.length >= 5) break
         if (picked.some(j => hexDist(i % s.W, (i / s.W) | 0, j % s.W, (j / s.W) | 0) < 3)) continue
         picked.push(i)
-        this.sites.set(i, siteScore(s, 0, i % s.W, (i / s.W) | 0))
+        this.sites.set(i, siteScore(s, this.me, i % s.W, (i / s.W) | 0))
       }
-      this.scene.showSites(picked.map((i, k) => ({ i, best: k === 0 })), s.players[0].nation)
+      this.scene.showSites(picked.map((i, k) => ({ i, best: k === 0 })), s.players[this.me].nation)
     }
     const far = u.goto ?? u.roadTo
     if (far && !u.goto) { const path = pathTo(s, this.pm, far[0], far[1]); if (path) this.scene.showRoute(path, [far]) }
@@ -181,7 +238,7 @@ export class App implements MapHost {
 
   /** Provede změnu stavu, přehraje animace a uloží hru. */
   async run(fn: () => void, fast = false): Promise<void> {
-    if (this.busy || this.state.over) return
+    if (this.busy || this.state.over || !this.myTurn) return
     this.busy = true
     try {
       fn()
@@ -192,22 +249,24 @@ export class App implements MapHost {
       this.busy = false
     }
     if (this.selUnit >= 0 && !this.unit) this.selUnit = -1
-    const pop = this.state.popup
-    this.state.popup = null
     saveGame(this.state)
     this.refresh()
     if (this.state.over) this.gameOver()
-    else if (pop) this.hud.showPopup(pop.title, pop.text)
+    // Po předání tahu si hráč svá okna přečte, až zase usedne k počítači.
+    else if (this.myTurn) this.showPopups()
   }
 
   private gameOver(): void {
     clearSave()
-    sfx(this.state.over!.won ? 'fanfare' : 'defeat')
+    const o = this.state.over!
+    // U jednoho počítače patří závěrečná obrazovka vítězi.
+    if (this.hotseat && this.state.players[o.winner]?.human && this.me !== o.winner) { this.me = o.winner; this.scene.reset(); this.refresh() }
+    sfx(o.won && o.winner === this.me ? 'fanfare' : 'defeat')
     this.hud.showGameOver()
   }
 
   onTileClick(x: number, y: number, right: boolean, shift = false): void {
-    if (this.busy || !this.inGame || this.hud.modalOpen || this.state.over) return
+    if (this.busy || !this.inGame || this.hud.modalOpen || this.state.over || !this.myTurn) return
     const s = this.state
     const i = idx(s, x, y)
     const u = this.unit
@@ -215,20 +274,18 @@ export class App implements MapHost {
       this.roadMode = false
       if (right) { this.refresh(); return }
       if (!this.pm || !pathTo(s, this.pm, x, y)) { sfx('error'); this.hud.toast('Tam dělníci cestu nedovedou.'); this.refresh(); return }
-      stopUnit(u); u.auto = false; u.roadTo = [x, y]
       sfx('build')
-      void this.run(() => roadStep(s, u)).then(() => { this.hud.toast('Dělníci postaví cestu až na označené pole.'); this.autoAdvance() })
+      void this.run(() => { this.cmd({ t: 'roadTo', unit: u.id, x, y }) }).then(() => { this.hud.toast('Dělníci postaví cestu až na označené pole.'); this.autoAdvance() })
       return
     }
     if (u) {
       if (this.targets.has(i)) { this.orderAttack(u, x, y); return }
       // Osadníci: klik na doporučené místo = dojít tam a založit město.
       if (u.type === 'settler' && this.sites.has(i) && !right && !shift && !(u.x === x && u.y === y)) {
-        stopUnit(u); u.todo = 'found'
         sfx('build')
-        void this.run(() => { moveUnit(s, u, x, y) }).then(() => {
+        void this.run(() => { this.cmd({ t: 'move', unit: u.id, x, y, todo: 'found' }) }).then(() => {
           const c = cityAt(s, x, y)
-          if (c && c.owner === 0 && !this.unit) { this.selCity = c.id; this.refresh() }
+          if (c && c.owner === this.me && !this.unit) { this.selCity = c.id; this.refresh() }
           else { this.hud.toast('Osadníci vyrazili a na místě založí město.'); this.autoAdvance() }
         })
         return
@@ -236,21 +293,20 @@ export class App implements MapHost {
       // Dělníci: klik na pole se zelenou značkou = dojít tam a postavit vylepšení.
       const job = this.jobs.get(i)
       if (job && !right && !shift && !(u.x === x && u.y === y)) {
-        stopUnit(u); u.auto = false; u.todo = job as ImprovementId
         sfx('build')
-        void this.run(() => { moveUnit(s, u, x, y) }).then(() => { const v = this.unit; if (v && (v.work || v.moves <= 0 || v.goto)) this.autoAdvance() })
+        void this.run(() => { this.cmd({ t: 'move', unit: u.id, x, y, todo: job as JobId }) }).then(() => { const v = this.unit; if (v && (v.work || v.moves <= 0 || v.goto)) this.autoAdvance() })
         return
       }
       // Levé tlačítko pošle jednotku i na vzdálené pole; na poli s vlastní jednotkou či městem místo toho vybírá.
-      const own = unitsAt(s, x, y).some(o => o.owner === 0) || cityAt(s, x, y)?.owner === 0
+      const own = unitsAt(s, x, y).some(o => o.owner === this.me) || cityAt(s, x, y)?.owner === this.me
       if (!(u.x === x && u.y === y) && (right || shift || this.reach.has(i) || !own)) { this.orderMove(u, x, y, shift); return }
     }
     if (right) return
     // Výběr: postupně voják, civilista, město.
-    const mine = unitsAt(s, x, y).filter(o => o.owner === 0).sort((a, b) => Number(isCivilian(a)) - Number(isCivilian(b)))
+    const mine = unitsAt(s, x, y).filter(o => o.owner === this.me).sort((a, b) => Number(isCivilian(a)) - Number(isCivilian(b)))
     const c = cityAt(s, x, y)
     const opts: (Unit | City)[] = [...mine]
-    if (c && c.owner === 0) opts.push(c)
+    if (c && c.owner === this.me) opts.push(c)
     if (!opts.length) { this.selUnit = -1; this.selCity = -1; this.refresh(); return }
     const curIdx = opts.findIndex(o => ('type' in o ? o.id === this.selUnit : o.id === this.selCity))
     const next = opts[(curIdx + 1) % opts.length]
@@ -262,15 +318,14 @@ export class App implements MapHost {
   private orderMove(u: Unit, x: number, y: number, append = false): void {
     const s = this.state
     if (append && u.goto) {
-      if (u.way.length >= 6) { sfx('error'); this.hud.toast('Fronta rozkazů je plná (nejvýš 6 bodů).'); return }
-      u.way.push([x, y]); u.auto = false
+      const r = this.cmd({ t: 'waypoint', unit: u.id, x, y })
+      if (!r.ok) { sfx('error'); if (r.text) this.hud.toast(r.text); return }
       sfx('click'); this.hud.toast(`Průjezdní bod ${u.way.length} přidán do fronty rozkazů.`)
-      saveGame(s); this.refresh()
+      this.commit()
       return
     }
-    stopUnit(u); u.auto = false
     if (!this.pm || !pathTo(s, this.pm, x, y)) { sfx('error'); this.hud.toast('Tam se jednotka nedostane.'); return }
-    void this.run(() => { moveUnit(s, u, x, y) }).then(() => {
+    void this.run(() => { this.cmd({ t: 'move', unit: u.id, x, y }) }).then(() => {
       const v = this.unit
       if (v && v.goto && this.gotoEta > 0) this.hud.toast(`${UNITS[v.type].name}: na cestě, dorazí za ${this.gotoEta} ${this.gotoEta === 1 ? 'tah' : this.gotoEta < 5 ? 'tahy' : 'tahů'}.`)
       if (v && v.moves <= 0) this.autoAdvance()
@@ -281,11 +336,11 @@ export class App implements MapHost {
     const s = this.state
     const pv = previewAttack(s, u, x, y)
     if (!pv) return
-    const go = () => void this.run(() => { attack(s, u, x, y) }).then(() => { const v = this.unit; if (!v || v.moves <= 0) this.autoAdvance() })
+    const go = (war = false) => void this.run(() => { this.cmd({ t: 'attack', unit: u.id, x, y, war }) }).then(() => { const v = this.unit; if (!v || v.moves <= 0) this.autoAdvance() })
     if (pv.needWar >= 0) {
       const n = NATIONS[s.players[pv.needWar].nation]
       this.hud.confirm(`Vyhlásit válku?`, `Útok na národ ${n.name} znamená válku. ${n.leader} vám to jen tak nezapomene.`, 'Vyhlásit válku', () => {
-        declareWar(s, 0, pv.needWar); go()
+        go(true)
       })
     } else go()
   }
@@ -298,14 +353,14 @@ export class App implements MapHost {
   }
 
   idleUnits(): Unit[] {
-    return unitsOf(this.state, 0).filter(u => u.moves > 0 && !u.skip && !u.sleep && !u.fortified && !u.work && !u.goto && !u.auto && !u.roadTo)
+    return unitsOf(this.state, this.me).filter(u => u.moves > 0 && !u.skip && !u.sleep && !u.fortified && !u.work && !u.goto && !u.auto && !u.roadTo)
   }
 
   attention(): Attention {
     const s = this.state
-    const cs = citiesOf(s, 0)
-    if (cs.length && !s.players[0].research && availableTechs(s.players[0]).length) return { kind: 'research' }
-    if (cs.length && traditionReady(s.players[0])) return { kind: 'tradition' }
+    const cs = citiesOf(s, this.me), p = this.player
+    if (cs.length && !p.research && availableTechs(p).length) return { kind: 'research' }
+    if (cs.length && traditionReady(p)) return { kind: 'tradition' }
     const c = cs.find(o => !o.build)
     if (c) return { kind: 'city', city: c }
     const idle = this.idleUnits()
@@ -319,7 +374,7 @@ export class App implements MapHost {
 
   /** Hlavní tlačítko: vyřídí, co čeká, jinak ukončí tah. */
   mainAction(force = false): void {
-    if (this.busy || this.state.over || this.hud.modalOpen) return
+    if (this.busy || this.state.over || this.hud.modalOpen || !this.myTurn) return
     const a = force ? { kind: 'end' as const } : this.attention()
     sfx('click')
     if (a.kind === 'research') this.hud.showTech()
@@ -330,14 +385,16 @@ export class App implements MapHost {
   }
 
   endTurn(): void {
-    if (this.busy || this.state.over) return
+    if (this.busy || this.state.over || !this.myTurn) return
     this.selCity = -1
     sfx('turn')
     this.hud.setWaiting(true)
     this.hud.markNotesRead()
-    void this.run(() => endTurn(this.state), true).then(() => {
+    void this.run(() => { this.cmd({ t: 'endTurn' }) }, true).then(() => {
       this.hud.setWaiting(false)
       if (this.state.over) return
+      // Na řadě je další hráč u téhož počítače.
+      if (!this.myTurn) { this.handover(); return }
       const u = this.unit
       if (!u || u.moves <= 0) { const n = this.idleUnits()[0]; if (n) this.select(n, true) }
       this.hud.checkOffers()
@@ -346,50 +403,46 @@ export class App implements MapHost {
 
   unitAction(a: string): void {
     const u = this.unit
-    if (!u || this.busy) return
+    if (!u || this.busy || !this.myTurn) return
     const s = this.state
+    const unit = u.id
     if (a === 'found') {
       const err = canFoundCity(s, u)
       if (err) { sfx('error'); this.hud.toast(err); return }
-      void this.run(() => { const c = foundCity(s, u); if (c) { this.selUnit = -1; this.selCity = c.id } })
+      void this.run(() => { const r = this.cmd({ t: 'found', unit }); if (r.city !== undefined) { this.selUnit = -1; this.selCity = r.city } })
       return
     }
     if (a.startsWith('imp:')) {
       const job = a.slice(4) as ImprovementId | 'road'
-      if (canWork(s, u, job) && startWork(s, u, job)) { sfx('build'); this.hud.toast(`${job === 'road' ? 'Cesta' : IMPROVEMENTS[job].name}: hotovo za ${u.workLeft} tahy.`); saveGame(s); this.autoAdvance(); this.refresh() }
+      if (this.cmd({ t: 'work', unit, job }).ok) { sfx('build'); this.hud.toast(`${job === 'road' ? 'Cesta' : IMPROVEMENTS[job].name}: hotovo za ${u.workLeft} tahy.`); saveGame(s); this.autoAdvance(); this.refresh() }
       return
     }
     if (a === 'roadto') { this.roadMode = !this.roadMode; sfx('click'); if (this.roadMode) this.hud.toast('Klikněte na pole, kam má cesta vést (pravé tlačítko ruší).'); this.refresh(); return }
     if (a.startsWith('promo:')) {
-      if (promoteUnit(s, u, a.slice(6) as PromoId)) { sfx('quest'); saveGame(s); this.refresh() }
+      if (this.cmd({ t: 'promo', unit, id: a.slice(6) as PromoId }).ok) { sfx('quest'); this.commit() }
       return
     }
     if (a === 'upgradeall') {
       // Přezbrojí všechny jednotky téhož druhu, u kterých to právě jde a na které stačí zlato.
-      const type = u.type
-      void this.run(() => { let n = 0; for (const o of unitsOf(s, 0)) if (o.type === type && !upgradeBlock(s, o) && upgradeUnit(s, o)) n++; note(s, 0, `Přezbrojeno jednotek: ${n}.`, 'good') })
+      void this.run(() => { this.cmd({ t: 'upgrade', unit, all: true }) })
       return
     }
     if (a === 'upgrade') {
       const err = upgradeBlock(s, u)
       if (err) { sfx('error'); this.hud.toast(err); return }
-      void this.run(() => { upgradeUnit(s, u) })
+      void this.run(() => { this.cmd({ t: 'upgrade', unit }) })
       return
     }
-    if (a === 'auto') {
-      stopUnit(u); u.auto = true; u.sleep = false; u.fortified = false
-      this.hud.toast(u.type === 'worker' ? 'Dělníci budou sami vylepšovat pole. Zrušíte tlačítkem Probudit.' : 'Jednotka bude sama zkoumat mapu. Zrušíte tlačítkem Probudit.')
-    }
-    else if (a === 'fortify') { u.fortified = true; stopUnit(u); u.sleep = false }
-    else if (a === 'sleep') { u.sleep = true; stopUnit(u) }
-    else if (a === 'skip') { u.skip = true }
-    else if (a === 'wake') { u.sleep = false; u.fortified = false; u.work = null; stopUnit(u); u.auto = false; u.skip = false; saveGame(s); this.refresh(); return }
-    else if (a === 'disband') {
+    if (a === 'disband') {
       this.hud.confirm('Rozpustit jednotku?', `${UNITS[u.type].name}: jednotka bude nenávratně rozpuštěna.`, 'Rozpustit', () => {
-        void this.run(() => { killUnit(s, u); updateVisibility(s, 0) })
+        void this.run(() => { this.cmd({ t: 'disband', unit }) })
       })
       return
     }
+    if (a !== 'auto' && a !== 'fortify' && a !== 'sleep' && a !== 'skip' && a !== 'wake') return
+    if (!this.cmd({ t: 'order', unit, o: a }).ok) return
+    if (a === 'wake') { this.commit(); return }
+    if (a === 'auto') this.hud.toast(u.type === 'worker' ? 'Dělníci budou sami vylepšovat pole. Zrušíte tlačítkem Probudit.' : 'Jednotka bude sama zkoumat mapu. Zrušíte tlačítkem Probudit.')
     sfx('click')
     saveGame(s)
     this.autoAdvance()
@@ -398,15 +451,14 @@ export class App implements MapHost {
 
   /** Přidá položku do výroby města: na konec fronty, s `front` hned na řadu. */
   chooseBuild(c: City, it: BuildItem, front = false): void {
-    const err = enqueue(this.state, c, it, front)
-    if (err) { sfx('error'); this.hud.toast(err); return }
+    const r = this.cmd({ t: 'build', city: c.id, item: it, front })
+    if (!r.ok) { sfx('error'); if (r.text) this.hud.toast(r.text); return }
     sfx('build')
-    saveGame(this.state)
-    this.refresh()
+    this.commit()
   }
 
-  queueRemove(c: City, i: number): void { dequeue(this.state, c, i); sfx('click'); saveGame(this.state); this.refresh() }
-  queuePromote(c: City, i: number): void { promote(this.state, c, i); sfx('build'); saveGame(this.state); this.refresh() }
+  queueRemove(c: City, i: number): void { if (this.cmd({ t: 'unqueue', city: c.id, i }).ok) { sfx('click'); this.commit() } }
+  queuePromote(c: City, i: number): void { if (this.cmd({ t: 'promote', city: c.id, i }).ok) { sfx('build'); this.commit() } }
 
   toggleHints(on = !this.hints): void {
     this.hints = on
@@ -417,72 +469,62 @@ export class App implements MapHost {
   }
 
   advise(c: City): void {
-    adviseBuild(this.state, c)
+    if (!this.cmd({ t: 'advise', city: c.id }).ok) return
     sfx('build')
-    this.refresh()
+    this.commit()
   }
 
   buyNow(c: City): void {
-    void this.run(() => { if (buy(this.state, c)) sfx('found'); else sfx('error') })
+    void this.run(() => { sfx(this.cmd({ t: 'buy', city: c.id }).ok ? 'found' : 'error') })
   }
 
   chooseTradition(id: TraditionId): void {
-    if (!adoptTradition(this.state, this.state.players[0], id)) { sfx('error'); return }
+    if (!this.cmd({ t: 'tradition', id }).ok) { sfx('error'); return }
     sfx('quest')
-    saveGame(this.state)
-    this.refresh()
+    this.commit()
   }
 
   /** Zvolí výzkum; u vzdálené technologie naplánuje celou cestu k ní. S `append` se zařadí za dosavadní plán. */
   chooseTech(t: TechId, append = false): void {
-    const p = this.state.players[0]
-    if (!planResearch(p, t, append)) return
+    if (!this.cmd({ t: 'research', tech: t, append }).ok) return
     sfx('build')
-    saveGame(this.state)
-    this.refresh()
+    this.commit()
   }
 
+  /** Přehraje zvuky, které příkaz vyvolal (bez animací). */
+  private sounds(): void { for (const ev of drainEvents()) if (ev.e === 'sound') sfx(ev.id) }
+
   proposePeace(pid: number): string {
-    const s = this.state
-    if (!atWar(s, 0, pid)) return ''
-    if (aiAcceptsPeace(s, pid)) { makePeace(s, 0, pid); sfx('quest'); saveGame(s); this.refresh(); return 'Mír uzavřen.' }
-    sfx('error')
-    return 'Odmítnuto. „Ještě jsme neskončili.“'
+    if (!atWar(this.state, this.me, pid)) return ''
+    const r = this.cmd({ t: 'peace', vs: pid })
+    sfx(r.ok ? 'quest' : 'error')
+    this.commit()
+    return r.text ?? ''
   }
 
   declare(pid: number): void {
-    declareWar(this.state, 0, pid)
-    for (const ev of drainEvents()) if (ev.e === 'sound') sfx(ev.id)
-    saveGame(this.state)
-    this.refresh()
+    this.cmd({ t: 'war', vs: pid })
+    this.sounds()
+    this.commit()
   }
 
   /** Diplomatická akce hráče; vrací odpověď soupeře. */
   diplo(kind: string, pid: number, arg: string): string {
-    const s = this.state
-    const r = kind === 'gift' ? giveGold(s, pid) : kind === 'sell' ? sellResource(s, pid, arg as ResourceId) : kind === 'buy' ? buyResource(s, pid, arg as ResourceId) : askAlliance(s, pid, Number(arg))
-    for (const ev of drainEvents()) if (ev.e === 'sound') sfx(ev.id)
+    const r = this.cmd({ t: 'diplo', kind: kind as 'gift' | 'sell' | 'buy' | 'ally', vs: pid, arg })
+    this.sounds()
     sfx(r.ok ? 'quest' : 'error')
-    saveGame(s)
-    this.refresh()
-    return r.text
+    this.commit()
+    return r.text ?? ''
   }
 
   answerOffer(from: number, accept: boolean): void {
-    const s = this.state
-    const o = s.offers.find(x => x.from === from)
-    s.offers = s.offers.filter(x => x !== o)
-    if (o?.kind === 'ally') {
-      answerAlly(s, from, o.vs!, accept)
-      for (const ev of drainEvents()) if (ev.e === 'sound') sfx(ev.id)
-      saveGame(s); this.refresh()
-      return
-    }
-    if (accept) makePeace(s, 0, from)
-    else note(s, 0, `Odmítli jste mír s národem ${NATIONS[s.players[from].nation].name}.`, 'info')
-    saveGame(s)
-    this.refresh()
+    this.cmd({ t: 'answer', from, accept })
+    this.sounds()
+    this.commit()
   }
+
+  /** Rada rádce přečtena. */
+  tipRead(id: string): void { this.cmd({ t: 'tip', id }); this.commit() }
 
   // ------------------------------------------------------------ vstup
 

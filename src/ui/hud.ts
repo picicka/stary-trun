@@ -14,6 +14,7 @@ import {
   unitsAt, unitsOf, UNITS_PER_SOURCE, resourceReport, unitsNeeding, traditionAdvice, techPath, foundBlock, isCoastal, traditionReady, pendingPromos, tileJobs, upgradeBlock, upgradeCost, upgradeTarget, xpLevel,
 } from '../game/rules.ts'
 import { hasSave, pickRivals, START_TECH } from '../game/state.ts'
+import { tipKey } from '../game/commands.ts'
 import { BARB, type BuildItem, type City, type Note, type Unit } from '../game/types.ts'
 import { isMusicOn, isMuted, setMusic, setMuted, sfx } from '../audio.ts'
 import type { App } from '../app.ts'
@@ -76,6 +77,9 @@ export class Hud {
   private pickDiff: Difficulty = 'normal'
   private pickScenario: ScenarioId = 'valley'
   private setupStep = 0
+  /** Kolik lidí hraje u jednoho počítače a které národy si už vybrali. */
+  private pickHumans = 1
+  private picks: NationId[] = []
 
   private app: App
 
@@ -147,7 +151,11 @@ export class Hud {
 
   get modalOpen(): boolean { return !this.modal.classList.contains('hidden') }
   private get s() { return this.app.state }
-  private get me() { return this.app.state.players[0] }
+  private get me() { return this.app.state.players[this.app.me] }
+  /** Id hráče, který se na hru dívá. */
+  private get my(): number { return this.app.me }
+  /** Ostatní národy (bez barbarů). */
+  private get rivals() { return this.s.players.filter(p => p.id !== BARB && p.id !== this.my) }
 
   // ------------------------------------------------------------ delegované kliky
 
@@ -171,6 +179,7 @@ export class Hud {
       case 'diplo': sfx('click'); this.showDiplo(); break
       case 'help': sfx('click'); this.showHelp(); break
       case 'close': sfx('click'); this.closeModal(); break
+      case 'seat': this.seatTaken(); break
       case 'city-close': app.openCity(null); break
       case 'build': {
         const c = app.city
@@ -190,7 +199,7 @@ export class Hud {
       case 'music': setMusic(!isMusicOn()); sfx('click'); this.render(); break
       case 'zoom': app.scene.zoomBy(Number(arg)); break
       case 'menu': this.confirm('Odejít do hlavního menu?', 'Hra je průběžně ukládána, můžete v ní později pokračovat.', 'Odejít', () => app.quitToMenu()); break
-      case 'tip-ok': this.s.tutorial.push(arg); this.tipOpen = false; sfx('click'); this.render(); break
+      case 'tip-ok': this.tipOpen = false; sfx('click'); this.app.tipRead(arg); break
       case 'tip-off': app.toggleHints(false); break
       case 'hints': app.toggleHints(); break
       case 'note': {
@@ -201,21 +210,31 @@ export class Hud {
       }
       case 'citylabel': {
         const c = this.s.cities.find(o => o.id === Number(arg))
-        if (c && c.owner === 0 && !app.busy) { sfx('select'); app.openCity(c) }
+        if (c && c.owner === this.my && !app.busy) { sfx('select'); app.openCity(c) }
         break
       }
       case 'war': this.confirm('Vyhlásit válku?', `Opravdu chcete vyhlásit válku národu ${NATIONS[this.s.players[Number(arg)].nation].name}?`, 'Vyhlásit válku', () => { app.declare(Number(arg)); this.showDiplo() }); break
       case 'peace': { const msg = app.proposePeace(Number(arg)); this.showDiplo(msg) ; break }
       case 'offer-yes': app.answerOffer(Number(arg), true); this.closeModal(); this.checkOffers(); break
       case 'offer-no': app.answerOffer(Number(arg), false); this.closeModal(); this.checkOffers(); break
-      case 'm-new': sfx('click'); this.setupStep = 0; this.showSetup(); break
-      case 'm-next': sfx('click'); this.setupStep = 1; this.showSetup(); break
+      case 'm-new': sfx('click'); this.setupStep = 0; this.picks = []; this.showSetup(); break
+      case 'm-next': sfx('click'); this.setupStep = 1; this.picks = []; this.showSetup(); break
+      case 'm-humans': this.pickHumans = Number(arg); sfx('click'); this.showSetup(); break
       case 'm-continue': sfx('click'); if (!app.continueGame()) this.showTitle(); break
       case 'm-help': sfx('click'); this.showGuide(0); break
-      case 'm-back': sfx('click'); if (this.setupStep === 1) { this.setupStep = 0; this.showSetup() } else this.showTitle(); break
-      case 'm-nation': this.pickNation = arg as NationId; sfx('select'); this.showSetup(); break
+      case 'm-back': sfx('click'); if (this.picks.length) { this.pickNation = this.picks.pop()!; this.showSetup() } else if (this.setupStep === 1) { this.setupStep = 0; this.showSetup() } else this.showTitle(); break
+      case 'm-nation': if (!this.picks.includes(arg as NationId)) { this.pickNation = arg as NationId; sfx('select'); this.showSetup() } break
       case 'm-diff': this.pickDiff = arg as Difficulty; sfx('click'); this.showSetup(); break
-      case 'm-start': sfx('found'); app.newGame(this.pickNation, this.pickDiff, this.pickScenario); break
+      case 'm-start': {
+        // Hráči si vybírají národ jeden po druhém; po posledním hra začne.
+        this.picks.push(this.pickNation)
+        if (this.picks.length < this.pickHumans) { sfx('select'); this.pickNation = PLAYABLE.find(n => !this.picks.includes(n))!; this.showSetup(); break }
+        sfx('found')
+        const nations = this.picks
+        this.picks = []
+        app.newGame(nations, this.pickDiff, this.pickScenario)
+        break
+      }
       case 'm-scen': this.pickScenario = arg as ScenarioId; sfx('select'); this.showSetup(); break
       case 'over-menu': this.modalKind = ''; this.closeModal(); app.quitToMenu(); break
     }
@@ -239,11 +258,16 @@ export class Hud {
 
   private showSetup(): void {
     this.menu.className = 'setup'
+    const multi = this.pickHumans > 1
+    if (this.picks.includes(this.pickNation)) this.pickNation = PLAYABLE.find(n => !this.picks.includes(n))!
     const [r1, r2] = pickRivals(this.pickNation)
+    const who = this.picks.length + 1
+    const last = who >= this.pickHumans
     const cards = PLAYABLE.map(id => {
       const n = NATIONS[id]
       const u = UNITS[n.unique]
-      return `<button class="card panel ${id === this.pickNation ? 'sel' : ''}" style="--c:${n.css}" data-a="m-nation" data-v="${id}">
+      const taken = this.picks.indexOf(id)
+      return `<button class="card panel ${id === this.pickNation ? 'sel' : ''} ${taken >= 0 ? 'taken' : ''}" style="--c:${n.css}" data-a="m-nation" data-v="${id}" ${taken >= 0 ? `disabled${tip(`Tento národ si vybral ${taken + 1}. hráč.`)}` : ''}>
         <div class="ph"><img class="p" src="${UI}p_${id}.png" alt=""><div><img class="e" src="${UI}em_${id}.png" alt=""><h3>${n.name}</h3></div></div>
         <div class="leader">${esc(n.leader)}<br>${esc(n.title)}</div>
         <div class="lore">${esc(n.lore)}</div>
@@ -263,12 +287,14 @@ export class Hud {
       <div class="scens">${scens}</div>
       <div class="setuprow"><span>Obtížnost:</span><div class="seg">${diffs}</div></div>
       <div class="setupinfo">${esc(DIFFICULTY[this.pickDiff].desc)}</div>
+      <div class="setuprow"><span>Hráčů u${NB}počítače:</span><div class="seg">${[1, 2, 3].map(k => `<button class="${k === this.pickHumans ? 'on' : ''}" data-a="m-humans" data-v="${k}">${k}</button>`).join('')}</div></div>
+      <div class="setupinfo">${esc(multi ? `Hra více hráčů u jednoho počítače: táhnete jeden po druhém a mezi tahy si počítač předáváte, mapu přitom zakryje opona. ${this.pickHumans === 2 ? 'Třetí národ vede počítač.' : 'Všechny tři národy vedou lidé.'}` : 'Hra jednoho hráče proti dvěma soupeřům, které vede počítač.')}</div>
       <div class="setuprow"><button class="btn big" data-a="m-back">Zpět</button><button class="btn big" data-a="m-next">Dál: výběr národa</button></div>` : `
-      <h2>Vyberte svůj národ</h2>
+      <h2>${multi ? `${who}. hráč: vyberte svůj národ` : 'Vyberte svůj národ'}</h2>
       <div class="lead">${esc(`${sd.name}, obtížnost ${DIFFICULTY[this.pickDiff].name.toLowerCase()}. Každý národ má jednu výjimečnou vlastnost a jednu unikátní jednotku.`)}</div>
       <div class="cards">${cards}</div>
-      <div class="setupinfo">${esc(`Soupeři: ${NATIONS[r1].name} (výbojní) a ${NATIONS[r2].name} (stavitelé).`)}</div>
-      <div class="setuprow"><button class="btn big" data-a="m-back">Zpět</button><button class="btn big" data-a="m-start">Začít misi</button></div>`
+      <div class="setupinfo">${esc(multi ? `Vybráno: ${this.picks.map((n, k) => `${k + 1}. hráč – ${NATIONS[n].name}`).join(', ') || 'zatím nikdo'}.` : `Soupeři: ${NATIONS[r1].name} (výbojní) a ${NATIONS[r2].name} (stavitelé).`)}</div>
+      <div class="setuprow"><button class="btn big" data-a="m-back">Zpět</button><button class="btn big" data-a="m-start">${last ? 'Začít misi' : `Dál: ${who + 1}. hráč`}</button></div>`
     this.menu.scrollTop = scroll
     this.drawScenarioPreviews()
   }
@@ -316,7 +342,7 @@ export class Hud {
     this.read = new WeakSet()
     // Po načtení uložené hry nezahlcovat starými zprávami.
     if (this.s.turn > 1) for (const n of this.s.notes) this.read.add(n)
-    this.modal.classList.add('hidden')
+    if (this.modalKind !== 'handover') this.modal.classList.add('hidden')
   }
 
   // ------------------------------------------------------------ vykreslení
@@ -339,9 +365,9 @@ export class Hud {
   private renderTop(): void {
     const s = this.s, p = this.me
     const n = NATIONS[p.nation]
-    const inc = playerIncome(s, 0)
-    const cult = citiesOf(s, 0).reduce((a, c) => a + cityYields(s, c).culture, 0)
-    const mil = unitsOf(s, 0).filter(u => !isCivilian(u)).length
+    const inc = playerIncome(s, this.my)
+    const cult = citiesOf(s, this.my).reduce((a, c) => a + cityYields(s, c).culture, 0)
+    const mil = unitsOf(s, this.my).filter(u => !isCivilian(u)).length
     let research: string
     if (p.research) {
       const t = TECHS[p.research]
@@ -349,18 +375,18 @@ export class Hud {
       research = `<div class="research" data-a="tech-open"${tip(`Výzkum: ${t.name}|${p.progress} / ${t.cost} bodů vědy, hotovo za ${left} ${turnsWord(left)}.\nOdemyká: ${t.unlocks}.${p.techQueue.length ? `\nPotom: ${p.techQueue.map(q => TECHS[q].name).join(' → ')}.` : ''}\nKliknutím otevřete strom technologií (T).`)}>${ic('sci')}<span>${t.name}</span><div class="bar"><i style="width:${Math.min(100, 100 * p.progress / t.cost)}%"></i></div><small>${left}${NB}${turnsWord(left)}</small></div>`
     } else {
       const any = availableTechs(p).length > 0
-      research = `<div class="research ${any && citiesOf(s, 0).length ? 'need' : ''}" data-a="tech-open"${tip('Výzkum|Kliknutím otevřete strom technologií (T) a zvolte, co zkoumat.')}>${ic('sci')}<span>${any ? 'Zvolte výzkum' : 'Vše objeveno'}</span></div>`
+      research = `<div class="research ${any && citiesOf(s, this.my).length ? 'need' : ''}" data-a="tech-open"${tip('Výzkum|Kliknutím otevřete strom technologií (T) a zvolte, co zkoumat.')}>${ic('sci')}<span>${any ? 'Zvolte výzkum' : 'Vše objeveno'}</span></div>`
     }
     this.top.innerHTML = `
       <div class="nation" style="color:${n.css}"${tip(`${n.name} – ${n.trait}|${n.traitDesc}\nUnikátní jednotka: ${UNITS[n.unique].name}. ${UNITS[n.unique].desc}`)}><img src="${UI}em_${p.nation}.png" alt="">${n.name}</div>
-      <div class="stat"${tip(`Pokladna: ${p.gold} zlata|Města vynášejí: +${inc.gold + inc.maint + inc.upkeep - inc.trade}\nÚdržba budov: −${inc.maint}\nŽold vojska: −${inc.upkeep} (jednotek ${mil}, zdarma ${freeUnits(s, 0)})${inc.trade ? `\nObchod se surovinami: ${signed(inc.trade)}` : ''}\nCelkem za tah: ${signed(inc.gold)}\nZa zlato lze ve městě dokončit výrobu ihned. Prázdná pokladna brzdí výzkum.`)}>${ic('gold')}${p.gold} <small>${signed(inc.gold)}</small></div>
+      <div class="stat"${tip(`Pokladna: ${p.gold} zlata|Města vynášejí: +${inc.gold + inc.maint + inc.upkeep - inc.trade}\nÚdržba budov: −${inc.maint}\nŽold vojska: −${inc.upkeep} (jednotek ${mil}, zdarma ${freeUnits(s, this.my)})${inc.trade ? `\nObchod se surovinami: ${signed(inc.trade)}` : ''}\nCelkem za tah: ${signed(inc.gold)}\nZa zlato lze ve městě dokončit výrobu ihned. Prázdná pokladna brzdí výzkum.`)}>${ic('gold')}${p.gold} <small>${signed(inc.gold)}</small></div>
       <div class="stat"${tip('Věda za tah|Každý obyvatel dává 1 vědu, další přidává hlavní město, knihovny a akademie.')}>${ic('sci')}<small>${signed(inc.sci)}</small></div>
       <div class="stat clickable ${traditionReady(p) ? 'need' : ''}" data-a="trad-open"${tip(`Kultura: ${p.culture} / ${traditionCost(p.traditions.length)}|Města dohromady dávají ${signed(cult)} kultury za tah. Za nastřádanou kulturu si národ vybírá tradice – trvalé výhody (máte ${p.traditions.length}).${traditionReady(p) ? '\nMůžete zvolit novou tradici!' : cult > 0 ? `\nDalší tradice za ${Math.max(1, Math.ceil((traditionCost(p.traditions.length) - p.culture) / cult))} tahů.` : ''}\nKaždé město navíc svou kulturou rozšiřuje hranice. Kliknutím otevřete tradice (C).`)}>${ic('culture')}${p.culture}<small>/${traditionCost(p.traditions.length)}</small></div>
       <div class="stat clickable" data-a="mission"${tip(`${ERAS[p.era].name}|${p.era < ERAS.length - 1 ? `Další věk (${ERAS[p.era + 1].name}) při ${ERAS[p.era + 1].techs} technologiích, máte ${p.techs.length}. Vstup do věku přináší zlato a kulturu; kdo je první, získá zlatý věk.` : 'Dosáhli jste posledního věku.'}${s.turn < p.goldenUntil ? `\nZlatý věk: ještě ${p.goldenUntil - s.turn} tahů (+1 výroba, zlato a kultura v každém městě).` : ''}`)}>${s.turn < p.goldenUntil ? '<b style="color:var(--gold)">★</b> ' : ''}${ERAS[p.era].name.replace(/^Věk | věk$/, '').replace(/^./, ch => ch.toUpperCase())}</div>
       ${research}
       ${this.resourceChips()}
       <div class="stat"${tip(`Tah ${Math.min(s.turn, s.maxTurns)} z ${s.maxTurns}|Po posledním tahu rozhodne o vítězi skóre.`)}>${ic('turn')}${Math.min(s.turn, s.maxTurns)}${NB}/${NB}${s.maxTurns}</div>
-      <div class="stat"${tip('Skóre|Technologie 6 bodů, město 12, obyvatel 4, budova 3, pole území 0,5, splněné vedlejší úkoly 20–25.')}>${ic('star')}${score(s, 0)}</div>
+      <div class="stat"${tip('Skóre|Technologie 6 bodů, město 12, obyvatel 4, budova 3, pole území 0,5, splněné vedlejší úkoly 20–25.')}>${ic('star')}${score(s, this.my)}</div>
       <div class="spacer"></div>
       <button class="tbtn ${this.overviewOn ? 'on' : ''}" data-a="overview"${tip('Přehled měst a jednotek (L)|Postranní seznam: co která města stavějí a co dělají jednotky. Kliknutím na řádek na ně skočíte. Zůstává otevřený, dokud ho nevypnete.')}>${ic('pop', 's')}<span class="lbl">Přehled</span></button>
       <button class="tbtn" data-a="mission" data-tip="Cíle mise (M)">${ic('flag', 's')}<span class="lbl">Mise</span></button>
@@ -374,11 +400,11 @@ export class Hud {
       <button class="tbtn" data-a="menu"${tip('Hlavní menu|Hra se ukládá sama, můžete v ní později pokračovat.')}>Menu</button>`
   }
 
-  markNotesRead(): void { for (const n of this.s.notes) this.read.add(n) }
+  markNotesRead(): void { for (const n of this.s.notes) if (n.pid === this.my) this.read.add(n) }
 
   private renderNotes(): void {
     const all = this.s.notes
-    const fresh = all.map((n, i) => ({ n, i })).filter(o => !this.read.has(o.n)).slice(-7)
+    const fresh = all.map((n, i) => ({ n, i })).filter(o => o.n.pid === this.my && !this.read.has(o.n)).slice(-7)
     this.notes.innerHTML = fresh.map(o => `<div class="note ${o.n.kind}" data-a="note" data-v="${o.i}"${o.n.x !== undefined ? tip('Kliknutím ukážete místo na mapě.') : ''}>${esc(o.n.text)}</div>`).join('')
   }
 
@@ -405,7 +431,7 @@ export class Hud {
       if (u.work) acts.push(`<span>${u.work === 'road' ? ROAD.name : IMPROVEMENTS[u.work].name}: ještě ${u.workLeft}${NB}${turnsWord(u.workLeft)}${u.roadTo ? ', pak cesta dál' : ''}</span>`)
       else if (!emb) {
         // Co lze postavit na poli, kde dělníci stojí – i s důvodem, proč něco nejde.
-        for (const j of tileJobs(s, idx(s, u.x, u.y), 0)) {
+        for (const j of tileJobs(s, idx(s, u.x, u.y), this.my)) {
           const verb = j.job === 'road' ? ROAD.verb : IMPROVEMENTS[j.job].verb
           const tt = `${j.name}|${j.effect ? `${j.effect[0].toUpperCase()}${j.effect.slice(1)}.\n` : ''}Stavba trvá ${j.turns} ${turnsWord(j.turns)}.${j.ok ? '' : `\nNelze: ${j.why}.`}`
           if (j.ok || j.why !== 'už stojí') acts.push(btn(`imp:${j.job}`, verb, '', j.job === 'road' ? 'road' : 'work', !j.ok || u.moves <= 0, tt))
@@ -420,7 +446,7 @@ export class Hud {
     if (upT) {
       const why = upgradeBlock(s, u)
       acts.push(`<button class="btn" data-a="unit" data-v="upgrade" ${why ? 'disabled' : ''}${tip(`Přezbrojit: ${UNITS[upT].name}|${UNITS[upT].desc}\nSíla ${UNITS[upT].str}${UNITS[upT].ranged ? `, střelba ${UNITS[upT].ranged}` : ''}, pohyb ${UNITS[upT].move}. Zkušenosti a povýšení zůstanou.\nCena ${upgradeCost(s, u)} zlata, spotřebuje tah.${why ? `\nNelze: ${why}` : ''}`)}>${ic('up', 's')}${UNITS[upT].name} ${ic('gold', 's')}${upgradeCost(s, u)}<kbd>U</kbd></button>`)
-      const same = unitsOf(s, 0).filter(o => o.type === u.type && !upgradeBlock(s, o))
+      const same = unitsOf(s, this.my).filter(o => o.type === u.type && !upgradeBlock(s, o))
       if (same.length > 1) acts.push(`<button class="btn small" data-a="unit" data-v="upgradeall"${tip(`Přezbrojit všechny|Přezbrojí všech ${same.length} jednotek tohoto druhu, které stojí na vašem území a mají pohyb – dokud stačí zlato (${upgradeCost(s, u)} za kus).`)}>${ic('up', 's')}Všechny (${same.length})</button>`)
     }
     const resting = u.fortified || u.sleep || u.work || u.goto || u.auto || u.roadTo
@@ -454,7 +480,7 @@ export class Hud {
 
   private renderCity(): void {
     const c = this.app.city
-    if (!c || c.owner !== 0) { this.cityPanel.classList.add('hidden'); this.notes.classList.remove('hidden'); return }
+    if (!c || c.owner !== this.my) { this.cityPanel.classList.add('hidden'); this.notes.classList.remove('hidden'); return }
     const s = this.s
     const y = cityYields(s, c)
     const need = growthNeed(s, c)
@@ -469,7 +495,7 @@ export class Hud {
     let acc = c.build ? turns(c.build) : 0
     const queue = c.queue.map((it, i) => {
       acc += Math.max(1, Math.ceil(itemCost(it) / Math.max(1, y.prod)))
-      return `<div class="qitem"><b>${i + 2}.</b><img src="${this.itemIcon(it, 0)}" alt=""><span class="n">${itemName(it)}</span><span class="c">za ${acc} t.</span>
+      return `<div class="qitem"><b>${i + 2}.</b><img src="${this.itemIcon(it, this.my)}" alt=""><span class="n">${itemName(it)}</span><span class="c">za ${acc} t.</span>
         <button class="btn small" data-a="q-up" data-v="${i}"${tip('Stavět hned|Položka přeskočí na začátek, dosavadní výroba se zařadí za ni.')}>▲</button>
         <button class="btn small" data-a="q-del" data-v="${i}"${tip('Odebrat z fronty')}>✕</button></div>`
     }).join('')
@@ -477,7 +503,7 @@ export class Hud {
     if (c.build) {
       const cost = itemCost(c.build), t = turns(c.build), bc = buyCost(s, c)
       const wonder = c.build.kind === 'building' && c.build.id === 'wonder'
-      cur = `<div class="current"><img src="${this.itemIcon(c.build, 0)}" alt=""><div class="n"><b>${itemName(c.build)}</b>
+      cur = `<div class="current"><img src="${this.itemIcon(c.build, this.my)}" alt=""><div class="n"><b>${itemName(c.build)}</b>
         <div class="sub"><div class="bar prod"><i style="width:${Math.min(100, 100 * c.prod / cost)}%"></i></div>${c.prod}${NB}/${NB}${cost} · ${t}${NB}${turnsWord(t)}</div></div>
         ${wonder ? '' : `<button class="btn small" data-a="buy" ${canBuy(s, c) ? '' : 'disabled'}${tip(`Koupit za ${bc} zlata|Dokončí rozestavěnou položku ihned. Máte ${this.me.gold} zlata.`)}>${ic('gold', 's')}${bc}</button>`}
         <button class="btn small" data-a="q-del" data-v="-1"${tip('Zrušit|Přestane stavět tuto položku; na řadu přijde další z fronty. Nastřádaná výroba zůstane.')}>✕</button></div>`
@@ -489,7 +515,7 @@ export class Hud {
       const inQ = c.queue.filter(q => sameItem(q, it)).length
       const tt = (it.kind === 'unit' ? this.unitTip(it.id) : this.buildingTip(it.id)) + '\nKlik: zařadit do fronty · Shift + klik: stavět hned'
       const extra = it.kind === 'unit' ? [UNITS[it.id].str ? `síla ${UNITS[it.id].str}` : '', UNITS[it.id].ranged ? `střelba ${UNITS[it.id].ranged}` : '', `pohyb ${UNITS[it.id].move}`].filter(Boolean).join(', ') + '. ' : ''
-      return `<button class="build ${isCur ? 'cur' : ''} ${isRec ? 'rec' : ''}" data-a="build" data-v="${it.kind}:${it.id}"${tip(tt + (isRec ? '\nTip rádce: tohle se městu teď hodí nejvíc.' : ''))}>${isRec ? REC : ''}<img src="${this.itemIcon(it, 0)}" alt="">
+      return `<button class="build ${isCur ? 'cur' : ''} ${isRec ? 'rec' : ''}" data-a="build" data-v="${it.kind}:${it.id}"${tip(tt + (isRec ? '\nTip rádce: tohle se městu teď hodí nejvíc.' : ''))}>${isRec ? REC : ''}<img src="${this.itemIcon(it, this.my)}" alt="">
         <span class="n">${def.name}${inQ ? ` <em class="inq">ve frontě${inQ > 1 ? ` ${inQ}×` : ''}</em>` : ''}<small>${esc(extra + def.desc)}</small></span><span class="c">${ic('prod', 's')}${itemCost(it)}<br>${turns(it)}${NB}${turnsWord(turns(it))}</span></button>`
     }
     const opts = availableBuilds(s, c)
@@ -498,7 +524,7 @@ export class Hud {
       if (d.nation && d.nation !== this.me.nation) return false
       if (UNIT_IDS.some(o => UNITS[o].replaces === id && UNITS[o].nation === this.me.nation)) return false
       return (!d.tech || hasTech(this.me, d.tech)) && !opts.some(o => o.kind === 'unit' && o.id === id)
-    }).map(id => `<div class="build off"${tip(this.unitTip(id))}><img src="${this.unitIcon(id, 0)}" alt=""><span class="n">${UNITS[id].name}<small>${esc(unitBlockReason(s, c, id) ?? '')}</small></span></div>`).join('')
+    }).map(id => `<div class="build off"${tip(this.unitTip(id))}><img src="${this.unitIcon(id, this.my)}" alt=""><span class="n">${UNITS[id].name}<small>${esc(unitBlockReason(s, c, id) ?? '')}</small></span></div>`).join('')
     const built = c.buildings.length ? c.buildings.map(b => `<span${tip(this.buildingTip(b))}><img src="${UI}b_${b}.png" alt="">${BUILDINGS[b].name}</span>`).join('') : '<span style="border:none;color:var(--muted)">zatím žádné</span>'
     const maxHp = cityMaxHp(c)
     this.cityPanel.classList.remove('hidden')
@@ -558,9 +584,9 @@ export class Hud {
   private nextTip(): Tip | null {
     const s = this.s, me = this.me
     if (!this.app.hints) return null
-    const done = (id: string) => s.tutorial.includes(id)
-    const cities = citiesOf(s, 0)
-    const units = unitsOf(s, 0)
+    const done = (id: string) => s.tutorial.includes(tipKey(this.my, id))
+    const cities = citiesOf(s, this.my)
+    const units = unitsOf(s, this.my)
     const tips: [string, boolean, string, string][] = [
       ['welcome', cities.length === 0 && units.some(u => u.type === 'settler'), 'Založte město',
         'Vítejte, vládče! Klikněte na osadníky a zvolte Založit město (klávesa B). Místo, kde stojí, je úrodné. Zlaté značky na mapě ukazují další dobrá místa – kliknutím tam osadníky pošlete a sami se usadí.'],
@@ -604,10 +630,10 @@ export class Hud {
   /** Stav strategických surovin (koně, železo) v horní liště. */
   private resourceChips(): string {
     const s = this.s
-    return resourceReport(s, 0).filter(r => RESOURCES[r.res].strategic).map(r => {
+    return resourceReport(s, this.my).filter(r => RESOURCES[r.res].strategic).map(r => {
       const def = RESOURCES[r.res]
       const nm = def.name, low = nm.toLowerCase()
-      const units = unitsNeeding(s, 0, r.res).join(', ') || 'žádná vaše jednotka (můžete ji ale prodávat v Diplomacii)'
+      const units = unitsNeeding(s, this.my, r.res).join(', ') || 'žádná vaše jednotka (můžete ji ale prodávat v Diplomacii)'
       const imp = def.improvement === 'mine' ? 'důl' : 'ohradu'
       const first = r.improved[0] ?? r.raw[0] ?? -1
       let state: string, mark: string, text: string
@@ -648,7 +674,7 @@ export class Hud {
     if (!on) return
     const s = this.s
     const scroll = this.overview.querySelector('.inner')?.scrollTop ?? 0
-    const cities = citiesOf(s, 0).map(c => {
+    const cities = citiesOf(s, this.my).map(c => {
       const y = cityYields(s, c)
       const need = growthNeed(s, c)
       const grow = y.foodNet > 0 ? `růst za ${Math.ceil((need - c.food) / y.foodNet)} t.` : y.foodNet < 0 ? '<span style="color:var(--bad)">hladoví</span>' : 'neroste'
@@ -657,24 +683,24 @@ export class Hud {
         const t = Math.max(1, Math.ceil((itemCost(c.build) - c.prod) / Math.max(1, y.prod)))
         what = `${esc(itemName(c.build))} <small>${t} ${turnsWord(t)}</small>${c.queue.length ? ` <small>· pak ${c.queue.map(q => esc(itemName(q))).join(', ')}</small>` : ''}`
       }
-      return `<div class="ov" data-a="ov-city" data-v="${c.id}">${c.build ? `<img src="${this.itemIcon(c.build, 0)}" alt="">` : `<img src="${UI}ic_prod.png" alt="" style="opacity:.4">`}<div><b>${c.capital ? '★ ' : ''}${esc(c.name)}</b> <small>${ic('pop', 's')}${c.pop} · ${grow}${c.hp < cityMaxHp(c) ? ` · <span style="color:var(--bad)">hradby ${c.hp}</span>` : ''}</small><br>${what}</div></div>`
+      return `<div class="ov" data-a="ov-city" data-v="${c.id}">${c.build ? `<img src="${this.itemIcon(c.build, this.my)}" alt="">` : `<img src="${UI}ic_prod.png" alt="" style="opacity:.4">`}<div><b>${c.capital ? '★ ' : ''}${esc(c.name)}</b> <small>${ic('pop', 's')}${c.pop} · ${grow}${c.hp < cityMaxHp(c) ? ` · <span style="color:var(--bad)">hradby ${c.hp}</span>` : ''}</small><br>${what}</div></div>`
     }).join('')
-    const mine = unitsOf(s, 0)
+    const mine = unitsOf(s, this.my)
     const row = (u: Unit) => {
       const [doing, idle] = this.unitDoing(u)
       const emb = isEmbarked(s, u)
-      return `<div class="ov ${u.id === this.app.selUnit ? 'sel' : ''}" data-a="ov-unit" data-v="${u.id}"><img src="${emb ? `${UI}u_boat_${this.me.nation}.png` : this.unitIcon(u.type, 0)}" alt=""><div><b>${UNITS[u.type].name}</b>${pendingPromos(u) > 0 ? ` <span style="color:var(--gold)"${tip('Čeká na povýšení')}>★</span>` : ''} <small>${u.hp < 100 ? `<span style="color:${u.hp < 40 ? 'var(--bad)' : 'var(--war)'}">${ic('hp', 's')}${u.hp}</span> · ` : ''}${ic('move', 's')}${mv(u.moves)}${emb ? ' · na moři' : ''}</small><br><span class="${idle ? 'idle' : 'doing'}">${esc(doing)}</span></div></div>`
+      return `<div class="ov ${u.id === this.app.selUnit ? 'sel' : ''}" data-a="ov-unit" data-v="${u.id}"><img src="${emb ? `${UI}u_boat_${this.me.nation}.png` : this.unitIcon(u.type, this.my)}" alt=""><div><b>${UNITS[u.type].name}</b>${pendingPromos(u) > 0 ? ` <span style="color:var(--gold)"${tip('Čeká na povýšení')}>★</span>` : ''} <small>${u.hp < 100 ? `<span style="color:${u.hp < 40 ? 'var(--bad)' : 'var(--war)'}">${ic('hp', 's')}${u.hp}</span> · ` : ''}${ic('move', 's')}${mv(u.moves)}${emb ? ' · na moři' : ''}</small><br><span class="${idle ? 'idle' : 'doing'}">${esc(doing)}</span></div></div>`
     }
     const civ = mine.filter(u => isCivilian(u)), mil = mine.filter(u => !isCivilian(u))
     const waiting = mine.filter(u => this.unitDoing(u)[1]).length
     this.overview.innerHTML = `<h2>Přehled<button class="x" data-a="overview"${tip('Zavřít přehled (L)')}>✕</button></h2><div class="inner">
-      <h4>Suroviny</h4>${resourceReport(s, 0).map(r => {
+      <h4>Suroviny</h4>${resourceReport(s, this.my).map(r => {
         const def = RESOURCES[r.res], n = r.improved.length + r.raw.length
         const first = r.improved[0] ?? r.raw[0] ?? -1
         const st = !r.known ? 'zatím neznámé' : def.strategic && r.cap > 0 ? `jednotek ${r.used} / ${r.cap}${r.raw.length ? `, bez vylepšení ${r.raw.length}` : ''}` : r.improved.length ? `využíváte ${r.improved.length}${r.raw.length ? `, bez vylepšení ${r.raw.length}` : ''}` : r.bought ? 'kupujete' : n ? `${n}× na území, chybí ${def.improvement === 'mine' ? 'důl' : def.improvement === 'pasture' ? 'ohrada' : 'farma'}` : 'nemáte'
         return `<div class="ov" ${first >= 0 ? `data-a="ov-tile" data-v="${first}"` : 'style="cursor:default"'}><i class="resic" style="background-image:url(${UI}r_${r.res}.png)"></i><div><b>${def.name}</b>${def.strategic ? ' <small>strategická</small>' : ''}<br><span class="${r.known && !r.improved.length && r.raw.length ? 'idle' : 'doing'}">${st}</span></div></div>`
       }).join('')}
-      <h4>Města (${citiesOf(s, 0).length})</h4>${cities || '<div class="sub">Zatím žádné město.</div>'}
+      <h4>Města (${citiesOf(s, this.my).length})</h4>${cities || '<div class="sub">Zatím žádné město.</div>'}
       <h4>Civilní jednotky (${civ.length})</h4>${civ.map(row).join('') || '<div class="sub">Žádné.</div>'}
       <h4>Vojsko (${mil.length})${waiting ? ` <small style="color:var(--gold)">· na rozkaz čeká ${waiting}</small>` : ''}</h4>${mil.map(row).join('') || '<div class="sub">Žádné.</div>'}</div>`
     const inner = this.overview.querySelector('.inner')
@@ -715,12 +741,12 @@ export class Hud {
       el.style.setProperty('--c', n.css)
       const vis = this.me.visible[idx(s, c.x, c.y)]
       let extra = ''
-      if (c.owner === 0) {
+      if (c.owner === this.my) {
         if (c.build) { const y = cityYields(s, c); const t = Math.max(1, Math.ceil((itemCost(c.build) - c.prod) / Math.max(1, y.prod))); extra = `<em>${esc(itemName(c.build))} · ${t} t.${c.queue.length ? ` → ${esc(itemName(c.queue[0]))}${c.queue.length > 1 ? '…' : ''}` : ''}</em>`; el.dataset.tip = typo(`${c.name}|Staví: ${itemName(c.build)}, hotovo za ${t} ${turnsWord(t)}.${c.queue.length ? `\nVe frontě potom: ${c.queue.map(q => itemName(q)).join(', ')}.` : '\nFronta je prázdná.'}\nKliknutím otevřete město.`) }
         else { extra = `<em style="color:var(--gold)">nečinné!</em>`; el.dataset.tip = typo(`${c.name}|Město nic nestaví, výroba se mění na zlato.\nKliknutím otevřete město a vyberete stavbu.`) }
       }
       const maxHp = cityMaxHp(c)
-      const html = `<b>${vis || c.owner === 0 ? c.pop : '?'}</b><span>${c.capital ? '★ ' : ''}${esc(c.name)}</span>${extra}${vis && c.hp < maxHp ? `<div class="hpb"><i style="width:${100 * c.hp / maxHp}%"></i></div>` : ''}`
+      const html = `<b>${vis || c.owner === this.my ? c.pop : '?'}</b><span>${c.capital ? '★ ' : ''}${esc(c.name)}</span>${extra}${vis && c.hp < maxHp ? `<div class="hpb"><i style="width:${100 * c.hp / maxHp}%"></i></div>` : ''}`
       if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html }
     }
     for (const [id, el] of this.cityLabels) if (!seen.has(id)) { el.remove(); this.cityLabels.delete(id) }
@@ -765,7 +791,7 @@ export class Hud {
     if (t.imp) parts.push(IMPROVEMENTS[t.imp].name)
     if (t.road) parts.push('cesta')
     if (t.river && TERRAIN[t.t].land) parts.push('řeka')
-    const yl = tileYield(s, i, 0)
+    const yl = tileYield(s, i, this.my)
     const ys = [yl.food ? `${ic('food', 's')}${yl.food}` : '', yl.prod ? `${ic('prod', 's')}${yl.prod}` : '', yl.gold ? `${ic('gold', 's')}${yl.gold}` : ''].filter(Boolean).join(' ')
     let html = parts.join(' · ') + (ys ? ` &nbsp; ${ys}` : '')
     const mc = t.t === 'mountain' ? 'neprůchodné' : isWater(t) ? (hasTech(this.me, t.t === 'coast' ? 'sailing' : 'navigation') ? 'splavné' : t.t === 'coast' ? 'voda (vyžaduje Plavbu)' : 'voda (vyžaduje Navigaci)') : ''
@@ -791,19 +817,19 @@ export class Hud {
       html += `<br><span class="${used ? 'job' : 'nojob'}">${esc(`Strategická surovina pro: ${unitsNeeding(s, 0, strat).join(', ') || '–'}. ${used ? (t.owner === 0 ? 'Využíváte ji.' : 'Využívá ji jiný národ.') : `Zpřístupní ji ${def.improvement === 'mine' ? 'důl' : 'ohrada'} na území města.`}`)}</span>`
     }
     const sel = this.app.unit, eta = this.app.hoverEta
-    if (sel && sel.type === 'settler' && sel.owner === 0 && TERRAIN[t.t].passable) {
+    if (sel && sel.type === 'settler' && sel.owner === this.my && TERRAIN[t.t].passable) {
       // Jak dobré je pole pro město.
-      const why = foundBlock(s, 0, x, y)
+      const why = foundBlock(s, this.my, x, y)
       if (why) html += `<br><span class="nojob">${ic('flag', 's')}Město zde založit nelze: ${esc(why)}</span>`
       else {
-        const sc = siteScore(s, 0, x, y)
+        const sc = siteScore(s, this.my, x, y)
         let food = 0, prod = 0, res = 0
         for (let k = 0; k < s.tiles.length; k++) {
           const tx = k % s.W, ty = (k / s.W) | 0
           if (Math.abs(tx - x) > 3 || Math.abs(ty - y) > 2 || !this.me.explored[k]) continue
           const dx = hexCenter(tx, ty), dc = hexCenter(x, y)
           if (Math.hypot(dx[0] - dc[0], dx[1] - dc[1]) > 70) continue
-          const yl = tileYield(s, k, 0); food += yl.food; prod += yl.prod
+          const yl = tileYield(s, k, this.my); food += yl.food; prod += yl.prod
           if (s.tiles[k].res && resourceVisible(this.me, s.tiles[k].res!)) res++
         }
         const word = sc >= 58 ? 'výborné' : sc >= 50 ? 'dobré' : sc >= 42 ? 'průměrné' : 'slabé'
@@ -812,9 +838,9 @@ export class Hud {
         if (this.app.sites.has(i) && !(sel.x === x && sel.y === y)) html += '<br><span class="job">Klikněte: osadníci sem dojdou a založí město</span>'
       }
     }
-    if (sel && sel.type === 'worker' && sel.owner === 0) {
+    if (sel && sel.type === 'worker' && sel.owner === this.my) {
       // Co tu mohou dělníci postavit.
-      const jobs = tileJobs(s, i, 0)
+      const jobs = tileJobs(s, i, this.my)
       const here = sel.x === x && sel.y === y
       const lines = jobs.filter(j => j.ok || j.why !== 'už stojí').map(j => `<span class="${j.ok ? 'job' : 'nojob'}">${ic(j.job === 'road' ? 'road' : 'work', 's')}${j.name}${j.ok ? `: ${j.job === 'road' ? 'rychlejší pohyb' : j.effect}, ${j.turns} ${turnsWord(j.turns)}` : ` – nelze, ${j.why}`}</span>`)
       if (lines.length) html += `<br>${lines.join(' · ')}`
@@ -880,13 +906,42 @@ export class Hud {
   private open(kind: string, title: string, body: string, foot = `<button class="btn" data-a="close">Zavřít</button>`, width = ''): void {
     this.modalKind = kind
     this.modal.classList.remove('hidden')
-    this.modal.innerHTML = `<div class="modalbox panel" ${width ? `style="width:${width}"` : ''}><h2>${title}${kind === 'over' || kind === 'confirm' || kind === 'offer' ? '' : '<button class="x" data-a="close">✕</button>'}</h2><div class="body">${body}</div><div class="foot">${foot}</div></div>`
+    // Předání počítače zakrývá celou mapu, ať další hráč nevidí cizí říši.
+    this.modal.classList.toggle('curtain', kind === 'handover')
+    this.modal.innerHTML = `<div class="modalbox panel" ${width ? `style="width:${width}"` : ''}><h2>${title}${kind === 'over' || kind === 'confirm' || kind === 'offer' || kind === 'handover' ? '' : '<button class="x" data-a="close">✕</button>'}</h2><div class="body">${body}</div><div class="foot">${foot}</div></div>`
     this.tileInfo.classList.add('hidden')
     this.modal.querySelector<HTMLElement>('.foot .btn:last-child')?.focus()
   }
 
+  /** Enter v okně s jedinou volbou ji potvrdí; vrací, zda se tak stalo. */
+  confirmModal(): boolean {
+    if (this.modalKind !== 'handover') return false
+    this.seatTaken()
+    return true
+  }
+
+  private seatCb: (() => void) | null = null
+
+  /** Hráč `pid` je na tahu: zakryje mapu, dokud neusedne k počítači. */
+  showHandover(pid: number, cb: () => void): void {
+    const p = this.s.players[pid], n = NATIONS[p.nation]
+    this.seatCb = cb
+    this.open('handover', `Na tahu: ${esc(n.name)}`, `<div style="display:flex;gap:16px;align-items:center"><img src="${UI}p_${p.nation}.png" style="width:144px;height:144px;border:3px solid ${n.css};flex:none" alt="">
+      <div><p style="font-size:21px">${esc(`${n.leader}, ${n.title.toLowerCase()}.`)}</p><p>${esc(`Tah ${Math.min(this.s.turn, this.s.maxTurns)} z ${this.s.maxTurns}. Předejte počítač hráči, který vede národ ${n.name}. Ostatní se teď nedívají.`)}</p></div></div>`,
+    `<button class="btn big" data-a="seat">Jsem tu, hrajeme</button>`, '640px')
+  }
+
+  private seatTaken(): void {
+    const f = this.seatCb
+    this.seatCb = null
+    this.modalKind = ''
+    this.closeModal()
+    sfx('turn')
+    f?.()
+  }
+
   closeModal(): void {
-    if (this.modalKind === 'over') return
+    if (this.modalKind === 'over' || this.modalKind === 'handover') return
     this.modal.classList.add('hidden')
     this.modalKind = ''
     this.confirmCb = null
@@ -903,11 +958,11 @@ export class Hud {
 
   showBriefing(): void {
     const n = NATIONS[this.me.nation]
-    const rivals = this.s.players.filter(p => p.id === 1 || p.id === 2)
+    const rivals = this.rivals
     this.open('brief', `Mise: ${esc(SCENARIOS[this.s.scenario].name)}`, `
       <div style="display:flex;gap:16px"><img src="${UI}p_${this.me.nation}.png" style="width:144px;height:144px;border:3px solid ${n.css};flex:none" alt="">
       <div><p>${esc(`Stará říše se rozpadla a její trůn osiřel. ${n.leader}, ${n.title.toLowerCase()}, ${SCENARIOS[this.s.scenario].intro}`)}</p>
-      <p>${esc(`Vaši soupeři: ${rivals.map(r => `${NATIONS[r.nation].name} (${describeAI(r)})`).join(' a ')}. V divočině mezi vámi táboří barbaři.`)}</p></div></div>
+      <p>${esc(`Vaši soupeři: ${rivals.map(r => `${NATIONS[r.nation].name} (${r.human ? `${NATIONS[r.nation].leader}, vede jiný hráč` : describeAI(r)})`).join(' a ')}. V divočině mezi vámi táboří barbaři.`)}</p></div></div>
       ${this.goalsHtml()}
       <p>${esc(`Každý národ si z domoviny přináší jednu znalost. Váš lid už ovládá: ${this.me.techs.map(t => TECHS[t].name).join(', ')} – proto je ve stromu technologií od začátku hotová.`)}</p>
       <p style="color:var(--muted)">${esc(`Na vše máte ${this.s.maxTurns} tahů. Cíle mise si kdykoli zobrazíte tlačítkem Mise (klávesa M). Rádce vás provede prvními tahy.`)}</p>`,
@@ -917,9 +972,9 @@ export class Hud {
   private goalsHtml(): string {
     const s = this.s, m = s.mission
     const goal = (done: boolean, text: string, icon = 'star') => `<div class="goal ${done ? 'done' : ''}">${ic(done ? 'check' : icon)}<div>${esc(text)}</div></div>`
-    const seats = s.players.filter(p => p.id === 1 || p.id === 2).map(p => {
+    const seats = this.rivals.map(p => {
       const c = s.cities.find(ct => ct.seat === p.id)
-      const held = !p.alive || (!!c && c.owner === 0)
+      const held = !p.alive || (!!c && c.owner === this.my)
       const known = this.me.met.includes(p.id)
       return `${known ? NATIONS[p.nation].name : 'neznámý národ'}${c && this.me.explored[idx(s, c.x, c.y)] ? ` (${c.name})` : ''}${held ? ' ✓' : ''}`
     }).join(', ')
@@ -929,15 +984,15 @@ export class Hud {
       ${goal(false, `Div: objevte astronomii a dostavte Sluneční chrám dřív než ostatní.${hasTech(this.me, 'astronomy') ? ' Astronomii už znáte.' : ''}`, 'sci')}
       ${goal(false, `Sláva: mějte po ${s.maxTurns} tazích nejvyšší skóre.`, 'turn')}
       <h4>Vedlejší úkoly</h4>
-      ${goal(m.questRuins, m.ruinsBy > 0 ? `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} – bohužel vás někdo předběhl.` : `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} (odměna: zlato a technologie).`, 'flag')}
-      ${goal(m.questCities, `Vládněte třem městům (odměna 60 zlata). Nyní: ${citiesOf(s, 0).length}.`, 'pop')}
+      ${goal(m.questRuins && m.ruinsBy === this.my, m.ruinsBy >= 0 && m.ruinsBy !== this.my ? `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} – bohužel vás někdo předběhl.` : `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} (odměna: zlato a technologie).`, 'flag')}
+      ${goal(m.questCities, `Vládněte třem městům (odměna 60 zlata). Nyní: ${citiesOf(s, this.my).length}.`, 'pop')}
       ${goal(m.questCamps, `Vypalte dva barbarské tábory (odměna 60 zlata). Nyní: ${m.campsDestroyed}.`, 'str')}`
   }
 
   showMission(): void {
     const s = this.s
     const rows = s.players.filter(p => p.id !== BARB).map(p => {
-      const known = p.id === 0 || this.me.met.includes(p.id)
+      const known = p.id === this.my || this.me.met.includes(p.id)
       const n = NATIONS[p.nation]
       return `<tr><td style="color:${known ? n.css : 'var(--muted)'}">${known ? n.name : 'Neznámý národ'}${p.alive ? '' : ' †'}</td><td>${known ? score(s, p.id) : '?'}</td><td>${known ? citiesOf(s, p.id).length : '?'}</td><td>${known ? p.techs.length : '?'}</td></tr>`
     }).join('')
@@ -945,7 +1000,7 @@ export class Hud {
       <h4>Milníky věků</h4>
       ${ERAS.slice(1).map((e, k) => {
         const i = k + 1, first = s.eraFirst[i]
-        const who = first === undefined ? '' : first === 0 ? ' První jste byli vy – zlatý věk.' : this.me.met.includes(first) ? ` První byli ${NATIONS[s.players[first].nation].name}.` : ' První byl neznámý národ.'
+        const who = first === undefined ? '' : first === this.my ? ' První jste byli vy – zlatý věk.' : this.me.met.includes(first) ? ` První byli ${NATIONS[s.players[first].nation].name}.` : ' První byl neznámý národ.'
         return `<div class="goal ${this.me.era >= i ? 'done' : ''}">${ic(this.me.era >= i ? 'check' : 'sci')}<div>${esc(`${e.name}: objevte ${e.techs} technologií (máte ${this.me.techs.length}). Odměna ${30 * i} zlata a ${15 * i} kultury; první národ získá zlatý věk na ${GOLDEN_TURNS} tahů.${who}`)}</div></div>`
       }).join('')}
       <h4>Stav sil</h4><table class="scores"><tr><th>Národ</th><th>Skóre</th><th>Města</th><th>Technologie</th></tr>${rows}</table>
@@ -954,7 +1009,7 @@ export class Hud {
 
   showTech(): void {
     const p = this.me
-    const inc = playerIncome(this.s, 0)
+    const inc = playerIncome(this.s, this.my)
     const avail = availableTechs(p)
     const recTech = this.app.hints ? adviseTech(this.s, p) : null
     const W = 196, H = 70, GX = 34, GY = 12
@@ -990,7 +1045,7 @@ export class Hud {
     const p = this.me
     const ready = traditionReady(p)
     const cost = traditionCost(p.traditions.length)
-    const cult = citiesOf(this.s, 0).reduce((a, c) => a + cityYields(this.s, c).culture, 0)
+    const cult = citiesOf(this.s, this.my).reduce((a, c) => a + cityYields(this.s, c).culture, 0)
     const left = Math.max(0, cost - p.culture)
     const recTrad = this.app.hints ? traditionAdvice(p) : null
     const cards = TRADITION_IDS.map(id => {
@@ -1008,48 +1063,61 @@ export class Hud {
 
   showDiplo(msg = ''): void {
     const s = this.s
-    const mine = militaryPower(s, 0)
-    const cards = s.players.filter(p => p.id === 1 || p.id === 2).map(p => {
+    const mine = militaryPower(s, this.my)
+    const my = this.my
+    const cards = this.rivals.map(p => {
       const n = NATIONS[p.nation]
       if (!this.me.met.includes(p.id)) return `<div class="rival" style="--c:#667"><h3>Neznámý národ</h3><p>Tento národ jste zatím nepotkali. Pošlete zvědy za hory.</p></div>`
       if (!p.alive) return `<div class="rival" style="--c:${n.css}"><h3>${n.name} †</h3><p>Tento národ byl vyhlazen.</p></div>`
-      const war = atWar(s, 0, p.id)
+      const war = atWar(s, my, p.id)
       const theirs = militaryPower(s, p.id)
       const cmp = theirs > mine * 1.4 ? 'výrazně silnější než vy' : theirs > mine * 1.1 ? 'o něco silnější' : theirs > mine * 0.75 ? 'vyrovnané' : 'slabší než vy'
-      const others = p.war.filter(w => w !== 0 && w !== BARB).map(w => NATIONS[s.players[w].nation].name)
+      const others = p.war.filter(w => w !== my && w !== BARB).map(w => NATIONS[s.players[w].nation].name)
+      const asked = s.offers.some(o => o.from === my && o.to === p.id && o.kind !== 'ally')
+      const foot = `<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">${war ? `<button class="btn" data-a="peace" data-v="${p.id}" ${asked ? 'disabled' : ''}>Nabídnout mír</button>` : `<button class="btn danger" data-a="war" data-v="${p.id}">Vyhlásit válku</button>`}</div></div>`
+      const gift = `<button class="btn small" data-a="dip" data-v="gift:${p.id}" ${this.me.gold < GIFT ? 'disabled' : ''}${tip(p.human ? `Dar ${GIFT} zlata|Zlato dostane druhý hráč hned.` : `Dar ${GIFT} zlata|Zlepší vztah o 12 bodů.`)}>${ic('gold', 's')}Dar ${GIFT}</button>`
+      // Lidský soupeř: jen válka, mír a dar; ostatní si hráči domluví sami.
+      if (p.human) return `<div class="rival" style="--c:${n.css}"><div class="top"><img class="p" src="${UI}p_${p.nation}.png" alt=""><div><h3>${n.name}</h3><div>${esc(n.leader)}</div>
+        <div class="st ${war ? 'war' : 'peace'}">${ic(war ? 'war' : 'peace', 's')}${war ? 'Válka' : 'Mír'}</div></div></div>
+        <p>${esc(`Národ vede jiný hráč. Vojsko: ${cmp}. Skóre ${score(s, p.id)}, měst ${citiesOf(s, p.id).length}.`)}${others.length ? esc(` Válčí s: ${others.join(', ')}.`) : ''}</p>
+        ${asked ? `<p class="deal">${ic('peace', 's')}Vaše nabídka míru čeká na odpověď.</p>` : ''}
+        ${war ? '' : `<div class="dip">${gift}</div>`}${foot}`
       return `<div class="rival" style="--c:${n.css}"><div class="top"><img class="p" src="${UI}p_${p.nation}.png" alt=""><div><h3>${n.name}</h3><div>${esc(n.leader)}</div>
         <div class="st ${war ? 'war' : 'peace'}">${ic(war ? 'war' : 'peace', 's')}${war ? 'Válka' : 'Mír'}</div></div></div>
         <p>${esc(`${p.personality === 'aggressive' ? 'Výbojný národ.' : 'Národ stavitelů.'} Vojsko: ${cmp}. Skóre ${score(s, p.id)}, měst ${citiesOf(s, p.id).length}.`)}${others.length ? esc(` Válčí s: ${others.join(', ')}.`) : ''}</p>
-        <p${tip('Vztah k vám|Zlepšují ho dary, obchod a společný boj; kazí ho vyhlášení války a odmítnutí pomoci. Přátelský národ vás nenapadne a spíš přijme spojenectví.')}>Vztah k vám: <b style="color:${p.attitude >= 15 ? 'var(--good)' : p.attitude <= -15 ? 'var(--bad)' : 'var(--text)'}">${attitudeWord(p)}</b> (${signed(p.attitude)})${s.turn < p.pactUntil ? ` · spojenec ještě ${p.pactUntil - s.turn}${NB}${turnsWord(p.pactUntil - s.turn)}` : ''}</p>
-        ${s.deals.filter(d => (d.seller === p.id && d.buyer === 0) || (d.buyer === p.id && d.seller === 0)).map(d => `<p class="deal">${ic('trade', 's')}${d.seller === 0 ? 'Prodáváte' : 'Kupujete'}: ${RESOURCES[d.res].name.toLowerCase()}, ${d.seller === 0 ? '+' : '−'}${d.gpt} zlata za tah, ještě ${d.until - s.turn}${NB}${turnsWord(d.until - s.turn)}</p>`).join('')}
+        <p${tip('Vztah k vám|Zlepšují ho dary, obchod a společný boj; kazí ho vyhlášení války a odmítnutí pomoci. Přátelský národ vás nenapadne a spíš přijme spojenectví.')}>Vztah k vám: <b style="color:${p.attitude[my] >= 15 ? 'var(--good)' : p.attitude[my] <= -15 ? 'var(--bad)' : 'var(--text)'}">${attitudeWord(p, my)}</b> (${signed(p.attitude[my])})${s.turn < p.pactUntil[my] ? ` · spojenec ještě ${p.pactUntil[my] - s.turn}${NB}${turnsWord(p.pactUntil[my] - s.turn)}` : ''}</p>
+        ${s.deals.filter(d => (d.seller === p.id && d.buyer === my) || (d.buyer === p.id && d.seller === my)).map(d => `<p class="deal">${ic('trade', 's')}${d.seller === my ? 'Prodáváte' : 'Kupujete'}: ${RESOURCES[d.res].name.toLowerCase()}, ${d.seller === my ? '+' : '−'}${d.gpt} zlata za tah, ještě ${d.until - s.turn}${NB}${turnsWord(d.until - s.turn)}</p>`).join('')}
         ${war ? '' : `<div class="dip">${TRADABLE.map(r => {
-          const sb = saleBlock(s, p.id, r), bb = buyBlock(s, p.id, r)
+          const sb = saleBlock(s, p.id, r, my), bb = buyBlock(s, p.id, r, my)
           const nm = RESOURCES[r].name.toLowerCase()
-          return `<button class="btn small" data-a="dip" data-v="sell:${p.id}:${r}" ${sb ? 'disabled' : ''}${tip(`Prodat: ${nm}|Dostanete ${salePrice(p)} zlata za tah po ${DEAL_TURNS} tahů. Jeden váš zdroj tím přenecháte soupeři: vy uživíte o ${UNITS_PER_SOURCE} jednotky méně, on o ${UNITS_PER_SOURCE} více.${sb ? `\nNelze: ${sb}` : ''}`)}>${ic('trade', 's')}Prodat ${nm} +${salePrice(p)}</button>
-            <button class="btn small" data-a="dip" data-v="buy:${p.id}:${r}" ${bb ? 'disabled' : ''}${tip(`Koupit: ${nm}|Zaplatíte ${buyPrice(p)} zlata za tah po ${DEAL_TURNS} tahů a uživíte o ${UNITS_PER_SOURCE} jednotky se surovinou víc.${bb ? `\nNelze: ${bb}` : ''}`)}>${ic('trade', 's')}Koupit ${nm} −${buyPrice(p)}</button>`
+          return `<button class="btn small" data-a="dip" data-v="sell:${p.id}:${r}" ${sb ? 'disabled' : ''}${tip(`Prodat: ${nm}|Dostanete ${salePrice(p, my)} zlata za tah po ${DEAL_TURNS} tahů. Jeden váš zdroj tím přenecháte soupeři: vy uživíte o ${UNITS_PER_SOURCE} jednotky méně, on o ${UNITS_PER_SOURCE} více.${sb ? `\nNelze: ${sb}` : ''}`)}>${ic('trade', 's')}Prodat ${nm} +${salePrice(p, my)}</button>
+            <button class="btn small" data-a="dip" data-v="buy:${p.id}:${r}" ${bb ? 'disabled' : ''}${tip(`Koupit: ${nm}|Zaplatíte ${buyPrice(p, my)} zlata za tah po ${DEAL_TURNS} tahů a uživíte o ${UNITS_PER_SOURCE} jednotky se surovinou víc.${bb ? `\nNelze: ${bb}` : ''}`)}>${ic('trade', 's')}Koupit ${nm} −${buyPrice(p, my)}</button>`
         }).join('')}
-          <button class="btn small" data-a="dip" data-v="gift:${p.id}" ${this.me.gold < GIFT ? 'disabled' : ''}${tip(`Dar ${GIFT} zlata|Zlepší vztah o 12 bodů.`)}>${ic('gold', 's')}Dar ${GIFT}</button>
-          ${s.players.filter(q => (q.id === 1 || q.id === 2) && q.id !== p.id && q.alive && this.me.met.includes(q.id)).map(q => `<button class="btn small" data-a="dip" data-v="ally:${p.id}:${q.id}"${tip(`Spojenectví proti: ${NATIONS[q.nation].name}|Oba vyhlásíte tomuto národu válku a spojenec vás 25 tahů nenapadne. Přijme, když je k vám aspoň vstřícný (vztah 20+) a soupeř pro něj není příliš silný, nebo když s ním už válčí.`)}>${ic('war', 's')}Spojenectví proti: ${NATIONS[q.nation].name}</button>`).join('')}
+          ${gift}
+          ${this.rivals.filter(q => q.id !== p.id && q.alive && this.me.met.includes(q.id)).map(q => `<button class="btn small" data-a="dip" data-v="ally:${p.id}:${q.id}"${tip(`Spojenectví proti: ${NATIONS[q.nation].name}|Oba vyhlásíte tomuto národu válku a spojenec vás 25 tahů nenapadne. Přijme, když je k vám aspoň vstřícný (vztah 20+) a soupeř pro něj není příliš silný, nebo když s ním už válčí.`)}>${ic('war', 's')}Spojenectví proti: ${NATIONS[q.nation].name}</button>`).join('')}
         </div>`}
-        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">${war ? `<button class="btn" data-a="peace" data-v="${p.id}">Nabídnout mír</button>` : `<button class="btn danger" data-a="war" data-v="${p.id}">Vyhlásit válku</button>`}</div></div>`
+        ${foot}`
     }).join('')
     this.open('diplo', 'Diplomacie', `${msg ? `<p style="color:var(--gold)">${esc(msg)}</p>` : ''}<div class="rivals">${cards}</div>`)
   }
 
+  /** Ukáže další nabídku (mír, spojenectví), která čeká na hráče u počítače. */
   checkOffers(): void {
-    const o = this.s.offers[0]
-    if (!o || this.modalOpen || this.s.over) return
+    const my = this.my
+    const o = this.s.offers.find(x => x.to === my)
+    if (!o || this.modalOpen || this.s.over || !this.app.myTurn) return
     const p = this.s.players[o.from]
     const n = NATIONS[p.nation]
     if (o.kind === 'ally') {
       const foe = this.s.players[o.vs!]
-      if (!foe.alive || !atWar(this.s, o.from, o.vs!) || atWar(this.s, 0, o.from) || atWar(this.s, 0, o.vs!)) { this.s.offers.shift(); this.checkOffers(); return }
+      // Zastaralou nabídku příkaz jen odklidí.
+      if (!foe.alive || !atWar(this.s, o.from, o.vs!) || atWar(this.s, my, o.from) || atWar(this.s, my, o.vs!)) { this.app.answerOffer(o.from, false); if (!this.s.offers.includes(o)) this.checkOffers(); return }
       sfx('quest')
       this.open('offer', `${n.name} žádají o pomoc`, `<div style="display:flex;gap:14px"><img src="${UI}p_${p.nation}.png" style="width:96px;height:96px;border:2px solid ${n.css}" alt=""><div><p>${esc(`„Válčíme s národem ${NATIONS[foe.nation].name},“ vzkazuje ${n.leader}. „Přidejte se k nám a budeme vám přáteli.“`)}</p><p style="color:var(--muted)">${esc(`Přijetí znamená válku s národem ${NATIONS[foe.nation].name}; ${n.name} vás pak 25 tahů nenapadnou a vztah se výrazně zlepší. Odmítnutí vztah mírně zhorší.`)}</p></div></div>`,
         `<button class="btn" data-a="offer-no" data-v="${o.from}">Odmítnout</button><button class="btn" data-a="offer-yes" data-v="${o.from}">Přidat se do války</button>`, '640px')
       return
     }
-    if (!atWar(this.s, 0, o.from)) { this.s.offers.shift(); return }
+    if (!atWar(this.s, my, o.from)) { this.app.answerOffer(o.from, false); if (!this.s.offers.includes(o)) this.checkOffers(); return }
     sfx('quest')
     this.open('offer', `${n.name} nabízejí mír`, `<div style="display:flex;gap:14px"><img src="${UI}p_${p.nation}.png" style="width:96px;height:96px;border:2px solid ${n.css}" alt=""><p>${esc(`„Dost krve bylo prolito,“ vzkazuje ${n.leader}. „Složme zbraně a každý ať si ponechá, co drží.“`)}</p></div>`,
       `<button class="btn" data-a="offer-no" data-v="${o.from}">Odmítnout</button><button class="btn" data-a="offer-yes" data-v="${o.from}">Přijmout mír</button>`, '600px')
@@ -1080,6 +1148,7 @@ export class Hud {
       <h4>Pole a vylepšení</h4><p>${esc('Louky dávají jídlo, pláně jídlo i výrobu, pahorkatina výrobu, les výrobu. Dělníci staví farmy (+jídlo), doly (+výroba), ohrady (koně, zvěř) a pily (les). Koně a železo je nutné vylepšit, aby šlo stavět jezdce a šermíře.')}</p>
       <h4>Boj</h4><p>${esc('Na jednom poli může stát jedna vojenská a jedna civilní jednotka. V boji zblízka utrpí ztráty obě strany, střelci (dostřel 2) odvetu nedostanou. Pahorkatina a les dávají obránci +25 %, opevnění dalších +25 %. Kopiníci mají +50 % proti jízdě, katapulty dvojnásobný účinek proti městům. Jednotka, která se celý tah nehýbe, se léčí (nejrychleji ve městě).')}</p>
       <p>${esc('Město se dobývá tak, že mu útoky srazíte hradby na nulu a vstoupíte do něj jednotkou pro boj zblízka. Města sama střílejí na nepřátele do 2 polí.')}</p>
+      <h4>Více hráčů</h4><p>${esc('Při zakládání hry zvolte 2 nebo 3 hráče u počítače. Každý si vybere národ a pak táhnete jeden po druhém; mezi tahy mapu zakryje opona a počítač si předáte. Po posledním z vás táhnou soupeři vedení počítačem a barbaři. Zprávy, mlhu i rady má každý své. Mezi sebou si můžete vyhlásit válku, nabídnout mír (druhý hráč odpoví, až bude na tahu) a poslat dar; vše ostatní si domluvíte u stolu.')}</p>
       <h4>Pokladna</h4><p>${esc('Každá vojenská jednotka nad volný limit (3 + 2 za město) stojí 1 zlato za tah, některé budovy také. Prázdná pokladna brzdí výzkum.')}</p>`, `<button class="btn" data-a="guide" data-v="0">Návod krok za krokem</button><button class="btn" data-a="close">Zavřít</button>`, '820px')
   }
 
@@ -1119,8 +1188,14 @@ export class Hud {
 
   showGameOver(): void {
     const s = this.s, o = s.over!
+    // Vítěz čte svůj text; lidský hráč, který nevyhrál, čte ten druhý.
+    const mine = o.winner === this.my || !s.players[o.winner]?.human
+    const won = o.won && mine
+    const title = mine ? o.title : 'Porážka'
+    const text = mine ? o.text : o.other ?? o.text
+    const multi = s.players.filter(p => p.human).length > 1
     const rows = s.players.filter(p => p.id !== BARB).map(p => `<tr><td style="color:${NATIONS[p.nation].css}">${NATIONS[p.nation].name}${p.alive ? '' : ' †'}</td><td>${score(s, p.id)}</td><td>${citiesOf(s, p.id).length}</td><td>${p.techs.length}</td></tr>`).join('')
-    this.open('over', esc(o.title), `<div style="display:flex;gap:16px"><img src="${UI}${o.won ? `p_${this.me.nation}` : 'em_barb'}.png" style="width:144px;height:144px;flex:none;border:3px solid ${o.won ? 'var(--gold)' : 'var(--bad)'}" alt=""><div><p style="font-size:19px">${esc(o.text)}</p>
+    this.open('over', esc(multi && won ? `${NATIONS[this.me.nation].name}: ${title}` : title), `<div style="display:flex;gap:16px"><img src="${UI}${won ? `p_${this.me.nation}` : 'em_barb'}.png" style="width:144px;height:144px;flex:none;border:3px solid ${won ? 'var(--gold)' : 'var(--bad)'}" alt=""><div><p style="font-size:19px">${esc(text)}</p>
       <p style="color:var(--muted)">${esc(`Hra skončila v tahu ${Math.min(s.turn, s.maxTurns)}. Obtížnost: ${DIFFICULTY[s.difficulty].name.toLowerCase()}.`)}</p></div></div>
       <table class="scores"><tr><th>Národ</th><th>Skóre</th><th>Města</th><th>Technologie</th></tr>${rows}</table>`,
     `<button class="btn big" data-a="over-menu">Hlavní menu</button>`, '760px')

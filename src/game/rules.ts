@@ -13,10 +13,24 @@ const events: GameEvent[] = []
 export function emit(ev: GameEvent): void { events.push(ev) }
 export function drainEvents(): GameEvent[] { return events.splice(0) }
 
+/** Lidští hráči, kteří jsou ještě ve hře. */
+export function humans(s: GameState): Player[] { return s.players.filter(p => p.human && p.alive) }
+
 export function note(s: GameState, pid: number, text: string, kind: Note['kind'] = 'info', x?: number, y?: number): void {
-  if (pid !== 0) return
-  s.notes.push({ turn: s.turn, text, kind, x, y })
-  if (s.notes.length > 60) s.notes.splice(0, s.notes.length - 60)
+  if (!s.players[pid]?.human) return
+  s.notes.push({ pid, turn: s.turn, text, kind, x, y })
+  // Každému hráči zůstává posledních 60 zpráv.
+  let n = 0
+  for (const o of s.notes) if (o.pid === pid) n++
+  for (let i = 0; n > 60 && i < s.notes.length; i++) if (s.notes[i].pid === pid) { s.notes.splice(i--, 1); n-- }
+}
+
+/** Zpráva všem lidským hráčům. `own` přepíše text pro jednotlivé hráče (null = tomuto hráči nic), `only` omezí příjemce. */
+export function noteAll(s: GameState, text: string | null, kind: Note['kind'] = 'info', x?: number, y?: number, own: Record<number, string | null> = {}, only?: (p: Player) => boolean): void {
+  for (const h of humans(s)) {
+    const t = h.id in own ? own[h.id] : only && !only(h) ? null : text
+    if (t) note(s, h.id, t, kind, x, y)
+  }
 }
 
 // ---------------------------------------------------------------- mapa
@@ -265,10 +279,10 @@ export function claimTiles(s: GameState, c: City): void {
     if (t.owner !== -1) continue
     t.owner = c.owner; t.city = c.id
     // Strategická surovina v novém území stojí za zprávu.
-    if (c.owner === 0 && t.res && RESOURCES[t.res].strategic && resourceVisible(s.players[0], t.res) && !cityAt(s, x, y)) {
+    if (s.players[c.owner].human && t.res && RESOURCES[t.res].strategic && resourceVisible(s.players[c.owner], t.res) && !cityAt(s, x, y)) {
       const imp = RESOURCES[t.res].improvement
-      const need = unitsNeeding(s, 0, t.res)
-      note(s, 0, `Na území města ${c.name} je surovina ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Pošlete tam dělníky postavit ${imp === 'mine' ? 'důl' : 'ohradu'} – pak půjde stavět: ${need.join(', ')}.` : `Vaše vojsko ji nepotřebuje, ale s vylepšením (${imp === 'mine' ? 'důl' : 'ohrada'}) ji můžete prodávat v Diplomacii.`}`, 'good', x, y)
+      const need = unitsNeeding(s, c.owner, t.res)
+      note(s, c.owner, `Na území města ${c.name} je surovina ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Pošlete tam dělníky postavit ${imp === 'mine' ? 'důl' : 'ohradu'} – pak půjde stavět: ${need.join(', ')}.` : `Vaše vojsko ji nepotřebuje, ale s vylepšením (${imp === 'mine' ? 'důl' : 'ohrada'}) ji můžete prodávat v Diplomacii.`}`, 'good', x, y)
     }
   }
 }
@@ -319,8 +333,8 @@ function meet(s: GameState, a: number, b: number): void {
   const pa = s.players[a], pb = s.players[b]
   if (pa.met.includes(b)) return
   pa.met.push(b); pb.met.push(a)
-  const other = a === 0 ? pb : b === 0 ? pa : null
-  if (other) note(s, 0, `Setkali jste se s národem ${NATIONS[other.nation].name}. Vládne mu ${NATIONS[other.nation].leader}.`, 'info')
+  note(s, a, `Setkali jste se s národem ${NATIONS[pb.nation].name}. Vládne mu ${NATIONS[pb.nation].leader}.`, 'info')
+  note(s, b, `Setkali jste se s národem ${NATIONS[pa.nation].name}. Vládne mu ${NATIONS[pa.nation].leader}.`, 'info')
 }
 
 // ---------------------------------------------------------------- pohyb
@@ -492,7 +506,7 @@ export function moveUnit(s: GameState, u: Unit, tx: number, ty: number): boolean
   }
   if (lastStop === 0) {
     // Nelze se hnout (zablokováno); u cíle hned vedle rozkaz zrušíme.
-    if (u.moves <= 0) u.goto = [tx, ty]; else { const todo = u.todo; stopUnit(u); if (todo && u.owner === 0) note(s, 0, 'Dělníci se na místo práce nedostali, cesta je zablokovaná.', 'info', u.x, u.y) }
+    if (u.moves <= 0) u.goto = [tx, ty]; else { const todo = u.todo; stopUnit(u); if (todo) note(s, u.owner, 'Dělníci se na místo práce nedostali, cesta je zablokovaná.', 'info', u.x, u.y) }
     return false
   }
   walked.length = lastStop + 1
@@ -518,10 +532,10 @@ function doTodo(s: GameState, u: Unit): void {
   u.todo = null
   if (job === 'found') {
     // Osadníci došli na vybrané místo a usadí se.
-    if (!foundCity(s, u) && u.owner === 0) note(s, 0, 'Osadníci dorazili, ale město tu už založit nejde. Vyberte jim jiné místo.', 'bad', u.x, u.y)
+    if (!foundCity(s, u)) note(s, u.owner, 'Osadníci dorazili, ale město tu už založit nejde. Vyberte jim jiné místo.', 'bad', u.x, u.y)
     return
   }
-  if (!startWork(s, u, job) && u.owner === 0) note(s, 0, 'Dělníci dorazili, ale naplánovanou práci už tu provést nejde.', 'info', u.x, u.y)
+  if (!startWork(s, u, job)) note(s, u.owner, 'Dělníci dorazili, ale naplánovanou práci už tu provést nejde.', 'info', u.x, u.y)
 }
 
 /** Po dosažení cíle pokračuje k dalšímu bodu fronty. */
@@ -556,12 +570,12 @@ function arrive(s: GameState, u: Unit): void {
       for (const b of s.units) if (b.owner === BARB && b.home === idx(s, u.x, u.y)) b.home = -1
       note(s, u.owner, 'Barbarský tábor vypálen! Kořist: 35 zlata.', 'good', u.x, u.y)
       emit({ e: 'sound', id: 'camp' })
-      if (u.owner === 0) {
+      if (pl.human) {
         s.mission.campsDestroyed++
         if (s.mission.campsDestroyed >= 2 && !s.mission.questCamps) {
-          s.mission.questCamps = true
+          s.mission.questCamps = true; s.mission.campsBy = pl.id
           pl.gold += 60
-          note(s, 0, 'Vedlejší úkol splněn: kraj je bezpečnější. Odměna 60 zlata.', 'good')
+          note(s, pl.id, 'Vedlejší úkol splněn: kraj je bezpečnější. Odměna 60 zlata.', 'good')
         }
       }
     }
@@ -573,13 +587,9 @@ function arrive(s: GameState, u: Unit): void {
     pl.gold += 50
     const tech = cheapestTech(pl)
     if (tech) grantTech(s, pl, tech)
-    if (u.owner === 0) {
-      s.mission.questRuins = true
-      note(s, 0, `V ruinách Starého trůnu jste našli zlato (50) a staré svitky${tech ? ` – objevena technologie ${TECHS[tech].name}` : ''}.`, 'good', u.x, u.y)
-      emit({ e: 'sound', id: 'quest' })
-    } else {
-      note(s, 0, `${NATIONS[pl.nation].name} vyplenili ruiny Starého trůnu dřív než vy.`, 'bad', u.x, u.y)
-    }
+    if (pl.human) { s.mission.questRuins = true; emit({ e: 'sound', id: 'quest' }) }
+    note(s, pl.id, `V ruinách Starého trůnu jste našli zlato (50) a staré svitky${tech ? ` – objevena technologie ${TECHS[tech].name}` : ''}.`, 'good', u.x, u.y)
+    noteAll(s, `${NATIONS[pl.nation].name} vyplenili ruiny Starého trůnu dřív než vy.`, 'bad', u.x, u.y, { [pl.id]: null })
   }
 }
 
@@ -601,7 +611,7 @@ export function grantTech(s: GameState, p: Player, t: TechId): void {
   if (p.research === t) { p.research = null; p.progress = 0 }
   p.techQueue = p.techQueue.filter(q => q !== t)
   nextResearch(p)
-  if (p.id === 0) emit({ e: 'sound', id: 'tech' })
+  if (p.human) emit({ e: 'sound', id: 'tech' })
   if (p.id === BARB) return
   if (p.human) {
     // Která vojska teď půjde přezbrojit.
@@ -609,12 +619,12 @@ export function grantTech(s: GameState, p: Player, t: TechId): void {
     for (const r of Object.keys(RESOURCES) as ResourceId[]) {
       if (RESOURCES[r].tech !== t) continue
       const mine: number[] = []
-      for (let i = 0; i < s.tiles.length; i++) if (s.tiles[i].res === r && s.tiles[i].owner === 0) mine.push(i)
-      note(s, 0, `Na mapě se objevila ložiska: ${RESOURCES[r].name.toLowerCase()}. ${mine.length ? `Na vašem území: ${mine.length} – postavte na nich důl.` : 'Na vašem území žádné není; hledejte je v okolí, založte u nich město, nebo surovinu kupte v Diplomacii.'}`, 'good', mine.length ? mine[0] % s.W : undefined, mine.length ? (mine[0] / s.W) | 0 : undefined)
+      for (let i = 0; i < s.tiles.length; i++) if (s.tiles[i].res === r && s.tiles[i].owner === p.id) mine.push(i)
+      note(s, p.id, `Na mapě se objevila ložiska: ${RESOURCES[r].name.toLowerCase()}. ${mine.length ? `Na vašem území: ${mine.length} – postavte na nich důl.` : 'Na vašem území žádné není; hledejte je v okolí, založte u nich město, nebo surovinu kupte v Diplomacii.'}`, 'good', mine.length ? mine[0] % s.W : undefined, mine.length ? (mine[0] / s.W) | 0 : undefined)
     }
     const up = new Set<string>()
     for (const u of unitsOf(s, p.id)) { const to = upgradeTarget(s, u); if (to && UNITS[to].tech === t) up.add(`${UNITS[u.type].name} → ${UNITS[to].name}`) }
-    if (up.size) note(s, 0, `Nová výzbroj: ${[...up].join(', ')}. Jednotku vyberte na vlastním území a zvolte Přezbrojit (klávesa U).`, 'good')
+    if (up.size) note(s, p.id, `Nová výzbroj: ${[...up].join(', ')}. Jednotku vyberte na vlastním území a zvolte Přezbrojit (klávesa U).`, 'good')
   }
   const e = eraOf(p)
   if (e <= p.era) return
@@ -626,9 +636,10 @@ export function grantTech(s: GameState, p: Player, t: TechId): void {
   const name = ERAS[e].name
   if (p.human) {
     emit({ e: 'sound', id: 'quest' })
-    s.popup = { title: `Nový věk: ${name}`, text: `Váš lid vstoupil do nového věku. Milník přináší ${gold} zlata a ${cult} bodů kultury.${first ? ` Jste v něm první ze všech národů – nastává zlatý věk: po ${GOLDEN_TURNS} tahů dává každé vaše město +1 výrobu, +1 zlato a +1 kulturu.` : ` Jiný národ vás ale předběhl, zlatý věk připadl jemu.`}` }
-    note(s, 0, `Nový věk: ${name}.${first ? ' Zlatý věk!' : ''}`, 'good')
-  } else if (s.players[0].met.includes(p.id)) note(s, 0, `${NATIONS[p.nation].name} vstoupili do nového věku: ${name}${first ? ' (jako první – mají zlatý věk)' : ''}.`, 'info')
+    s.popups.push({ pid: p.id, title: `Nový věk: ${name}`, text: `Váš lid vstoupil do nového věku. Milník přináší ${gold} zlata a ${cult} bodů kultury.${first ? ` Jste v něm první ze všech národů – nastává zlatý věk: po ${GOLDEN_TURNS} tahů dává každé vaše město +1 výrobu, +1 zlato a +1 kulturu.` : ` Jiný národ vás ale předběhl, zlatý věk připadl jemu.`}` })
+    note(s, p.id, `Nový věk: ${name}.${first ? ' Zlatý věk!' : ''}`, 'good')
+  }
+  noteAll(s, `${NATIONS[p.nation].name} vstoupili do nového věku: ${name}${first ? ' (jako první – mají zlatý věk)' : ''}.`, 'info', undefined, undefined, { [p.id]: null }, h => h.met.includes(p.id))
 }
 
 /** Když se nic nezkoumá, vezme první dostupnou technologii z fronty. */
@@ -734,17 +745,16 @@ export function foundCity(s: GameState, u: Unit): City | null {
   assignWorkers(s, c)
   updateVisibility(s, c.owner)
   emit({ e: 'found', city: c.id, x: c.x, y: c.y })
-  if (c.owner === 0) {
-    note(s, 0, `Založili jste město ${c.name}.`, 'good', c.x, c.y)
-    if (!s.mission.questCities && citiesOf(s, 0).length >= 3) {
-      s.mission.questCities = true
+  if (p.human) {
+    note(s, p.id, `Založili jste město ${c.name}.`, 'good', c.x, c.y)
+    if (!s.mission.questCities && citiesOf(s, p.id).length >= 3) {
+      s.mission.questCities = true; s.mission.citiesBy = p.id
       p.gold += 60
-      note(s, 0, 'Vedlejší úkol splněn: tři města pod vaší vládou. Odměna 60 zlata.', 'good')
+      note(s, p.id, 'Vedlejší úkol splněn: tři města pod vaší vládou. Odměna 60 zlata.', 'good')
       emit({ e: 'sound', id: 'quest' })
     }
-  } else if (s.players[0].visible[idx(s, c.x, c.y)]) {
-    note(s, 0, `${NATIONS[p.nation].name} založili město ${c.name}.`, 'info', c.x, c.y)
   }
+  noteAll(s, `${NATIONS[p.nation].name} založili město ${c.name}.`, 'info', c.x, c.y, { [p.id]: null }, h => !!h.visible[idx(s, c.x, c.y)])
   return c
 }
 
@@ -1155,7 +1165,7 @@ export function attack(s: GameState, u: Unit, x: number, y: number): boolean {
     } else if (c.hp <= 0) {
       captureCity(s, c, u)
     }
-    if (c.owner === 0 && u.owner !== 0) noteOnce(s, `Město ${c.name} je pod útokem!`, 'bad', c.x, c.y)
+    if (c.owner !== u.owner) noteOnce(s, c.owner, `Město ${c.name} je pod útokem!`, 'bad', c.x, c.y)
     return true
   }
   const t = pv.target!
@@ -1204,7 +1214,7 @@ function gainXp(s: GameState, u: Unit, n: number): void {
   u.xp += n
   if (pendingPromos(u) <= before) return
   const p = s.players[u.owner]
-  if (p.human) { note(s, 0, `${UNITS[u.type].name} získal zkušenosti a čeká na povýšení.`, 'good', u.x, u.y); return }
+  if (p.human) { note(s, p.id, `${UNITS[u.type].name} získal zkušenosti a čeká na povýšení.`, 'good', u.x, u.y); return }
   // Soupeři a barbaři volí sami.
   const pref: PromoId[] = UNITS[u.type].ranged ? ['drill', 'march', 'guard', 'medic'] : p.personality === 'aggressive' ? ['drill', 'guard', 'medic', 'march'] : ['guard', 'drill', 'medic', 'march']
   while (pendingPromos(u) > 0) promoteUnit(s, u, pref.find(x => !u.promos.includes(x))!)
@@ -1253,9 +1263,9 @@ export function upgradeUnit(s: GameState, u: Unit): boolean {
   return true
 }
 
-function noteOnce(s: GameState, text: string, kind: Note['kind'], x?: number, y?: number): void {
-  if (s.notes.some(n => n.turn === s.turn && n.text === text)) return
-  note(s, 0, text, kind, x, y)
+function noteOnce(s: GameState, pid: number, text: string, kind: Note['kind'], x?: number, y?: number): void {
+  if (s.notes.some(n => n.pid === pid && n.turn === s.turn && n.text === text)) return
+  note(s, pid, text, kind, x, y)
 }
 
 function captureCity(s: GameState, c: City, by: Unit): void {
@@ -1295,7 +1305,7 @@ function captureCity(s: GameState, c: City, by: Unit): void {
   oldP.gold -= loot; newP.gold += loot
   note(s, by.owner, `Dobyli jste město ${c.name}! Kořist: ${loot} zlata.`, 'good', c.x, c.y)
   note(s, old, `Ztratili jste město ${c.name}!`, 'bad', c.x, c.y)
-  if (old !== 0 && by.owner !== 0) note(s, 0, `${NATIONS[newP.nation].name} dobyli město ${c.name} (${NATIONS[oldP.nation].name}).`, 'war', c.x, c.y)
+  noteAll(s, `${NATIONS[newP.nation].name} dobyli město ${c.name} (${NATIONS[oldP.nation].name}).`, 'war', c.x, c.y, { [old]: null, [by.owner]: null })
   updateVisibility(s, by.owner); updateVisibility(s, old)
   checkElimination(s, old)
   checkVictory(s)
@@ -1310,8 +1320,8 @@ function checkElimination(s: GameState, pid: number): void {
   for (const u of unitsOf(s, pid)) killUnit(s, u)
   for (const o of s.players) { o.war = o.war.filter(w => w !== pid) }
   p.war = []
-  s.offers = s.offers.filter(o => o.from !== pid)
-  if (pid !== 0) note(s, 0, `Národ ${NATIONS[p.nation].name} byl vyhlazen.`, 'war')
+  s.offers = s.offers.filter(o => o.from !== pid && o.to !== pid)
+  noteAll(s, `Národ ${NATIONS[p.nation].name} byl vyhlazen.`, 'war')
 }
 
 // ---------------------------------------------------------------- diplomacie
@@ -1321,13 +1331,14 @@ export function declareWar(s: GameState, a: number, b: number): void {
   const pa = s.players[a], pb = s.players[b]
   pa.war.push(b); pb.war.push(a)
   pa.lastWarTurn = s.turn; pb.lastWarTurn = s.turn
-  s.offers = s.offers.filter(o => !(o.from === a && b === 0) && !(o.from === b && a === 0))
+  s.offers = s.offers.filter(o => !(o.from === a && o.to === b) && !(o.from === b && o.to === a))
   s.deals = s.deals.filter(d => !((d.seller === a && d.buyer === b) || (d.seller === b && d.buyer === a)))
-  if (a === 0) { pb.attitude = Math.max(-100, pb.attitude - 50); pb.pactUntil = 0 }
+  if (pa.human && !pb.human) { pb.attitude[a] = Math.max(-100, pb.attitude[a] - 50); pb.pactUntil[a] = 0 }
   if (!pa.met.includes(b)) { pa.met.push(b); pb.met.push(a) }
-  if (b === 0) note(s, 0, `${NATIONS[pa.nation].name} vám vyhlásili válku!`, 'war')
-  else if (a === 0) note(s, 0, `Vyhlásili jste válku národu ${NATIONS[pb.nation].name}.`, 'war')
-  else note(s, 0, `${NATIONS[pa.nation].name} vyhlásili válku národu ${NATIONS[pb.nation].name}.`, 'war')
+  noteAll(s, `${NATIONS[pa.nation].name} vyhlásili válku národu ${NATIONS[pb.nation].name}.`, 'war', undefined, undefined, {
+    [b]: `${NATIONS[pa.nation].name} vám vyhlásili válku!`,
+    [a]: `Vyhlásili jste válku národu ${NATIONS[pb.nation].name}.`,
+  })
   emit({ e: 'sound', id: 'war' })
 }
 
@@ -1335,11 +1346,13 @@ export function makePeace(s: GameState, a: number, b: number): void {
   const pa = s.players[a], pb = s.players[b]
   pa.war = pa.war.filter(w => w !== b); pb.war = pb.war.filter(w => w !== a)
   pa.peaceUntil[b] = s.turn + 12; pb.peaceUntil[a] = s.turn + 12
-  s.offers = s.offers.filter(o => !(o.kind !== 'ally' && (o.from === a || o.from === b)))
-  if (a === 0) pb.attitude = Math.min(100, pb.attitude + 10)
-  if (b === 0) pa.attitude = Math.min(100, pa.attitude + 10)
-  if (a === 0 || b === 0) note(s, 0, `Uzavřeli jste mír s národem ${NATIONS[(a === 0 ? pb : pa).nation].name}.`, 'good')
-  else note(s, 0, `${NATIONS[pa.nation].name} a ${NATIONS[pb.nation].name} uzavřeli mír.`, 'info')
+  s.offers = s.offers.filter(o => !(o.kind !== 'ally' && ((o.from === a && o.to === b) || (o.from === b && o.to === a))))
+  if (pa.human && !pb.human) pb.attitude[a] = Math.min(100, pb.attitude[a] + 10)
+  if (pb.human && !pa.human) pa.attitude[b] = Math.min(100, pa.attitude[b] + 10)
+  noteAll(s, `${NATIONS[pa.nation].name} a ${NATIONS[pb.nation].name} uzavřeli mír.`, 'info', undefined, undefined, {
+    [a]: `Uzavřeli jste mír s národem ${NATIONS[pb.nation].name}.`,
+    [b]: `Uzavřeli jste mír s národem ${NATIONS[pa.nation].name}.`,
+  })
 }
 
 export function militaryPower(s: GameState, pid: number): number {
@@ -1355,42 +1368,49 @@ export function score(s: GameState, pid: number): number {
   let v = p.techs.length * 6 + p.traditions.length * 5 + p.era * 8
   for (const c of citiesOf(s, pid)) v += 12 + c.pop * 4 + c.buildings.length * 3 + (c.buildings.includes('wonder') ? 60 : 0)
   for (const t of s.tiles) if (t.owner === pid) v += 0.5
-  if (pid === 0) v += (s.mission.questCamps ? 20 : 0) + (s.mission.questCities ? 20 : 0) + (s.mission.questRuins ? 25 : 0)
+  const m = s.mission
+  v += (m.questCamps && (m.campsBy ?? 0) === pid ? 20 : 0) + (m.questCities && (m.citiesBy ?? 0) === pid ? 20 : 0) + (m.questRuins && m.ruinsBy === pid ? 25 : 0)
   return Math.round(v)
 }
 
 export function checkVictory(s: GameState): void {
   if (s.over) return
-  const me = s.players[0]
-  const rivals = s.players.filter(p => p.id !== 0 && p.id !== BARB)
-  const myName = NATIONS[me.nation].name
-  if (s.mission.wonderBy === 0) {
-    s.over = { won: true, kind: 'wonder', title: 'Vítězství – Sluneční chrám', text: `${SCENARIOS[s.scenario].over} se rozzářil Sluneční chrám. Poutníci ze všech krajů se klaní vaší moudrosti a ${myName} vejdou do dějin jako dědicové staré říše.` }
-    return
-  }
-  if (s.mission.wonderBy > 0) {
+  const majors = s.players.filter(p => p.id !== BARB)
+  const sc = SCENARIOS[s.scenario]
+  const nm = (p: Player) => NATIONS[p.nation].name
+  // Div: kdo dostaví Sluneční chrám, vyhrává.
+  if (s.mission.wonderBy >= 0) {
     const w = s.players[s.mission.wonderBy]
-    s.over = { won: false, kind: 'defeat', title: 'Porážka', text: `${NATIONS[w.nation].name} dostavěli Sluneční chrám dřív než vy. Kraj se klaní jinému trůnu.` }
+    const lost = `${nm(w)} dostavěli Sluneční chrám dřív než vy. Kraj se klaní jinému trůnu.`
+    s.over = w.human
+      ? { won: true, winner: w.id, kind: 'wonder', title: 'Vítězství – Sluneční chrám', text: `${sc.over} se rozzářil Sluneční chrám. Poutníci ze všech krajů se klaní vaší moudrosti a ${nm(w)} vejdou do dějin jako dědicové staré říše.`, other: lost }
+      : { won: false, winner: w.id, kind: 'defeat', title: 'Porážka', text: lost }
     return
   }
-  const seatsHeld = rivals.every(r => { const c = s.cities.find(ct => ct.seat === r.id); return !r.alive || (c ? c.owner === 0 : false) })
-  if (seatsHeld && s.cities.some(c => c.owner === 0)) {
-    s.over = { won: true, kind: 'conquest', title: 'Vítězství – dobytí', text: `Sídla vašich soupeřů padla. ${SCENARIOS[s.scenario].name} má jediného vládce a ${myName} píší jeho zákony.` }
+  // Lidský hráč bez měst i osadníků vypadává; hra končí, když nezbývá žádný.
+  for (const h of majors) if (h.human) checkElimination(s, h.id)
+  const alive = humans(s)
+  if (!alive.length) {
+    s.over = { won: false, winner: -1, kind: 'defeat', title: 'Porážka', text: 'Vaše poslední město padlo. Kronikáři o vašem lidu napíší jen krátkou poznámku.' }
     return
   }
-  const hasCity = s.cities.some(c => c.owner === 0)
-  const hasSettler = s.units.some(u => u.owner === 0 && u.type === 'settler')
-  if (!hasCity && !hasSettler) {
-    s.over = { won: false, kind: 'defeat', title: 'Porážka', text: 'Vaše poslední město padlo. Kronikáři o vašem lidu napíší jen krátkou poznámku.' }
-    return
+  // Dobytí: hráč drží sídelní města všech soupeřů.
+  for (const h of alive) {
+    const seatsHeld = majors.every(r => { if (r.id === h.id || !r.alive) return true; const c = s.cities.find(ct => ct.seat === r.id); return c ? c.owner === h.id : false })
+    if (seatsHeld && s.cities.some(c => c.owner === h.id)) {
+      s.over = { won: true, winner: h.id, kind: 'conquest', title: 'Vítězství – dobytí', text: `Sídla vašich soupeřů padla. ${sc.name} má jediného vládce a ${nm(h)} píší jeho zákony.`, other: `Sídla soupeřů padla. ${sc.name} má jediného vládce a zákony tu píší ${nm(h)}.` }
+      return
+    }
   }
   if (s.turn > s.maxTurns) {
-    const mine = score(s, 0)
-    const best = rivals.filter(r => r.alive).map(r => ({ r, v: score(s, r.id) })).sort((a, b) => b.v - a.v)[0]
-    if (!best || mine >= best.v) {
-      s.over = { won: true, kind: 'score', title: 'Vítězství – nejslavnější říše', text: `Po ${s.maxTurns} letech soupeření je váš lid nejmocnější ${SCENARIOS[s.scenario].inPlace} (skóre ${mine}${best ? ` proti ${best.v}` : ''}). Rada starších vám svěřuje Starý trůn.` }
+    // Sláva: nejvyšší skóre; při shodě má přednost lidský hráč.
+    const rank = majors.filter(p => p.alive).map(r => ({ r, v: score(s, r.id) })).sort((a, b) => b.v - a.v || Number(b.r.human) - Number(a.r.human) || a.r.id - b.r.id)
+    const top = rank[0], next = rank[1]
+    const lost = (v: number) => `Čas vypršel. ${nm(top.r)} vás zastínili (skóre ${top.v} proti vašim ${v}) a Starý trůn připadl jim.`
+    if (top.r.human) {
+      s.over = { won: true, winner: top.r.id, kind: 'score', title: 'Vítězství – nejslavnější říše', text: `Po ${s.maxTurns} letech soupeření je váš lid nejmocnější ${sc.inPlace} (skóre ${top.v}${next ? ` proti ${next.v}` : ''}). Rada starších vám svěřuje Starý trůn.`, other: `Čas vypršel. ${nm(top.r)} vás zastínili (skóre ${top.v}) a Starý trůn připadl jim.` }
     } else {
-      s.over = { won: false, kind: 'defeat', title: 'Porážka', text: `Čas vypršel. ${NATIONS[best.r.nation].name} vás zastínili (skóre ${best.v} proti vašim ${mine}) a Starý trůn připadl jim.` }
+      s.over = { won: false, winner: top.r.id, kind: 'defeat', title: 'Porážka', text: lost(Math.max(...alive.map(h => score(s, h.id)))) }
     }
   }
 }
@@ -1403,7 +1423,7 @@ export function unitMaxMoves(u: Unit): number { return UNITS[u.type].move }
 export function beginTurn(s: GameState, pid: number): void {
   for (const u of unitsOf(s, pid)) { u.moves = maxMoves(s, u); u.attacked = false; u.skip = false }
   updateVisibility(s, pid)
-  if (pid === 0) {
+  if (s.players[pid].human) {
     for (const u of unitsOf(s, pid)) {
       // Spící jednotku probudí nepřítel na dohled.
       if (u.sleep && enemyNear(s, u, 2)) u.sleep = false
@@ -1436,9 +1456,9 @@ export function endPlayerTurn(s: GameState, pid: number): void {
       u.workLeft -= 1
       if (u.workLeft <= 0) {
         if (u.work === 'road') t.road = true; else t.imp = u.work
-        if (pid === 0 && t.res && RESOURCES[t.res].strategic && RESOURCES[t.res].improvement === u.work && t.owner === 0) {
-          const need = unitsNeeding(s, 0, t.res)
-          note(s, 0, `Máte přístup k surovině ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Můžete stavět: ${need.join(', ')}.` : 'Vaše vojsko ji nepotřebuje, ale můžete ji prodávat v Diplomacii.'}`, 'good', u.x, u.y)
+        if (p.human && t.res && RESOURCES[t.res].strategic && RESOURCES[t.res].improvement === u.work && t.owner === pid) {
+          const need = unitsNeeding(s, pid, t.res)
+          note(s, pid, `Máte přístup k surovině ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Můžete stavět: ${need.join(', ')}.` : 'Vaše vojsko ji nepotřebuje, ale můžete ji prodávat v Diplomacii.'}`, 'good', u.x, u.y)
         }
         u.work = null
         const c = cityById(s, t.city)
@@ -1451,14 +1471,20 @@ export function endPlayerTurn(s: GameState, pid: number): void {
   s.deals = s.deals.filter(d => {
     if (d.seller !== pid) return true
     const ok = s.turn < d.until && ownsResource(s, d.seller, d.res) && s.players[d.buyer].alive
-    if (!ok && (d.seller === 0 || d.buyer === 0)) note(s, 0, `Obchod skončil: ${RESOURCES[d.res].name} (${NATIONS[s.players[d.seller === 0 ? d.buyer : d.seller].nation].name}).`, 'info')
+    if (!ok) for (const [me, they] of [[d.seller, d.buyer], [d.buyer, d.seller]]) note(s, me, `Obchod skončil: ${RESOURCES[d.res].name} (${NATIONS[s.players[they].nation].name}).`, 'info')
     return ok
   })
-  if (pid !== 0 && s.turn % 4 === 0) { p.attitude += p.attitude > 0 ? -1 : p.attitude < 0 ? 1 : 0; if (s.deals.some(d => (d.seller === pid && d.buyer === 0) || (d.buyer === pid && d.seller === 0))) p.attitude = Math.min(100, p.attitude + 2) }
+  // Vztahy soupeře k lidským hráčům se časem vracejí k neutrálu; obchod je zlepšuje.
+  if (!p.human && s.turn % 4 === 0) for (const h of s.players) {
+    if (!h.human) continue
+    const a = p.attitude[h.id]
+    p.attitude[h.id] = a + (a > 0 ? -1 : a < 0 ? 1 : 0)
+    if (s.deals.some(d => (d.seller === pid && d.buyer === h.id) || (d.buyer === pid && d.seller === h.id))) p.attitude[h.id] = Math.min(100, p.attitude[h.id] + 2)
+  }
   for (const c of citiesOf(s, pid)) { processCity(s, c); p.culture += cityYields(s, c).culture }
   if (!p.human) {
     while (traditionReady(p)) adoptTradition(s, p, traditionAdvice(p)!)
-  } else if (traditionReady(p)) noteOnce(s, 'Nastřádali jste dost kultury na novou tradici.', 'good')
+  } else if (traditionReady(p)) noteOnce(s, pid, 'Nastřádali jste dost kultury na novou tradici.', 'good')
   const inc = playerIncome(s, pid)
   p.gold += inc.gold
   let sci = inc.sci
@@ -1466,7 +1492,7 @@ export function endPlayerTurn(s: GameState, pid: number): void {
     // Prázdná pokladna brzdí vědu.
     sci = Math.max(0, sci + p.gold)
     p.gold = 0
-    if (pid === 0) noteOnce(s, 'Pokladna je prázdná! Schodek brzdí výzkum – stavte tržiště nebo rozpusťte část vojska.', 'bad')
+    noteOnce(s, pid, 'Pokladna je prázdná! Schodek brzdí výzkum – stavte tržiště nebo rozpusťte část vojska.', 'bad')
   }
   if (p.research) {
     p.progress += sci

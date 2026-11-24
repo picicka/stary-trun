@@ -270,13 +270,13 @@ test('povýšení, přezbrojení, obchod a spojenectví', () => {
   assert.equal(pi2(s, 0).gold, before + 3)
   // Spojenectví: chladnému soupeři se nechce, po darech ano.
   s.players[1].met.push(2); s.players[2].met.push(1)
-  s.players[1].attitude = 0
+  s.players[1].attitude[0] = 0
   assert.ok(!askAlliance(s, 1, 2).ok)
   s.players[0].gold = 500
   giveGold(s, 1); giveGold(s, 1)
-  s.players[1].attitude = 30
+  s.players[1].attitude[0] = 30
   const a = askAlliance(s, 1, 2)
-  if (a.ok) { assert.ok(s.players[1].war.includes(2)); assert.ok(s.players[0].war.includes(2)); assert.ok(s.players[1].pactUntil > s.turn) }
+  if (a.ok) { assert.ok(s.players[1].war.includes(2)); assert.ok(s.players[0].war.includes(2)); assert.ok(s.players[1].pactUntil[0] > s.turn) }
   // Válka obchod ruší.
   declareWar(s, 0, 1)
   assert.equal(s.deals.length, 0)
@@ -353,7 +353,7 @@ test('kultura a věky: tradice za kulturu, milníky a zlatý věk za výzkum', (
   assert.equal(s.eraFirst[1], 0)
   assert.ok(p.goldenUntil > s.turn)
   assert.equal(p.gold, gold + 30)
-  assert.ok(s.popup && s.popup.title.includes('Bronzový'))
+  assert.ok(s.popups.some(o => o.pid === 0 && o.title.includes('Bronzový')))
   // Druhý národ už zlatý věk nedostane.
   const q = s.players[1]
   while (q.techs.length < ERAS[1].techs) gt2(s, q, (['agriculture', 'husbandry', 'mining', 'archery', 'pottery', 'wheel', 'bronze'] as const).find(t => !q.techs.includes(t))!)
