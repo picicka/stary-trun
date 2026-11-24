@@ -122,6 +122,7 @@ kbd { font-family: var(--font); font-size: 16px; background: #0008; color: #ffe;
 .modalbox h4 { color: var(--gold); margin: 12px 0 4px; font-size: 22px; font-weight: 600; }
 
 .tree { position: relative; }
+.modalbox:has(.tree) { max-width: min(1300px, 96vw); }
 .tree svg { position: absolute; inset: 0; pointer-events: none; }
 .tech { position: absolute; width: 196px; height: 70px; background: #0f1530; border: 2px solid var(--line); padding: 3px 7px; font-size: 19px; line-height: 1.15; cursor: default; }
 .tech b { font-size: 21px; font-weight: 600; display: block; }
@@ -345,3 +346,24 @@ button[data-tip], .build[data-tip], .tech.avail[data-tip], [data-a][data-tip] { 
 .scen .fit { margin-top: 6px; color: var(--gold); font-size: 18px; }
 input.seed { font-family: var(--font); font-size: 22px; width: 110px; background: #0f1530; color: var(--text); border: 2px solid var(--line); padding: 4px 8px; }
 .dip .allylbl { flex-basis: 100%; color: var(--muted); font-size: 19px; margin-top: 2px; }
+
+/* Hra po síti */
+input.seed.wide { width: 300px; }
+input.seed.code { width: 150px; font-size: 30px; letter-spacing: 4px; text-align: center; text-transform: uppercase; }
+input.seed.url { width: min(520px, 60vw); font-size: 18px; }
+.neterr { color: var(--bad); font-size: 22px; margin: 4px 20px 0; text-align: center; max-width: 900px; }
+.netbox { display: flex; gap: 16px; margin-top: 18px; flex-wrap: wrap; justify-content: center; }
+.netbox .panel { width: 420px; padding: 12px 16px 16px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.netbox h3 { margin: 0; font-size: 26px; color: var(--gold); font-weight: 600; }
+.netbox p { margin: 0; color: var(--muted); font-size: 20px; flex: 1; }
+.netbox .setuprow { margin-top: 0; }
+.roomcode { color: #fff; letter-spacing: 5px; margin-left: 8px; }
+.members { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; width: min(620px, calc(100vw - 40px)); }
+.member { display: flex; align-items: center; gap: 10px; background: #141a2ecc; border-left: 5px solid var(--c); padding: 3px 10px; font-size: 21px; }
+.member img { width: 28px; height: 28px; image-rendering: pixelated; }
+.member b { font-weight: 400; color: #fff; min-width: 160px; text-align: left; }
+.member span { color: var(--c); flex: 1; text-align: left; }
+.member small { color: var(--muted); }
+.ntile.small { width: 104px; font-size: 15px; }
+.ntile.small img.p { width: 64px; height: 64px; }
+.ntile.small img.e { width: 18px; height: 18px; }

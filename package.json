@@ -11,6 +11,7 @@
     "art": "node ~/.claude/skills/pxl-pixel-art/bin/pxl.js build art/art.px.js && node scripts/copy-art.mjs"
   },
   "dependencies": {
+    "peerjs": "^1.5.5",
     "phaser": "^4.2.1"
   },
   "devDependencies": {

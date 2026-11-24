@@ -9,13 +9,37 @@ import {
   isNaval, traditionReady, tileJobs, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
   type PathMap,
 } from './game/rules.ts'
-import { clearSave, createGame, loadGame, saveGame, type GameOptions } from './game/state.ts'
+import { clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
+import { cleanCode, ClientSession, HostSession, roomCode, type Lobby, type NetEvents, type NetGame, type SavedSeat, type Session } from './net/session.ts'
+import { localTransport, NetError, peerTransport, type Transport } from './net/transport.ts'
 import type { BuildItem, City, GameState, JobId, Unit } from './game/types.ts'
 import { sfx, unlockAudio } from './audio.ts'
 import { Hud } from './ui/hud.ts'
 import type { MapHost, MapScene } from './view/MapScene.ts'
 
 export type Attention = { kind: 'research' } | { kind: 'tradition' } | { kind: 'city'; city: City } | { kind: 'unit'; unit: Unit } | { kind: 'end' }
+
+/** Nastavení síťové hry, které hostitel zvolil před otevřením místnosti. */
+export interface NetConfig { difficulty: Difficulty; scenario: ScenarioId; opts: GameOptions; seed?: number; info: string; max: number }
+
+const NET_KEY = 'hex4x-net'
+const JOIN_KEY = 'hex4x-join'
+const NAME_KEY = 'hex4x-name'
+/** Obě strany musí mít stejná pravidla; číslo sestavení dosazuje Vite. */
+const NET_VERSION = typeof __BUILD__ === 'string' ? __BUILD__ : 'dev'
+const store = {
+  get<T>(k: string): T | null { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) as T : null } catch { return null } },
+  set(k: string, v: unknown): void { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* bez úložiště */ } },
+  del(k: string): void { try { localStorage.removeItem(k) } catch { /* nic */ } },
+}
+/** Místo v cizí hře si pamatuje prohlížeč; při zkoušení mezi panely (?net=local) každý panel zvlášť. */
+const LOCAL_NET = new URLSearchParams(location.search).get('net') === 'local'
+const seatStore = {
+  get(): { code: string; token: string } | null { if (!LOCAL_NET) return store.get(JOIN_KEY); try { const v = sessionStorage.getItem(JOIN_KEY); return v ? JSON.parse(v) : null } catch { return null } },
+  set(v: { code: string; token: string }): void { if (!LOCAL_NET) store.set(JOIN_KEY, v); else try { sessionStorage.setItem(JOIN_KEY, JSON.stringify(v)) } catch { /* nic */ } },
+  del(): void { if (!LOCAL_NET) store.del(JOIN_KEY); else try { sessionStorage.removeItem(JOIN_KEY) } catch { /* nic */ } },
+}
+const newToken = () => Math.random().toString(36).slice(2) + Date.now().toString(36)
 
 export class App implements MapHost {
   state!: GameState
@@ -42,6 +66,10 @@ export class App implements MapHost {
   sites = new Map<number, number>()
   /** Za kolik tahů dorazí vybraná jednotka do cíle své cesty, nebo -1. */
   gotoEta = -1
+  /** Hra po síti: sezení hostitele nebo připojeného hráče. */
+  net: Session | null = null
+  private netCfg: NetConfig | null = null
+  private transport: Transport = LOCAL_NET ? localTransport() : peerTransport()
 
   constructor(scene: MapScene) {
     this.scene = scene
@@ -51,12 +79,16 @@ export class App implements MapHost {
     window.addEventListener('keydown', e => this.onKey(e))
     window.addEventListener('pointerdown', () => unlockAudio(), { capture: true })
     this.hud.showTitle()
+    const join = cleanCode(new URLSearchParams(location.search).get('hra') ?? '')
+    if (join.length === 5) this.hud.showNet(join)
   }
 
   // ------------------------------------------------------------ start
 
   /** Nová hra; víc národů v `nations` = víc lidských hráčů, kteří se střídají u jednoho počítače. */
   newGame(nations: NationId[], difficulty: Difficulty, scenario: ScenarioId = 'valley', opts: GameOptions = {}, seed?: number): void {
+    this.leaveNet()
+    store.del(NET_KEY)
     // Pokaždé jiné startovní místo.
     this.begin(createGame(nations[0], difficulty, scenario, seed, Math.floor(Math.random() * 8), nations.slice(1), opts))
     if (this.hotseat) this.handover(() => this.hud.showBriefing())
@@ -66,22 +98,230 @@ export class App implements MapHost {
   continueGame(): boolean {
     const s = loadGame()
     if (!s) return false
+    this.leaveNet()
+    const saved = store.get<{ code: string; seats: SavedSeat[] }>(NET_KEY)
+    if (saved && saved.seats.length === s.players.filter(p => p.human).length) { void this.resumeHost(s, saved.code, saved.seats); return true }
     this.begin(s)
     if (this.hotseat) this.handover()
     return true
   }
 
   /** Hraje víc lidí u jednoho počítače? */
-  get hotseat(): boolean { return this.state.players.filter(p => p.human).length > 1 }
+  get hotseat(): boolean { return !this.net && this.state.players.filter(p => p.human).length > 1 }
   /** Je místní hráč na tahu? */
   get myTurn(): boolean { return this.state.cur === this.me }
   get player() { return this.state.players[this.me] }
 
   /** Provede příkaz místního hráče – jediná cesta, kterou rozhraní mění stav hry. */
-  cmd(c: Command): Result { return exec(this.state, this.me, c) }
+  cmd(c: Command): Result {
+    const net = this.net
+    if (net) {
+      if (!this.myTurn) return { ok: false, text: 'Nejste na tahu.' }
+      if (!net.ready) return { ok: false, text: 'Spojení je přerušeno, hra čeká na jeho obnovení.' }
+    }
+    const r = exec(this.state, this.me, c)
+    net?.local(this.me, c, c.t === 'endTurn' ? stateHash(this.state) : undefined)
+    return r
+  }
+
+  /** Uloží hru (v síťové hře ji ukládá jen hostitel). */
+  private save(): void { if (!this.net || this.net.role === 'host') saveGame(this.state) }
 
   /** Uloží hru a překreslí rozhraní po příkazu bez animace. */
-  private commit(): void { saveGame(this.state); this.refresh() }
+  private commit(): void { this.save(); this.refresh() }
+
+  // ------------------------------------------------------------ hra po síti
+
+  get playerName(): string { return store.get<string>(NAME_KEY) ?? '' }
+  set playerName(v: string) { store.set(NAME_KEY, v.trim().slice(0, 20)) }
+  /** Rozehraná síťová hra, do které se dá vrátit (kód místnosti), nebo null. */
+  get rejoinCode(): string | null { return seatStore.get()?.code ?? null }
+  /** Jméno hráče na daném místě (jen v síťové hře). */
+  seatName(pid: number): string { return this.net?.lobby()?.members[pid]?.name ?? '' }
+  /** Odkaz, kterým se spoluhráči připojí. */
+  get joinUrl(): string {
+    const u = new URL(location.href)
+    u.search = ''
+    u.searchParams.set('hra', this.net?.lobby()?.code ?? '')
+    if (LOCAL_NET) u.searchParams.set('net', 'local')
+    return u.toString()
+  }
+
+  private netGame(): NetGame {
+    return {
+      apply: (pid, cmd, hashed) => this.remote(pid, cmd, hashed),
+      snapshot: () => serialize(this.state),
+      load: (json, seat, first) => this.netLoad(json, seat, first),
+    }
+  }
+
+  private netEvents(): NetEvents {
+    return {
+      lobby: l => this.onLobby(l),
+      status: text => { if (this.inGame) { this.hud.toast(text); this.hud.render() } },
+      closed: why => {
+        this.net = null
+        seatStore.del()
+        // Po konci hry si hráč v klidu dočte závěrečnou obrazovku.
+        if (this.inGame && this.state.over) return
+        this.inGame = false
+        this.hud.showNet('', why)
+      },
+    }
+  }
+
+  private onLobby(_l: Lobby): void {
+    if (this.inGame) this.hud.render()
+    else if (!this.net?.started) this.hud.showLobby()
+  }
+
+  /** Otevře místnost pro síťovou hru; ostatní se připojí kódem nebo odkazem. */
+  async hostGame(cfg: NetConfig): Promise<void> {
+    this.leaveNet()
+    this.netCfg = cfg
+    this.hud.showConnecting('Otevírám místnost…')
+    for (let k = 0; k < 4; k++) {
+      const code = roomCode()
+      try {
+        const end = await this.transport.host(code)
+        this.net = new HostSession(end, { code, name: this.playerName || 'Hostitel', token: newToken(), max: cfg.max, info: cfg.info, version: NET_VERSION }, this.netGame(), this.netEvents())
+        this.hud.showLobby()
+        return
+      } catch (e) {
+        if (e instanceof NetError && e.taken) continue
+        this.hud.showNet('', e instanceof NetError ? e.message : 'Místnost se nepodařilo otevřít.')
+        return
+      }
+    }
+    this.hud.showNet('', 'Místnost se nepodařilo otevřít.')
+  }
+
+  /** Připojí se do místnosti jiného hráče. */
+  async joinGame(raw: string): Promise<void> {
+    const code = cleanCode(raw)
+    if (code.length !== 5) { this.hud.showNet(raw, 'Kód místnosti má pět znaků.'); return }
+    this.leaveNet()
+    // Stejný kód = návrat na své místo v rozehrané hře.
+    const old = seatStore.get()
+    const token = old?.code === code ? old.token : newToken()
+    this.hud.showConnecting('Připojuji se…')
+    const cs = new ClientSession(() => this.transport.join(code), { name: this.playerName || 'Hráč', token, version: NET_VERSION }, this.netGame(), this.netEvents())
+    this.net = cs
+    try {
+      await cs.open()
+      seatStore.set({ code, token })
+    } catch (e) {
+      if (this.net !== cs) return
+      this.net = null
+      this.hud.showNet(code, e instanceof NetError ? e.message : 'Připojení se nezdařilo.')
+    }
+  }
+
+  /** Hostitel spouští hru: národy podle místnosti, zbylá místa vede počítač. */
+  netStart(): void {
+    const net = this.net, cfg = this.netCfg
+    if (!net || net.role !== 'host' || !cfg || net.started) return
+    const nations = net.lobby().members.map(m => m.nation)
+    const s = createGame(nations[0], cfg.difficulty, cfg.scenario, cfg.seed, Math.floor(Math.random() * 8), nations.slice(1), cfg.opts)
+    this.begin(s, () => this.hud.showBriefing())
+    saveGame(s)
+    store.set(NET_KEY, { code: net.code, seats: net.seats() })
+    net.start()
+  }
+
+  /** Hostitel pokračuje v uložené síťové hře: otevře tutéž místnost a hráči se vrátí na svá místa. */
+  private async resumeHost(s: GameState, code: string, seats: SavedSeat[]): Promise<void> {
+    this.hud.showConnecting('Otevírám místnost…')
+    try {
+      const end = await this.transport.host(code)
+      this.net = new HostSession(end, { code, name: seats[0].name, token: seats[0].token, max: seats.length, info: '', version: NET_VERSION, resume: seats }, this.netGame(), this.netEvents())
+      this.begin(s)
+      this.hud.toast(`Místnost ${code} je znovu otevřená. Spoluhráči se vrátí stejným kódem.`)
+    } catch (e) {
+      this.hud.showNet('', e instanceof NetError && e.taken ? 'Místnost je ještě obsazená předchozím spojením. Zkuste to za chvíli znovu.' : e instanceof NetError ? e.message : 'Místnost se nepodařilo otevřít.')
+    }
+  }
+
+  /** Stav hry od hostitele: začátek hry, návrat do ní, nebo oprava po rozejití. */
+  private netLoad(json: string, seat: number, first: boolean): void {
+    const s = deserialize(json)
+    if (!s || !this.net) return
+    const again = this.inGame && !first
+    const cam = again ? this.scene.cameras.main : null
+    const view = cam ? [cam.scrollX, cam.scrollY] : null
+    this.me = seat
+    this.busy = false
+    this.begin(s, () => {
+      if (first) this.hud.showBriefing()
+      else {
+        if (view) this.scene.cameras.main.setScroll(view[0], view[1])
+        this.hud.toast(again ? 'Hra se srovnala se stavem u hostitele.' : 'Jste zpět ve hře.')
+        if (this.myTurn) { this.showPopups(); this.hud.checkOffers() }
+      }
+    })
+  }
+
+  /** Provede příkaz jiného hráče, který přišel po síti, a přehraje jeho animaci. */
+  private async remote(pid: number, cmd: Command, hashed: boolean, after?: () => void): Promise<string> {
+    for (let k = 0; this.busy && k < 400; k++) await new Promise(r => window.setTimeout(r, 25))
+    if (!this.inGame) return ''
+    const s = this.state
+    const wasMine = this.myTurn
+    this.busy = true
+    let h = ''
+    try {
+      exec(s, pid, cmd)
+      if (hashed) h = stateHash(s)
+      after?.()
+      const ev = drainEvents()
+      // Panel na pozadí neanimuje (prohlížeč mu zastaví čas), jen srovná jednotky.
+      if (document.hidden) this.scene.syncUnits()
+      else { this.scene.ensureUnitViews(); await this.scene.play(ev, cmd.t === 'endTurn') }
+    } finally {
+      this.busy = false
+    }
+    if (s !== this.state) return h
+    if (this.selUnit >= 0 && !this.unit) this.selUnit = -1
+    if (this.selCity >= 0 && this.city?.owner !== this.me) this.selCity = -1
+    this.save()
+    this.refresh()
+    if (s.over) this.gameOver()
+    else if (!wasMine && this.myTurn) this.turnStarts()
+    return h
+  }
+
+  /** V síťové hře přišel místní hráč na řadu. */
+  private turnStarts(): void {
+    sfx('turn')
+    this.hud.toast('Jste na tahu.')
+    const n = this.idleUnits()[0]
+    if (n && !this.hud.modalOpen) this.select(n, true)
+    if (!this.hud.modalOpen) this.showPopups()
+    this.hud.checkOffers()
+  }
+
+  /** Hostitel může ukončit tah hráče, kterému vypadlo spojení. */
+  get canForceEnd(): boolean {
+    const net = this.net
+    return !!net && net.role === 'host' && net.started && !this.myTurn && !this.state.over && !net.online(this.state.cur) && net.idle
+  }
+
+  forceEnd(): void {
+    const net = this.net
+    if (!this.canForceEnd || !net || net.role !== 'host' || this.busy) return
+    const pid = this.state.cur
+    const cmd: Command = { t: 'endTurn' }
+    void this.remote(pid, cmd, false, () => net.local(pid, cmd, stateHash(this.state)))
+  }
+
+  /** Ukončí síťové sezení (hostitel tím hru pro ostatní zavře, uložená mu zůstane). */
+  leaveNet(): void {
+    const net = this.net
+    if (!net) return
+    this.net = null
+    this.netCfg = null
+    net.close()
+  }
 
   /** Předání počítače dalšímu hráči: zakryje mapu a po potvrzení přepne pohled. */
   private handover(then?: () => void): void {
@@ -122,9 +362,9 @@ export class App implements MapHost {
     this.hud.showPopup(pop.title, pop.text)
   }
 
-  private begin(s: GameState): void {
+  private begin(s: GameState, then?: () => void): void {
     this.state = s
-    this.me = s.players[s.cur]?.human ? s.cur : 0
+    this.me = this.net ? Math.max(0, this.net.seat) : s.players[s.cur]?.human ? s.cur : 0
     this.inGame = true
     this.selUnit = -1; this.selCity = -1
     drainEvents()
@@ -138,6 +378,7 @@ export class App implements MapHost {
       const first = unitsOf(s, this.me).find(v => v.type === 'settler')
       if (first && !cap) this.select(first)
       this.refresh()
+      then?.()
     }
     if (this.scene.scene.isActive()) go()
     else this.scene.events.once('ready', go)
@@ -145,6 +386,7 @@ export class App implements MapHost {
 
   quitToMenu(): void {
     this.inGame = false
+    this.leaveNet()
     this.hud.showTitle()
   }
 
@@ -249,7 +491,7 @@ export class App implements MapHost {
       this.busy = false
     }
     if (this.selUnit >= 0 && !this.unit) this.selUnit = -1
-    saveGame(this.state)
+    this.save()
     this.refresh()
     if (this.state.over) this.gameOver()
     // Po předání tahu si hráč svá okna přečte, až zase usedne k počítači.
@@ -257,7 +499,8 @@ export class App implements MapHost {
   }
 
   private gameOver(): void {
-    clearSave()
+    if (!this.net || this.net.role === 'host') { clearSave(); store.del(NET_KEY) }
+    seatStore.del()
     const o = this.state.over!
     // U jednoho počítače patří závěrečná obrazovka vítězi.
     if (this.hotseat && this.state.players[o.winner]?.human && this.me !== o.winner) { this.me = o.winner; this.scene.reset(); this.refresh() }
@@ -266,10 +509,11 @@ export class App implements MapHost {
   }
 
   onTileClick(x: number, y: number, right: boolean, shift = false): void {
-    if (this.busy || !this.inGame || this.hud.modalOpen || this.state.over || !this.myTurn) return
+    if (this.busy || !this.inGame || this.hud.modalOpen || this.state.over || (!this.myTurn && !this.net)) return
     const s = this.state
     const i = idx(s, x, y)
-    const u = this.unit
+    // Mimo svůj tah si hráč síťové hry může jen prohlížet a vybírat.
+    const u = this.myTurn ? this.unit : undefined
     if (u && this.roadMode) {
       this.roadMode = false
       if (right) { this.refresh(); return }
@@ -374,7 +618,14 @@ export class App implements MapHost {
 
   /** Hlavní tlačítko: vyřídí, co čeká, jinak ukončí tah. */
   mainAction(force = false): void {
-    if (this.busy || this.state.over || this.hud.modalOpen || !this.myTurn) return
+    if (this.busy || this.state.over || this.hud.modalOpen) return
+    if (!this.myTurn) {
+      if (this.canForceEnd) {
+        const p = this.state.players[this.state.cur]
+        this.hud.confirm('Ukončit tah za hráče?', `${this.seatName(p.id) || 'Hráč'} nemá spojení. Národ ${NATIONS[p.nation].name} tento tah nic dalšího neudělá a hra půjde dál; vrátit se do ní dá kdykoli stejným kódem.`, 'Ukončit tah', () => this.forceEnd())
+      }
+      return
+    }
     const a = force ? { kind: 'end' as const } : this.attention()
     sfx('click')
     if (a.kind === 'research') this.hud.showTech()
@@ -393,8 +644,8 @@ export class App implements MapHost {
     void this.run(() => { this.cmd({ t: 'endTurn' }) }, true).then(() => {
       this.hud.setWaiting(false)
       if (this.state.over) return
-      // Na řadě je další hráč u téhož počítače.
-      if (!this.myTurn) { this.handover(); return }
+      // Na řadě je další hráč: po síti jen čekáme, u téhož počítače se předává místo.
+      if (!this.myTurn) { if (this.net) this.refresh(); else this.handover(); return }
       const u = this.unit
       if (!u || u.moves <= 0) { const n = this.idleUnits()[0]; if (n) this.select(n, true) }
       this.hud.checkOffers()
@@ -414,7 +665,7 @@ export class App implements MapHost {
     }
     if (a.startsWith('imp:')) {
       const job = a.slice(4) as ImprovementId | 'road'
-      if (this.cmd({ t: 'work', unit, job }).ok) { sfx('build'); this.hud.toast(`${job === 'road' ? 'Cesta' : IMPROVEMENTS[job].name}: hotovo za ${u.workLeft} tahy.`); saveGame(s); this.autoAdvance(); this.refresh() }
+      if (this.cmd({ t: 'work', unit, job }).ok) { sfx('build'); this.hud.toast(`${job === 'road' ? 'Cesta' : IMPROVEMENTS[job].name}: hotovo za ${u.workLeft} tahy.`); this.save(); this.autoAdvance(); this.refresh() }
       return
     }
     if (a === 'roadto') { this.roadMode = !this.roadMode; sfx('click'); if (this.roadMode) this.hud.toast('Klikněte na pole, kam má cesta vést (pravé tlačítko ruší).'); this.refresh(); return }
@@ -444,7 +695,7 @@ export class App implements MapHost {
     if (a === 'wake') { this.commit(); return }
     if (a === 'auto') this.hud.toast(u.type === 'worker' ? 'Dělníci budou sami vylepšovat pole. Zrušíte tlačítkem Probudit.' : 'Jednotka bude sama zkoumat mapu. Zrušíte tlačítkem Probudit.')
     sfx('click')
-    saveGame(s)
+    this.save()
     this.autoAdvance()
     this.refresh()
   }

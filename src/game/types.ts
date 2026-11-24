@@ -1,4 +1,4 @@
-import type { TraditionId, ScenarioId, BuildingId, Difficulty, ImprovementId, NationId, PromoId, ResourceId, TechId, TerrainId, UnitId } from './data.ts'
+import type { TraditionId, ScenarioId, BuildingId, Difficulty, ImprovementId, NationId, PersonaId, PromoId, ResourceId, TechId, TerrainId, UnitId } from './data.ts'
 
 /** Práce dělníků: vylepšení pole, nebo cesta. */
 export type JobId = ImprovementId | 'road'
@@ -95,8 +95,10 @@ export interface Player {
   visible: number[]
   war: number[]
   met: number[]
-  personality: 'aggressive' | 'builder' | 'human' | 'barbarian'
+  personality: PersonaId | 'human' | 'barbarian'
   lastWarTurn: number
+  /** Tažení počítače: na které město táhne, zda už vyrazil (jinak shromažďuje vojsko) a odkdy. `pre` = válka ještě nebyla vyhlášena. */
+  siege?: { city: number; go: boolean; since: number; pre?: boolean } | null
   peaceUntil: number[]
   cityNames: number
   /** Vztah soupeře k jednotlivým hráčům (−100 až 100), index = id hráče. */
@@ -123,14 +125,16 @@ export interface Mission {
   questCities: boolean
   questCamps: boolean
   questRuins: boolean
+  /** Kdo drží dostavěný Sluneční chrám (-1 = nestojí) a od kterého tahu. */
   wonderBy: number
+  wonderSince?: number
   /** Kdo splnil vedlejší úkol (id hráče), kvůli skóre. */
   citiesBy?: number
   campsBy?: number
 }
 
 /** Konec hry. `title` a `text` platí pro vítěze (nebo pro poražené, když nevyhrál člověk); `other` čtou lidští hráči, kteří nevyhráli. */
-export interface GameOver { won: boolean; winner: number; kind: 'conquest' | 'wonder' | 'score' | 'defeat'; title: string; text: string; other?: string }
+export interface GameOver { won: boolean; winner: number; kind: 'conquest' | 'wonder' | 'score' | 'defeat'; /** Čím hra skončila (i když vyhrál počítač). */ how?: 'conquest' | 'wonder' | 'score'; title: string; text: string; other?: string }
 
 /** Nabídka od `from` hráči `to`: mír, nebo pozvání do války proti `vs`. */
 export interface PeaceOffer { from: number; to: number; kind?: 'peace' | 'ally'; vs?: number }

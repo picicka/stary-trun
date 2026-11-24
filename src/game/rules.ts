@@ -2,6 +2,7 @@
 import {
   ERAS, GOLDEN_TURNS, TRADITIONS, TRADITION_IDS, traditionCost, type TraditionId, SCENARIOS, BUILDINGS, BUILDING_IDS, DIFFICULTY, IMPROVEMENTS, NATIONS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS, TERRAIN, UNITS, UNIT_IDS, XP_LEVELS, unitFor,
   type BuildingId, type ImprovementId, type PromoId, type ResourceId, type TechId, type UnitId, type Yields,
+  PERSONAS, type PersonaId,
 } from './data.ts'
 import { hexDist, neighborXY } from './hex.ts'
 import { rand } from './rng.ts'
@@ -230,6 +231,7 @@ export function cityYields(s: GameState, c: City): CityYields {
   if (has('academy')) sci = Math.round((sci + 3) * 1.25)
   if (has('court')) gold += 4
   if (has('market')) gold = Math.round((gold + 2) * 1.25)
+  if (has('bank')) gold = Math.round((gold + 3) * 1.2)
   if (!p.human && c.owner !== barbId(s)) {
     const m = DIFFICULTY[s.difficulty].aiMult
     prod = Math.max(1, Math.round(prod * m)); sci = Math.max(1, Math.round(sci * m)); food = Math.round(food * (0.5 + m / 2))
@@ -690,7 +692,7 @@ export function traditionReady(p: Player): boolean {
 
 /** Která tradice se národu právě hodí nejvíc (volba soupeřů i tip pro hráče): ve válce a výbojným bojové, jinak hospodářské. */
 export function traditionAdvice(p: Player): TraditionId | null {
-  const martial = p.personality === 'aggressive' || (p.human && p.war.length > 0)
+  const martial = (PERSONAS[p.personality as PersonaId]?.martial ?? false) || (p.human && p.war.length > 0)
   const pref: TraditionId[] = martial ? ['craft', 'warrior', 'stores', 'trade', 'militia', 'builders', 'scribes', 'feasts', 'settlers', 'sea'] : ['stores', 'craft', 'scribes', 'feasts', 'trade', 'settlers', 'builders', 'militia', 'sea', 'warrior']
   return pref.find(x => !p.traditions.includes(x)) ?? null
 }
@@ -704,11 +706,12 @@ export function adoptTradition(_s: GameState, p: Player, id: TraditionId): boole
 
 // ---------------------------------------------------------------- města
 
-export function cityMaxHp(c: City): number { return 200 + (c.buildings.includes('walls') ? 60 : 0) }
+export function cityMaxHp(c: City): number { return 200 + (c.buildings.includes('walls') ? 60 : 0) + (c.buildings.includes('bastion') ? 40 : 0) }
 
 export function cityStrength(s: GameState, c: City): number {
-  let v = 7 + c.pop * 1.2 + s.players[c.owner].techs.length * 0.25
-  if (c.buildings.includes('walls')) v *= 1.5
+  let v = 7 + c.pop * 0.9 + s.players[c.owner].techs.length * 0.15
+  if (c.buildings.includes('walls')) v *= 1.4
+  if (c.buildings.includes('bastion')) v *= 1.25
   if (s.players[c.owner].traditions.includes('militia')) v *= 1.25
   if (s.players[c.owner].nation === 'morv') v *= 1.25
   const g = militaryAt(s, c.x, c.y)
@@ -790,6 +793,7 @@ export function canBuildBuilding(s: GameState, c: City, id: BuildingId): boolean
   if (c.buildings.includes(id)) return false
   if (d.tech && !hasTech(p, d.tech)) return false
   if (id === 'harbor' && !isCoastal(s, c.x, c.y)) return false
+  if (id === 'bastion' && !c.buildings.includes('walls')) return false
   if (id === 'wonder') {
     if (s.mission.wonderBy >= 0) return false
     const isW = (it: BuildItem | null) => it?.kind === 'building' && it.id === 'wonder'
@@ -931,8 +935,13 @@ function completeBuild(s: GameState, c: City): boolean {
     c.build = nextQueued(s, c)
     note(s, c.owner, `${c.name}: dokončena stavba ${BUILDINGS[it.id].name}.`, 'good', c.x, c.y)
     if (it.id === 'walls') c.hp = Math.min(cityMaxHp(c), c.hp + 60)
+    if (it.id === 'bastion') c.hp = Math.min(cityMaxHp(c), c.hp + 40)
     if (it.id === 'wonder') {
       s.mission.wonderBy = c.owner
+      s.mission.wonderSince = s.turn
+      // O chrámu se dozví celý svět: kdo jeho stavitele dosud neznal, teď ho zná (a může mu vyhlásit válku).
+      for (const o of s.players) if (o.id !== c.owner && o.id !== barbId(s) && o.alive) meet(s, c.owner, o.id)
+      noteAll(s, `${NATIONS[s.players[c.owner].nation].name} dostavěli Sluneční chrám ve městě ${c.name}! Udrží-li město ${WONDER_TURNS} tahů, zvítězí. Kdo město dobude, získá chrám pro sebe.`, 'war', c.x, c.y, { [c.owner]: `Sluneční chrám stojí! Udržte ${c.name} ${WONDER_TURNS} tahů a zvítězíte. Soupeři se ho pokusí dobýt.` })
       for (const o of s.cities) {
         o.queue = o.queue.filter(q => !(q.kind === 'building' && q.id === 'wonder'))
         if (o.build?.kind === 'building' && o.build.id === 'wonder') o.build = nextQueued(s, o)
@@ -977,7 +986,7 @@ function processCity(s: GameState, c: City): void {
     p.gold += Math.floor(y.prod / 2)
   }
   // Opravy a střelba z hradeb.
-  c.hp = Math.min(cityMaxHp(c), c.hp + 14)
+  if (!besieged(s, c)) c.hp = Math.min(cityMaxHp(c), c.hp + 10)
   cityShoot(s, c)
 }
 
@@ -990,8 +999,9 @@ function cityShoot(s: GameState, c: City): void {
   }
   if (!target) return
   const a = cityStrength(s, c) * 0.62
-  const d = unitStrength(s, target, { defending: true })
-  const dmg = damage(s, a, d)
+  const d = unitStrength(s, target, { defending: true }) * ramCover(s, target, c)
+  // Ani obléhací stroj nepadne jedinou salvou z hradeb.
+  const dmg = Math.min(45, damage(s, a, d))
   target.hp -= dmg
   emit({ e: 'cityShot', from: [c.x, c.y], to: [target.x, target.y], dmg })
   if (target.hp <= 0) {
@@ -1079,7 +1089,34 @@ export function roadStep(s: GameState, u: Unit): void {
 
 // ---------------------------------------------------------------- boj
 
-export interface StrengthCtx { defending?: boolean; ranged?: boolean; vs?: Unit | null; vsCity?: boolean; river?: boolean }
+export interface StrengthCtx { defending?: boolean; ranged?: boolean; vs?: Unit | null; vsCity?: boolean; river?: boolean; /** U města stojí vlastní beranidlo. */ ram?: boolean }
+
+/** Kolikrát beranidlo násobí sílu pěchoty při útoku na město. */
+export const RAM_BONUS = 1.5
+/** Kolikrát beranidlo násobí obranu jednotek hned u města proti odvetě a střelbě z hradeb. */
+export const RAM_COVER = 1.5
+/** Střílející obléhací stroje: násobek síly proti městům a proti jednotkám. */
+export const SIEGE_VS_CITY = 3
+export const SIEGE_VS_UNIT = 0.5
+
+/** Kryje jednotku u města `c` vlastní beranidlo? Vrací násobek její obrany proti městu. */
+export function ramCover(s: GameState, u: Unit, c: City): number {
+  return !UNITS[u.type].ram && hexDist(u.x, u.y, c.x, c.y) === 1 && ramAt(s, c, u.owner) ? RAM_COVER : 1
+}
+/** Kolik nepřátelských jednotek hned u města stačí, aby bylo v obležení a přestalo se opravovat. */
+export const SIEGE_UNITS = 3
+
+/** Stojí hned u města beranidlo hráče `pid`? */
+export function ramAt(s: GameState, c: City, pid: number): boolean {
+  return s.units.some(u => u.owner === pid && UNITS[u.type].ram && hexDist(u.x, u.y, c.x, c.y) === 1)
+}
+
+/** Město v obležení: hned u něj stojí aspoň SIEGE_UNITS bojových jednotek národů, se kterými válčí. Takové město se neopravuje. */
+export function besieged(s: GameState, c: City): boolean {
+  let n = 0
+  for (const u of s.units) if (!isCivilian(u) && hexDist(u.x, u.y, c.x, c.y) === 1 && atWar(s, c.owner, u.owner) && ++n >= SIEGE_UNITS) return true
+  return false
+}
 
 export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): number {
   const d = UNITS[u.type]
@@ -1102,8 +1139,11 @@ export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): numb
   // Útok zblízka přes řeku je těžší.
   if (ctx.river) m -= 0.2
   if (d.antiMounted && ctx.vs && UNITS[ctx.vs.type].mounted) m += 0.5
-  if (ctx.vsCity && ctx.ranged) m *= d.siege ? 2 : 0.7
+  if (ctx.vsCity && ctx.ranged) m *= d.siege ? SIEGE_VS_CITY : 0.7
+  // Stroje jsou stavěné na hradby; do pohyblivých jednotek se trefují špatně.
+  if (!ctx.vsCity && ctx.ranged && d.siege && !ctx.defending) m *= SIEGE_VS_UNIT
   if (ctx.vsCity && d.mounted && !ctx.ranged) m *= 0.75
+  if (ctx.vsCity && ctx.ram && !ctx.ranged) m *= RAM_BONUS
   if (base <= 0) base = 1
   return base * m * (0.5 + 0.5 * u.hp / 100)
 }
@@ -1120,7 +1160,7 @@ export interface AttackPreview { ranged: boolean; city: City | null; target: Uni
 /** Lze zaútočit na pole? Vrací náhled (očekávané ztráty), nebo null. */
 export function previewAttack(s: GameState, u: Unit, x: number, y: number): AttackPreview | null {
   const d = UNITS[u.type]
-  if (d.civilian || u.attacked || u.moves <= 0) return null
+  if (d.civilian || d.ram || u.attacked || u.moves <= 0) return null
   const dist = hexDist(u.x, u.y, x, y)
   const ranged = !!d.ranged
   if (dist === 0 || dist > (ranged ? d.range! : 1)) return null
@@ -1135,9 +1175,9 @@ export function previewAttack(s: GameState, u: Unit, x: number, y: number): Atta
   const needWar = atWar(s, u.owner, foe) ? -1 : foe
   const river = !ranged && riverBetween(s, idx(s, u.x, u.y), idx(s, x, y))
   if (city && city.owner !== u.owner) {
-    const a = unitStrength(s, u, { ranged, vsCity: true, river })
+    const a = unitStrength(s, u, { ranged, vsCity: true, river, ram: !ranged && ramAt(s, city, u.owner) })
     const cs = cityStrength(s, city)
-    return { ranged, city, target: null, dmgDef: Math.round(damageExpected(a, cs)), dmgAtt: ranged ? 0 : Math.round(damageExpected(cs, unitStrength(s, u, {}))), defHp: city.hp, attHp: u.hp, needWar, river }
+    return { ranged, city, target: null, dmgDef: Math.round(damageExpected(a, cs)), dmgAtt: ranged ? 0 : Math.round(damageExpected(cs, unitStrength(s, u, {}) * ramCover(s, u, city))), defHp: city.hp, attHp: u.hp, needWar, river }
   }
   if (!target) return null
   const a = unitStrength(s, u, { ranged, vs: target, river })
@@ -1161,10 +1201,10 @@ export function attack(s: GameState, u: Unit, x: number, y: number): boolean {
   const from: [number, number] = [u.x, u.y]
   if (pv.city) {
     const c = pv.city
-    const a = unitStrength(s, u, { ranged: pv.ranged, vsCity: true, river: pv.river })
+    const a = unitStrength(s, u, { ranged: pv.ranged, vsCity: true, river: pv.river, ram: !pv.ranged && ramAt(s, pv.city, u.owner) })
     const cs = cityStrength(s, c)
     let dmgDef = damage(s, a, cs)
-    const dmgAtt = pv.ranged ? 0 : damage(s, cs, unitStrength(s, u, {}))
+    const dmgAtt = pv.ranged ? 0 : damage(s, cs, unitStrength(s, u, {}) * ramCover(s, u, c))
     if (pv.ranged) dmgDef = Math.min(dmgDef, Math.max(0, c.hp - 1))
     c.hp -= dmgDef
     u.hp -= dmgAtt
@@ -1228,7 +1268,7 @@ function gainXp(s: GameState, u: Unit, n: number): void {
   const p = s.players[u.owner]
   if (p.human) { note(s, p.id, `${UNITS[u.type].name} získal zkušenosti a čeká na povýšení.`, 'good', u.x, u.y); return }
   // Soupeři a barbaři volí sami.
-  const pref: PromoId[] = UNITS[u.type].ranged ? ['drill', 'march', 'guard', 'medic'] : p.personality === 'aggressive' ? ['drill', 'guard', 'medic', 'march'] : ['guard', 'drill', 'medic', 'march']
+  const pref: PromoId[] = UNITS[u.type].ranged ? ['drill', 'march', 'guard', 'medic'] : PERSONAS[p.personality as PersonaId]?.martial ? ['drill', 'guard', 'medic', 'march'] : ['guard', 'drill', 'medic', 'march']
   while (pendingPromos(u) > 0) promoteUnit(s, u, pref.find(x => !u.promos.includes(x))!)
 }
 
@@ -1299,7 +1339,7 @@ function captureCity(s: GameState, c: City, by: Unit): void {
   c.pop = Math.max(1, c.pop - 1)
   c.hp = Math.floor(cityMaxHp(c) / 2)
   c.build = null; c.queue = []; c.prod = 0; c.food = 0
-  const i = c.buildings.indexOf('walls'); if (i >= 0) c.buildings.splice(i, 1)
+  c.buildings = c.buildings.filter(b => b !== 'walls' && b !== 'bastion')
   if (c.capital) {
     c.capital = false
     const next = citiesOf(s, old).sort((a, b) => b.pop - a.pop)[0]
@@ -1387,6 +1427,14 @@ export function score(s: GameState, pid: number): number {
 
 /** Kolik tahů je třeba držet většinu cizích sídel k vítězství dobytím. */
 export const CONQUEST_TURNS = 5
+/** Kolik tahů je třeba udržet město se Slunečním chrámem. */
+export const WONDER_TURNS = 15
+/** Město, kde stojí Sluneční chrám. */
+export function wonderCity(s: GameState): City | null { return s.cities.find(c => c.buildings.includes('wonder')) ?? null }
+/** Kolik tahů zbývá držiteli chrámu do vítězství (null = chrám nestojí). */
+export function wonderLeft(s: GameState): number | null {
+  return s.mission.wonderBy >= 0 ? Math.max(0, WONDER_TURNS - (s.turn - (s.mission.wonderSince ?? s.turn))) : null
+}
 
 /** Původní sídelní města soupeřů hráče `pid`: kolik jich je a kolik jich hráč drží. */
 export function seatCount(s: GameState, pid: number): { held: number; need: number; total: number } {
@@ -1413,25 +1461,35 @@ export function checkVictory(s: GameState): void {
   const majors = s.players.filter(p => p.id !== barbId(s))
   const sc = SCENARIOS[s.scenario]
   const nm = (p: Player) => NATIONS[p.nation].name
-  // Div: kdo dostaví Sluneční chrám, vyhrává.
-  if (s.mission.wonderBy >= 0) {
+  // Div: kdo dostaví Sluneční chrám a udrží jeho město WONDER_TURNS tahů, vyhrává. Dobytím města přechází chrám na dobyvatele.
+  const temple = s.mission.wonderBy >= 0 ? wonderCity(s) : null
+  if (s.mission.wonderBy >= 0 && !temple) { s.mission.wonderBy = -1; delete s.mission.wonderSince }
+  if (temple && temple.owner !== s.mission.wonderBy) {
+    const was = s.players[s.mission.wonderBy], now = s.players[temple.owner]
+    s.mission.wonderBy = now.id; s.mission.wonderSince = s.turn
+    noteAll(s, `${nm(now)} dobyli ${temple.name} a zmocnili se Slunečního chrámu! Udrží-li město ${WONDER_TURNS} tahů, zvítězí.`, 'war', temple.x, temple.y, { [now.id]: `Sluneční chrám je váš! Udržte ${temple.name} ${WONDER_TURNS} tahů a zvítězíte.`, [was.id]: `Přišli jste o ${temple.name} i o Sluneční chrám. Získejte město zpět, než ${nm(now)} zvítězí.` })
+  }
+  if (temple && s.mission.wonderSince === undefined) s.mission.wonderSince = s.turn
+  if (temple && s.turn - s.mission.wonderSince! >= WONDER_TURNS) {
     const w = s.players[s.mission.wonderBy]
-    const lost = `${nm(w)} dostavěli Sluneční chrám dřív než vy. Kraj se klaní jinému trůnu.`
+    const lost = `${nm(w)} udrželi Sluneční chrám ${WONDER_TURNS} tahů. Kraj se klaní jinému trůnu.`
     s.over = w.human
       ? { won: true, winner: w.id, kind: 'wonder', title: 'Vítězství – Sluneční chrám', text: `${sc.over} se rozzářil Sluneční chrám. Poutníci ze všech krajů se klaní vaší moudrosti a ${nm(w)} vejdou do dějin jako dědicové staré říše.`, other: lost }
       : { won: false, winner: w.id, kind: 'defeat', title: 'Porážka', text: lost }
+    s.over.how = 'wonder'
     return
   }
   // Lidský hráč bez měst i osadníků vypadává; hra končí, když nezbývá žádný.
   for (const h of majors) if (h.human) checkElimination(s, h.id)
   const alive = humans(s)
-  if (!alive.length) {
+  // (Hra bez lidí – simulace počítač proti počítači – tímhle nekončí.)
+  if (!alive.length && majors.some(p => p.human)) {
     s.over = { won: false, winner: -1, kind: 'defeat', title: 'Porážka', text: 'Vaše poslední město padlo. Kronikáři o vašem lidu napíší jen krátkou poznámku.' }
     return
   }
   // Poslední národ na mapě vítězí hned.
   const standing = majors.filter(p => p.alive)
-  if (standing.length === 1 && s.cities.some(c => c.owner === standing[0].id)) { conquered(s, standing[0]); return }
+  if (standing.length === 1 && s.cities.some(c => c.owner === standing[0].id)) { conquered(s, standing[0]); s.over!.how = 'conquest'; return }
   // Dobytí: národ drží vlastní sídlo a nadpoloviční většinu cizích sídelních měst po CONQUEST_TURNS tahů.
   const holder = majors.find(p => p.alive && holdsMajority(s, p.id))
   if (!holder) {
@@ -1440,7 +1498,7 @@ export function checkVictory(s: GameState): void {
   } else if (s.conquest?.by !== holder.id) {
     s.conquest = { by: holder.id, since: s.turn }
     noteAll(s, `${nm(holder)} drží většinu sídelních měst! Udrží-li je ${CONQUEST_TURNS} tahů, zvítězí dobytím.`, 'war', undefined, undefined, { [holder.id]: `Držíte většinu sídelních měst. Udržte je ${CONQUEST_TURNS} tahů a zvítězíte dobytím.` })
-  } else if (s.turn - s.conquest.since >= CONQUEST_TURNS) { conquered(s, holder); return }
+  } else if (s.turn - s.conquest.since >= CONQUEST_TURNS) { conquered(s, holder); s.over!.how = 'conquest'; return }
   if (s.turn > s.maxTurns) {
     // Sláva: nejvyšší skóre; při shodě má přednost lidský hráč.
     const rank = majors.filter(p => p.alive).map(r => ({ r, v: score(s, r.id) })).sort((a, b) => b.v - a.v || Number(b.r.human) - Number(a.r.human) || a.r.id - b.r.id)
@@ -1451,6 +1509,7 @@ export function checkVictory(s: GameState): void {
     } else {
       s.over = { won: false, winner: top.r.id, kind: 'defeat', title: 'Porážka', text: lost(Math.max(...alive.map(h => score(s, h.id)))) }
     }
+    s.over.how = 'score'
   }
 }
 

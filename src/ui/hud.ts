@@ -5,16 +5,17 @@ import {
 } from '../game/data.ts'
 import { adviseTech, describeAI, recommendBuild, siteScore } from '../game/ai.ts'
 import { attitudeWord, buyBlock, buyPrice, DEAL_TURNS, GIFT, saleBlock, salePrice, TRADABLE } from '../game/diplo.ts'
-import { ERAS, GOLDEN_TURNS, PROMOS, PROMO_IDS, ROAD, SCENARIOS, SCENARIO_IDS, TRADITIONS, TRADITION_IDS, XP_LEVELS, traditionCost, type ScenarioId, type TraditionId } from '../game/data.ts'
+import { ERAS, GOLDEN_TURNS, PERSONAS, PROMOS, type PersonaId, PROMO_IDS, ROAD, SCENARIOS, SCENARIO_IDS, TRADITIONS, TRADITION_IDS, XP_LEVELS, traditionCost, type ScenarioId, type TraditionId } from '../game/data.ts'
 import { generateScenario, ISLANDS_SEEDS, mapSize, TIERS, tierOf, VALLEY_SEEDS, type Landform } from '../game/mapgen.ts'
 import { hexCenter } from '../game/hex.ts'
 import {
-  CONQUEST_TURNS, seatCount,
+  CONQUEST_TURNS, WONDER_TURNS, SIEGE_UNITS, besieged, wonderCity, wonderLeft, seatCount,
   atWar, availableBuilds, availableTechs, BORDER_AT, buyCost, canBuy, canFoundCity, cityAt, cityMaxHp, citiesOf, cityStrength, cityYields, cultureSources, freeUnits, growthNeed, hasTech, idx,
   isCivilian, isEmbarked, isNaval, isWater, itemCost, itemName, maxMoves, militaryPower, sameItem, playerIncome, previewAttack, resourceVisible, score, tileYield, unitBlockReason, unitStrength,
   unitsAt, unitsOf, UNITS_PER_SOURCE, resourceReport, unitsNeeding, traditionAdvice, techPath, foundBlock, isCoastal, traditionReady, pendingPromos, tileJobs, upgradeBlock, upgradeCost, upgradeTarget, xpLevel,
 } from '../game/rules.ts'
 import { hasSave, START_TECH } from '../game/state.ts'
+import { cleanCode } from '../net/session.ts'
 import { tipKey } from '../game/commands.ts'
 import { barbId, type BuildItem, type City, type Note, type Unit } from '../game/types.ts'
 import { isMusicOn, isMuted, setMusic, setMuted, sfx } from '../audio.ts'
@@ -90,6 +91,9 @@ export class Hud {
   private pickBarb: 0 | 1 | 2 | 3 = 2
   /** Kód náhodné mapy; prázdný = pokaždé jiná. */
   private pickSeed = ''
+  /** Nastavuje se hra po síti (hráči se připojí v místnosti) místo hry u jednoho počítače. */
+  private netMode = false
+  private netCode = ''
 
   private app: App
 
@@ -104,7 +108,11 @@ export class Hud {
     this.mini.onpointerdown = e => this.miniClick(e)
     this.mini.onpointermove = e => { if (e.buttons & 1) this.miniClick(e) }
     this.root.addEventListener('click', e => this.onClick(e))
-    this.root.addEventListener('input', e => { const el = e.target as HTMLInputElement; if (el.id === 'seed') this.pickSeed = el.value.replace(/\D/g, '').slice(0, 6) })
+    this.root.addEventListener('input', e => { const el = e.target as HTMLInputElement; if (el.id === 'seed') this.pickSeed = el.value.replace(/\D/g, '').slice(0, 6)
+      else if (el.id === 'netname') this.app.playerName = el.value
+      else if (el.id === 'netcode') { this.netCode = cleanCode(el.value); if (el.value !== this.netCode) el.value = this.netCode }
+    })
+    this.root.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target as HTMLElement).id === 'netcode') { sfx('click'); void this.app.joinGame(this.netCode) } })
     this.root.addEventListener('wheel', e => { if (!(e.target as HTMLElement).closest('.body, .inner, #menu')) e.preventDefault() }, { passive: false })
   }
 
@@ -151,7 +159,7 @@ export class Hud {
     for (const b of BUILDING_IDS) if (BUILDINGS[b].tech === id) un.push(`budova ${BUILDINGS[b].name} (${BUILDINGS[b].desc})`)
     for (const i of Object.keys(IMPROVEMENTS) as ImprovementId[]) if (IMPROVEMENTS[i].tech === id) un.push(`vylepšení ${IMPROVEMENTS[i].name}`)
     const extra: Partial<Record<TechId, string>> = {
-      bronze: 'na mapě se objeví ložiska železa', wheel: 'dělníci mohou stavět cesty (pohyb za půl bodu, most přes řeku)', irrigation: 'farmy dávají +1 jídlo', astronomy: 'kdo dostaví Sluneční chrám, vyhrává misi',
+      bronze: 'na mapě se objeví ložiska železa', wheel: 'dělníci mohou stavět cesty (pohyb za půl bodu, most přes řeku)', irrigation: 'farmy dávají +1 jídlo', astronomy: 'kdo dostaví Sluneční chrám a udrží ho, vyhrává misi',
       sailing: 'pozemní jednotky se mohou nalodit a plout po pobřežních vodách', navigation: 'naloděné jednotky smějí na oceán a plují rychleji',
     }
     if (extra[id]) un.push(extra[id]!)
@@ -179,6 +187,7 @@ export class Hud {
     switch (a) {
       case 'unit': app.unitAction(arg); break
       case 'tech-open': sfx('click'); this.showTech(); break
+      case 'temple': { const c = wonderCity(this.s); if (c && !app.busy) { sfx('select'); app.scene.centerOn(c.x, c.y); app.scene.ping(c.x, c.y) } break }
       case 'overview': sfx('click'); this.toggleOverview(); break
       case 'ov-city': { const c = this.s.cities.find(o => o.id === Number(arg)); if (c && !app.busy) { sfx('select'); app.openCity(c) } break }
       case 'ov-tile': { const i = Number(arg); if (!app.busy) { sfx('select'); app.scene.centerOn(i % this.s.W, (i / this.s.W) | 0); app.scene.ping(i % this.s.W, (i / this.s.W) | 0) } break }
@@ -209,7 +218,7 @@ export class Hud {
       case 'mute': setMuted(!isMuted()); this.render(); break
       case 'music': setMusic(!isMusicOn()); sfx('click'); this.render(); break
       case 'zoom': app.scene.zoomBy(Number(arg)); break
-      case 'menu': this.confirm('Odejít do hlavního menu?', 'Hra je průběžně ukládána, můžete v ní později pokračovat.', 'Odejít', () => app.quitToMenu()); break
+      case 'menu': this.confirm('Odejít do hlavního menu?', !app.net ? 'Hra je průběžně ukládána, můžete v ní později pokračovat.' : app.net.role === 'host' ? 'Hru po síti tím přerušíte všem. Zůstane uložená: až zvolíte Pokračovat, místnost se otevře znovu a spoluhráči se vrátí stejným kódem.' : 'Ze hry odejdete. Dokud ji hostitel má otevřenou, můžete se z hlavního menu vrátit na své místo.', 'Odejít', () => app.quitToMenu()); break
       case 'tip-ok': this.tipOpen = false; sfx('click'); this.app.tipRead(arg); break
       case 'tip-off': app.toggleHints(false); break
       case 'hints': app.toggleHints(); break
@@ -228,7 +237,27 @@ export class Hud {
       case 'peace': { const msg = app.proposePeace(Number(arg)); this.showDiplo(msg) ; break }
       case 'offer-yes': app.answerOffer(Number(arg), true); this.closeModal(); this.checkOffers(); break
       case 'offer-no': app.answerOffer(Number(arg), false); this.closeModal(); this.checkOffers(); break
-      case 'm-new': sfx('click'); this.setupStep = 0; this.picks = []; this.showSetup(); break
+      case 'm-new': sfx('click'); this.netMode = false; this.setupStep = 0; this.picks = []; this.showSetup(); break
+      case 'm-net': sfx('click'); this.showNet(); break
+      case 'n-host': sfx('click'); this.netMode = true; this.setupStep = 0; this.picks = []; this.pickNations = Math.max(this.pickNations, 2); this.showSetup(); break
+      case 'n-open': {
+        sfx('click')
+        const random = this.pickScenario === 'random'
+        const n = this.pickNations
+        void app.hostGame({
+          difficulty: this.pickDiff, scenario: this.pickScenario, max: n,
+          opts: { nations: n, maxTurns: this.pickTurns, map: { barbarians: this.pickBarb, ...(random ? { landform: this.pickLand, size: this.pickSize } : {}) } },
+          seed: random && this.pickSeed ? Number(this.pickSeed) : undefined,
+          info: `${SCENARIOS[this.pickScenario].name} · ${n} ${n < 5 ? 'národy' : 'národů'} · obtížnost ${DIFFICULTY[this.pickDiff].name.toLowerCase()} · ${this.pickTurns} tahů`,
+        })
+        break
+      }
+      case 'n-join': sfx('click'); void app.joinGame(this.netCode); break
+      case 'n-rejoin': sfx('click'); void app.joinGame(arg); break
+      case 'n-pick': sfx('select'); app.net?.pick(arg as NationId); break
+      case 'n-start': sfx('found'); app.netStart(); break
+      case 'n-leave': sfx('click'); app.leaveNet(); this.showNet(); break
+      case 'n-copy': sfx('click'); void navigator.clipboard?.writeText(app.joinUrl).then(() => { el.textContent = 'Zkopírováno' }, () => { this.menu.querySelector<HTMLInputElement>('#neturl')?.select() }); break
       case 'm-next': sfx('click'); this.setupStep = 1; this.picks = []; this.showSetup(); break
       case 'm-humans': this.pickHumans = Number(arg); sfx('click'); this.showSetup(); break
       case 'm-nations': this.pickNations = Number(arg); this.pickHumans = Math.min(this.pickHumans, this.pickNations); sfx('click'); this.showSetup(); break
@@ -236,9 +265,10 @@ export class Hud {
       case 'm-land': this.pickLand = arg as Landform; sfx('click'); this.showSetup(); break
       case 'm-size': this.pickSize = Number(arg) as -1 | 0 | 1; sfx('click'); this.showSetup(); break
       case 'm-barb': this.pickBarb = Number(arg) as 0 | 1 | 2 | 3; sfx('click'); this.showSetup(); break
+      case 'm-back-title': sfx('click'); this.showTitle(); break
       case 'm-continue': sfx('click'); if (!app.continueGame()) this.showTitle(); break
       case 'm-help': sfx('click'); this.showGuide(0); break
-      case 'm-back': sfx('click'); if (this.picks.length) { this.pickNation = this.picks.pop()!; this.showSetup() } else if (this.setupStep === 1) { this.setupStep = 0; this.showSetup() } else this.showTitle(); break
+      case 'm-back': sfx('click'); if (this.picks.length) { this.pickNation = this.picks.pop()!; this.showSetup() } else if (this.setupStep === 1) { this.setupStep = 0; this.showSetup() } else if (this.netMode) this.showNet(); else this.showTitle(); break
       case 'm-nation': if (!this.picks.includes(arg as NationId)) { this.pickNation = arg as NationId; sfx('select'); this.showSetup() } break
       case 'm-diff': this.pickDiff = arg as Difficulty; sfx('click'); this.showSetup(); break
       case 'm-start': {
@@ -270,14 +300,90 @@ export class Hud {
       <div class="title"><h1>STARÝ TRŮN</h1><div class="subtitle">${esc('Hexová tahová strategie o dědictví staré říše')}</div></div>
       <div class="buttons">
         ${hasSave() ? `<button class="btn" data-a="m-continue">Pokračovat v${NB}misi</button>` : ''}
+        ${this.app.rejoinCode ? `<button class="btn" data-a="n-rejoin" data-v="${this.app.rejoinCode}">Vrátit se do hry po síti</button>` : ''}
         <button class="btn" data-a="m-new">Nová hra</button>
+        <button class="btn" data-a="m-net">Hra po síti</button>
         <button class="btn" data-a="m-help">Jak hrát</button>
       </div>
       <div class="credit">Tři scénáře · osm národů · až osm hráčů</div>`
   }
 
+  // ------------------------------------------------------------ hra po síti
+
+  /** Rozcestník síťové hry: založit místnost, nebo se připojit kódem. */
+  showNet(code = '', err = ''): void {
+    if (code) this.netCode = cleanCode(code)
+    this.setGameUi(false)
+    this.modalKind = ''
+    this.modal.classList.add('hidden')
+    this.menu.className = 'setup'
+    const back = this.app.rejoinCode
+    this.menu.innerHTML = `
+      <h2>Hra po síti</h2>
+      <div class="lead">${esc('Jeden z vás hru založí a ostatním pošle kód místnosti nebo odkaz. Hraje se napřímo mezi vašimi prohlížeči, bez herního serveru. Tahy se střídají: kdo není na řadě, dívá se.')}</div>
+      ${err ? `<div class="neterr">${esc(err)}</div>` : ''}
+      <div class="setuprow"><span>Vaše jméno:</span><input id="netname" class="seed wide" maxlength="20" placeholder="jak vás uvidí ostatní" value="${esc(this.app.playerName).replace(/"/g, '&quot;')}"></div>
+      <div class="netbox">
+        <div class="panel"><h3>Založit hru</h3><p>${esc('Zvolíte mapu a pravidla, otevřete místnost a počkáte na spoluhráče. Místa, která neobsadí lidé, povede počítač.')}</p>
+          <button class="btn big" data-a="n-host">Založit hru</button></div>
+        <div class="panel"><h3>Připojit se</h3><p>${esc('Zadejte kód, který vám poslal hostitel.')}</p>
+          <div class="setuprow"><input id="netcode" class="seed code" maxlength="5" placeholder="KÓD" autocomplete="off" spellcheck="false" value="${this.netCode}"><button class="btn big" data-a="n-join">Připojit se</button></div>
+          ${back && back !== this.netCode ? `<button class="btn" data-a="n-rejoin" data-v="${back}">Vrátit se do hry ${back}</button>` : ''}</div>
+      </div>
+      <div class="setuprow"><button class="btn big" data-a="m-back-title">Zpět</button></div>`
+  }
+
+  showConnecting(text: string): void {
+    this.setGameUi(false)
+    this.menu.className = 'setup'
+    this.menu.innerHTML = `<h2>Hra po síti</h2><div class="lead" style="margin-top:18vh;font-size:26px">${esc(text)}</div><div class="setuprow"><button class="btn big" data-a="n-leave">Zrušit</button></div>`
+  }
+
+  /** Místnost: kdo je připojen, výběr národů; hostitel odtud hru spouští. */
+  showLobby(): void {
+    const net = this.app.net
+    const l = net?.lobby()
+    if (!net || !l) return
+    this.setGameUi(false)
+    this.menu.className = 'setup'
+    const host = net.role === 'host'
+    const mine = l.members[l.you]?.nation ?? PLAYABLE[0]
+    const rows = l.members.map((m, i) => {
+      const n = NATIONS[m.nation]
+      return `<div class="member" style="--c:${n.css}"><img src="${UI}em_${m.nation}.png" alt=""><b>${esc(m.name)}</b><span>${n.name}</span><small>${[m.host ? 'hostitel' : '', i === l.you ? 'vy' : ''].filter(Boolean).join(', ')}</small></div>`
+    }).join('')
+    const free = l.max - l.members.length
+    const tiles = PLAYABLE.map(id => {
+      const n = NATIONS[id]
+      const by = l.members.findIndex(m => m.nation === id)
+      const taken = by >= 0 && by !== l.you
+      return `<button class="ntile panel small ${id === mine ? 'sel' : ''} ${taken ? 'taken' : ''}" style="--c:${n.css}" data-a="n-pick" data-v="${id}" ${taken ? `disabled${tip(`Tento národ si vybral hráč ${l.members[by].name}.`)}` : ''}>
+        <img class="p" src="${UI}p_${id}.png" alt=""><span><img class="e" src="${UI}em_${id}.png" alt="">${n.name}</span></button>`
+    }).join('')
+    const n = NATIONS[mine], u = UNITS[n.unique]
+    const detail = `<div class="ndetail panel" style="--c:${n.css}">
+        <img class="p" src="${UI}p_${mine}.png" alt="">
+        <div class="who"><h3><img class="e" src="${UI}em_${mine}.png" alt="">${n.name}</h3><div class="leader">${esc(`${n.leader}, ${n.title.toLowerCase()}`)}</div><div class="lore">${esc(n.lore)}</div></div>
+        <div class="traits"><div class="trait"><b>${esc(n.trait)}</b>${esc(n.traitDesc)}</div>
+          <div class="trait"><img src="${unitIconUrl(n.unique, mine)}" alt=""><b>${esc(u.name)}</b>${esc(u.desc)}${u.replaces ? ` (místo: ${UNITS[u.replaces].name})` : ''}</div></div>
+      </div>`
+    const scroll = this.menu.scrollTop
+    this.menu.innerHTML = `
+      <h2>Místnost <span class="roomcode">${l.code}</span></h2>
+      <div class="lead">${esc(l.info)}</div>
+      ${host ? `<div class="setuprow"><span>Pošlete spoluhráčům kód nebo odkaz:</span><input id="neturl" class="seed url" readonly value="${this.app.joinUrl}"><button class="btn" data-a="n-copy">Kopírovat odkaz</button></div>` : ''}
+      <div class="members">${rows}</div>
+      <div class="setupinfo">${esc(free > 0 ? `${free === 1 ? 'Zbývá jedno volné místo' : free < 5 ? `Zbývají ${free} volná místa` : `Zbývá ${free} volných míst`}; neobsazené národy povede počítač.` : 'Všechna místa jsou obsazená lidmi.')}</div>
+      <div class="ntiles">${tiles}</div>
+      ${detail}
+      <div class="setupinfo">${esc(host ? (l.members.length < 2 ? 'Počkejte, až se připojí aspoň jeden spoluhráč.' : 'Až budou všichni připraveni, spusťte hru. Později už se nikdo nový nepřipojí.') : 'Vyberte si národ a počkejte, až hostitel hru spustí.')}</div>
+      <div class="setuprow"><button class="btn big" data-a="n-leave">${host ? 'Zavřít místnost' : 'Odejít'}</button>${host ? `<button class="btn big" data-a="n-start" ${l.members.length < 2 ? 'disabled' : ''}>Spustit hru</button>` : ''}</div>`
+    this.menu.scrollTop = scroll
+  }
+
   private showSetup(): void {
     this.menu.className = 'setup'
+    if (this.netMode) this.pickHumans = 1
     const multi = this.pickHumans > 1
     if (this.picks.includes(this.pickNation)) this.pickNation = PLAYABLE.find(n => !this.picks.includes(n))!
     const who = this.picks.length + 1
@@ -309,24 +415,24 @@ export class Hud {
     const scroll = this.menu.scrollTop
     const sd = SCENARIOS[this.pickScenario]
     const ai = players - this.pickHumans
-    const humansInfo = `${this.pickHumans === 1 ? 'Hrajete sami' : `U počítače se střídá ${this.pickHumans} hráčů; mezi tahy mapu zakryje opona`}${ai ? ` a ${ai === 1 ? 'jeden národ vede' : ai < 5 ? `${ai} národy vede` : `${ai} národů vede`} počítač (vylosují se ze zbylých).` : '. Všechny národy vedou lidé.'}`
+    const humansInfo = this.netMode ? 'Do místnosti se vejde tolik hráčů, kolik je národů. Národy, které si nikdo nevezme, povede počítač (vylosují se ze zbylých).' : `${this.pickHumans === 1 ? 'Hrajete sami' : `U počítače se střídá ${this.pickHumans} hráčů; mezi tahy mapu zakryje opona`}${ai ? ` a ${ai === 1 ? 'jeden národ vede' : ai < 5 ? `${ai} národy vede` : `${ai} národů vede`} počítač (vylosují se ze zbylých).` : '. Všechny národy vedou lidé.'}`
     const randomRows = this.pickScenario !== 'random' ? '' : `
       <div class="setuprow"><span>Krajina:</span>${seg('m-land', this.pickLand, [['continent', 'Pevnina'], ['continents', 'Kontinenty'], ['islands', 'Souostroví']])}
         <span>Velikost:</span>${seg('m-size', this.pickSize, [[-1, 'Menší'], [0, 'Běžná'], [1, 'Větší']])}
         <span${tip('Kód mapy|Číslo, ze kterého mapa vzniká. Stejný kód a stejné nastavení dají stejnou zemi – hodí se na odvetu. Prázdné pole = pokaždé jiná mapa; kód odehrané hry najdete v okně Mise.')}>Kód mapy:</span><input id="seed" class="seed" inputmode="numeric" maxlength="6" placeholder="náhodný" value="${this.pickSeed}"></div>
       <div class="setupinfo">${esc({ continent: 'Jeden členitý kontinent: všichni jsou propojeni po souši.', continents: 'Několik pevnin oddělených mořem: sousedy máte po souši, zbytek světa až za vodou.', islands: 'Každý národ na vlastním ostrově: bez lodí se nikam nedostanete.' }[this.pickLand])}</div>`
     this.menu.innerHTML = this.setupStep === 0 ? `
-      <h2>Nová hra</h2>
+      <h2>${this.netMode ? 'Nová hra po síti' : 'Nová hra'}</h2>
       <div class="lead">${esc('Stará říše padla a její trůn osiřel. Kolik národů se o něj utká a kde?')}</div>
       <div class="setuprow"><span>Národů ve hře:</span>${seg('m-nations', players, [2, 3, 4, 5, 6, 7, 8].map(k => [k, String(k)]))}
-        <span>Z${NB}toho lidí:</span>${seg('m-humans', this.pickHumans, Array.from({ length: players }, (_, k) => [k + 1, String(k + 1)]))}</div>
+        ${this.netMode ? '' : `<span>Z${NB}toho lidí:</span>${seg('m-humans', this.pickHumans, Array.from({ length: players }, (_, k) => [k + 1, String(k + 1)]))}`}</div>
       <div class="setupinfo">${esc(humansInfo)}</div>
       <div class="scens">${scens}</div>${randomRows}
       <div class="setuprow"><span>Obtížnost:</span>${seg('m-diff', this.pickDiff, (Object.keys(DIFFICULTY) as Difficulty[]).map(d => [d, DIFFICULTY[d].name]))}
         <span>Délka hry:</span>${seg('m-turns', this.pickTurns, [[80, 'Krátká 80'], [120, 'Běžná 120'], [160, 'Dlouhá 160']])}
         <span>Barbaři:</span>${seg('m-barb', this.pickBarb, [[0, 'Žádní'], [1, 'Málo'], [2, 'Běžně'], [3, 'Hodně']])}</div>
       <div class="setupinfo">${esc(`${DIFFICULTY[this.pickDiff].desc} Hra trvá nejvýš ${this.pickTurns} tahů, pak rozhodne skóre.`)}</div>
-      <div class="setuprow"><button class="btn big" data-a="m-back">Zpět</button><button class="btn big" data-a="m-next">Dál: výběr národa</button></div>` : `
+      <div class="setuprow"><button class="btn big" data-a="m-back">Zpět</button>${this.netMode ? '<button class="btn big" data-a="n-open">Otevřít místnost</button>' : '<button class="btn big" data-a="m-next">Dál: výběr národa</button>'}</div>` : `
       <h2>${multi ? `${who}. hráč: vyberte svůj národ` : 'Vyberte svůj národ'}</h2>
       <div class="lead">${esc(`${sd.name}, ${players} ${players < 5 ? 'národy' : 'národů'}, obtížnost ${DIFFICULTY[this.pickDiff].name.toLowerCase()}. Každý národ má jednu výjimečnou vlastnost a jednu unikátní jednotku.`)}</div>
       <div class="ntiles">${tiles}</div>
@@ -398,6 +504,7 @@ export class Hud {
     this.renderUnit()
     this.renderCity()
     this.renderEnd()
+    this.renderNet()
     this.renderTip()
     this.renderOverview()
     this.renderLabels()
@@ -429,7 +536,9 @@ export class Hud {
       ${research}
       ${this.resourceChips()}
       <div class="stat"${tip(`Tah ${Math.min(s.turn, s.maxTurns)} z ${s.maxTurns}|Po posledním tahu rozhodne o vítězi skóre.`)}>${ic('turn')}${Math.min(s.turn, s.maxTurns)}${NB}/${NB}${s.maxTurns}</div>
+      ${this.templeChip()}
       <div class="stat"${tip('Skóre|Technologie 6 bodů, město 12, obyvatel 4, budova 3, pole území 0,5, splněné vedlejší úkoly 20–25.')}>${ic('star')}${score(s, this.my)}</div>
+      ${this.netChip()}
       <div class="spacer"></div>
       <button class="tbtn ${this.overviewOn ? 'on' : ''}" data-a="overview"${tip('Přehled měst a jednotek (L)|Postranní seznam: co která města stavějí a co dělají jednotky. Kliknutím na řádek na ně skočíte. Zůstává otevřený, dokud ho nevypnete.')}>${ic('pop', 's')}<span class="lbl">Přehled</span></button>
       <button class="tbtn" data-a="mission" data-tip="Cíle mise (M)">${ic('flag', 's')}<span class="lbl">Mise</span></button>
@@ -441,6 +550,15 @@ export class Hud {
       <button class="tbtn" data-a="music" data-tip="Hudba">${isMusicOn() ? '♪' : '<s>♪</s>'}</button>
       <button class="tbtn" data-a="mute" data-tip="Zvuk">${ic(isMuted() ? 'mute' : 'sound', 's')}</button>
       <button class="tbtn" data-a="menu"${tip('Hlavní menu|Hra se ukládá sama, můžete v ní později pokračovat.')}>Menu</button>`
+  }
+
+  private netChip(): string {
+    const net = this.app.net, l = net?.lobby()
+    if (!net || !l) return ''
+    const s = this.s
+    const rows = l.members.map((m, i) => `${net.online(i) ? '●' : '○'} ${m.name} – ${NATIONS[m.nation].name}${i === l.you ? ' (vy)' : ''}${m.host ? ' (hostitel)' : ''}${net.online(i) ? '' : ' – bez spojení'}${s.cur === i && !s.over ? ' – na tahu' : ''}`)
+    const off = l.members.some((_, i) => !net.online(i)) || !net.ready
+    return `<div class="stat"${tip(`Hra po síti – místnost ${l.code}|${rows.join('\n')}${net.role === 'host' ? '\nHráč, kterému vypadne spojení, se vrátí stejným kódem. Je-li zrovna na tahu, můžete jeho tah ukončit.' : ''}`)}><b style="color:${off ? 'var(--bad)' : 'var(--good)'}">●</b> ${l.code}</div>`
   }
 
   markNotesRead(): void { for (const n of this.s.notes) if (n.pid === this.my) this.read.add(n) }
@@ -582,10 +700,10 @@ export class Hud {
         <span${tip(`Zlato: ${y.gold} za tah|Hrubý výnos města před odečtením údržby budov a žoldu.`)}>${ic('gold')}${y.gold}</span>
         <span${tip(`Věda: ${y.sci} za tah|1 za obyvatele, navíc hlavní město, knihovna a akademie.`)}>${ic('sci')}${y.sci}</span>
         <span${tip(`Kultura: +${y.culture} za tah|${cs.map(([n, v]) => `${n}: +${v}`).join('\n')}\nNastřádáno ${c.culture}. Kultura rozšiřuje hranice města: 2. okruh při ${BORDER_AT[0]}, 3. okruh při ${BORDER_AT[1]}.`)}>${ic('culture')}+${y.culture}</span>
-        <span${tip(`Obrana města: ${Math.round(cityStrength(s, c))}|Roste s počtem obyvatel a technologií, hradby dávají +50 %, posádka přidá část své síly. Město samo střílí na nepřátele do 2 polí.`)}>${ic('shield')}${Math.round(cityStrength(s, c))}</span>
+        <span${tip(`Obrana města: ${Math.round(cityStrength(s, c))}|Roste s počtem obyvatel a technologií, hradby dávají +40 %, bašty dalších +25 %, posádka přidá část své síly. Město samo střílí na nepřátele do 2 polí a každý tah si opraví 10 životů – ne však v obležení, tedy když u něj stojí aspoň ${SIEGE_UNITS} nepřátelské bojové jednotky.`)}>${ic('shield')}${Math.round(cityStrength(s, c))}</span>
       </div>
       <div class="sub">${ic('food', 's')}<div class="bar food"><i style="width:${Math.min(100, 100 * c.food / need)}%"></i></div>${y.foodNet > 0 ? `růst za ${growT}${NB}${turnsWord(growT)}` : y.foodNet < 0 ? '<span style="color:var(--bad)">hladoví!</span>' : 'neroste'}</div>
-      ${c.hp < maxHp ? `<div class="sub">${ic('hp', 's')}<div class="bar hp low"><i style="width:${100 * c.hp / maxHp}%"></i></div>hradby ${c.hp}${NB}/${NB}${maxHp}</div>` : ''}
+      ${c.hp < maxHp ? `<div class="sub">${ic('hp', 's')}<div class="bar hp low"><i style="width:${100 * c.hp / maxHp}%"></i></div>hradby ${c.hp}${NB}/${NB}${maxHp}${besieged(s, c) ? ' · <span style="color:var(--bad)">v obležení, neopravuje se</span>' : ''}</div>` : ''}
       <div class="sub"${tip(`Kultura a hranice|Město střádá +${y.culture} kultury za tah (${cs.map(([n, v]) => `${n.toLowerCase()} ${v}`).join(', ')}). Monument přidá +2, chrám +3.`)}>${ic('culture', 's')}<div class="bar cult"><i style="width:${nextB ? Math.min(100, 100 * (c.culture - prevB) / (nextB - prevB)) : 100}%"></i></div>${nextB ? `hranice za ${cultT} ${turnsWord(cultT)} (${c.culture} / ${nextB})` : 'hranice jsou největší možné'}</div>
       <div class="sub">${ic('pop', 's')}Pole ve zlatém rámu s hlavou obyvatele město obdělává; ztmavená pole patří městu, ale nikdo na nich nepracuje. Obyvatele rozmisťuje město samo.</div>
       <h4>Výroba a fronta</h4>
@@ -602,7 +720,29 @@ export class Hud {
     if (inner) inner.scrollTop = scroll
   }
 
+  /** Síťová hra: pruh s tím, na koho se čeká, a stav spojení. */
+  private renderNet(): void {
+    const net = this.app.net
+    if (!net) return
+    const s = this.s
+    let text = ''
+    if (!net.ready) text = 'Spojení s hostitelem je přerušeno, obnovuji…'
+    else if (!s.over && !this.app.myTurn) {
+      const p = s.players[s.cur], who = this.app.seatName(p.id)
+      text = `Na tahu: ${NATIONS[p.nation].name}${who ? ` (${who})` : ''}${net.online(p.id) ? '' : ' – bez spojení'}`
+    }
+    if (text) this.waiting.textContent = typo(text)
+    if (text || !this.app.busy) this.waiting.classList.toggle('hidden', !text)
+  }
+
   private renderEnd(): void {
+    if (this.app.net && !this.app.myTurn) {
+      const force = this.app.canForceEnd
+      this.endBtn.classList.toggle('attn', false)
+      this.endBtn.innerHTML = force ? `Ukončit tah za hráče<small>${esc('hráč na tahu nemá spojení')}</small>` : `Čekáte na tah<small>${esc('mapu si zatím můžete prohlížet')}</small>`
+      this.endBtn.disabled = !force || this.app.busy
+      return
+    }
     const a = this.app.attention()
     const map: Record<string, [string, string]> = {
       research: ['Zvolit výzkum', 'vědci čekají'],
@@ -618,6 +758,7 @@ export class Hud {
   }
 
   setWaiting(on: boolean): void {
+    if (on) this.waiting.textContent = 'Soupeři táhnou…'
     this.waiting.classList.toggle('hidden', !on)
     this.endBtn.disabled = on
   }
@@ -658,13 +799,13 @@ export class Hud {
       ['expand', cities.length === 1 && cities[0].pop >= 3 && s.turn > 10, 'Rozšiřujte říši',
         'Vaše město roste. Postavte osadníky a založte další města – víc měst znamená víc výroby, vědy i skóre. Hranice města rozšiřuje kultura (monument, chrám).'],
       ['war', me.war.length > 0, 'Válka',
-        'Jste ve válce. Města se brání sama a střílejí na 2 pole. K dobytí je třeba srazit hradby na nulu (nejlépe katapulty) a pak do města vstoupit pěchotou. Mír lze nabídnout v okně Diplomacie.'],
+        'Jste ve válce. Města se brání sama a střílejí na 2 pole. K dobytí je třeba srazit hradby na nulu a pak do města vstoupit pěchotou. Bez obléhacích strojů to skoro nejde: beranidlo (Bronz) přidá pěchotě u města +50 % síly i obrany, katapulty (Matematika) hradby rozstřílejí. Město, u kterého stojí aspoň tři vaše bojové jednotky, se přestane opravovat. Mír lze nabídnout v okně Diplomacie.'],
       ['thal', me.nation === 'thal' && s.turn <= 3, 'Vládci vln',
         'Thalassové jsou doma na moři: lodě mají rychlejší a zkušenější, pobřežní vody jim nesou zlato a plout umějí od začátku. Vyplatí se zakládat města přímo na pobřeží – klidně s osadníky dojděte k moři, než první město založíte.'],
       ['sail', hasTech(me, 'sailing') && s.turn > 3, 'Plavba',
         'Umíte plout! Pozemní jednotky teď smějí vstoupit na pobřežní vody – nalodí se na čluny (nalodění i vylodění ukončí tah) a obeplují hory i nepřítele. Na vodě se ale skoro neubrání, proto je doprovázejte galérou z pobřežního města.'],
       ['wonder', hasTech(me, 'astronomy'), 'Sluneční chrám',
-        'Znáte astronomii – můžete stavět Sluneční chrám. Kdo jej dostaví první, vyhrává misi. Stavte jej ve městě s nejvyšší výrobou a braňte ho.'],
+        `Znáte astronomii – můžete stavět Sluneční chrám. Kdo jej dostaví první a udrží jeho město ${WONDER_TURNS} tahů, vyhrává misi. Stavte jej ve městě s nejvyšší výrobou, postavte tam hradby a připravte posádku – soupeři na něj zaútočí.`],
     ]
     for (const [id, cond, title, text] of tips) if (cond && !done(id)) return { id, title, text }
     return null
@@ -842,7 +983,7 @@ export class Hud {
     if (t.owner >= 0) html += ` · <span style="color:${NATIONS[s.players[t.owner].nation].css}">${NATIONS[s.players[t.owner].nation].name}</span>`
     if (this.me.visible[i]) {
       const c = cityAt(s, x, y)
-      if (c) html += `<br>${ic('shield', 's')}Město ${esc(c.name)} – obrana ${Math.round(cityStrength(s, c))}, hradby ${c.hp}${NB}/${NB}${cityMaxHp(c)}`
+      if (c) html += `<br>${ic('shield', 's')}Město ${esc(c.name)} – obrana ${Math.round(cityStrength(s, c))}, hradby ${c.hp}${NB}/${NB}${cityMaxHp(c)}${besieged(s, c) ? ' · v obležení' : ''}`
       for (const u of unitsAt(s, x, y)) {
         const d = UNITS[u.type]
         const own = u.owner === 0 ? '' : ` <span style="color:${NATIONS[s.players[u.owner].nation].css}">(${NATIONS[s.players[u.owner].nation].name})</span>`
@@ -1015,6 +1156,24 @@ export class Hud {
     `<button class="btn big" data-a="close">Rovnou hrát</button><button class="btn big" data-a="guide" data-v="0">Jak se to hraje</button>`, '860px')
   }
 
+  /** Odpočet Slunečního chrámu v horní liště; klik skočí na jeho město. */
+  private templeChip(): string {
+    const s = this.s, left = wonderLeft(s), c = wonderCity(s)
+    if (left === null || !c) return ''
+    const mine = s.mission.wonderBy === this.my
+    return `<div class="stat clickable" data-a="temple" style="color:var(${mine ? '--gold' : '--bad'})"${tip(`Sluneční chrám|${this.templeText().trim()}\nKliknutím mapu posunete na město.`)}><img src="${UI}b_wonder.png" alt="" style="height:20px;image-rendering:pixelated;vertical-align:-4px;margin-right:4px">${left}${NB}${turnsWord(left)}</div>`
+  }
+
+  /** Kdo drží Sluneční chrám a kolik tahů mu zbývá (prázdné, když chrám nestojí). */
+  private templeText(): string {
+    const s = this.s, left = wonderLeft(s), c = wonderCity(s)
+    if (left === null || !c) return ''
+    const by = s.mission.wonderBy
+    return by === this.my
+      ? ` Chrám stojí ve vašem městě ${c.name}: udržte ho ještě ${left} ${turnsWord(left)}.`
+      : ` Pozor: chrám drží ${this.me.met.includes(by) ? NATIONS[s.players[by].nation].name : 'neznámý národ'} (${c.name}), do jejich vítězství zbývá ${left} ${turnsWord(left)}! Dobuďte město a chrám bude váš.`
+  }
+
   private goalsHtml(): string {
     const s = this.s, m = s.mission
     const goal = (done: boolean, text: string, icon = 'star') => `<div class="goal ${done ? 'done' : ''}">${ic(done ? 'check' : icon)}<div>${esc(text)}</div></div>`
@@ -1028,7 +1187,7 @@ export class Hud {
     return `
       <h4>Cesty k vítězství (stačí jedna)</h4>
       ${goal(false, `Dobytí: držte své sídelní město a většinu cizích (${sn.held} z ${sn.total}, potřeba ${sn.need}) po ${CONQUEST_TURNS} tahů – ${seats}.${cq ? (cq.by === this.my ? ` Odpočet běží: ještě ${left} ${turnsWord(left)}.` : ` Pozor: ${this.me.met.includes(cq.by) ? NATIONS[s.players[cq.by].nation].name : 'neznámý národ'} většinu drží, zbývá ${left} ${turnsWord(left)}!`) : ''}`, 'war')}
-      ${goal(false, `Div: objevte astronomii a dostavte Sluneční chrám dřív než ostatní.${hasTech(this.me, 'astronomy') ? ' Astronomii už znáte.' : ''}`, 'sci')}
+      ${goal(false, `Div: objevte astronomii, dostavte Sluneční chrám dřív než ostatní a udržte jeho město ${WONDER_TURNS} tahů.${this.templeText() || (hasTech(this.me, 'astronomy') ? ' Astronomii už znáte.' : '')}`, 'sci')}
       ${goal(false, `Sláva: mějte po ${s.maxTurns} tazích nejvyšší skóre.`, 'turn')}
       <h4>Vedlejší úkoly</h4>
       ${goal(m.questRuins && m.ruinsBy === this.my, m.ruinsBy >= 0 && m.ruinsBy !== this.my ? `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} – bohužel vás někdo předběhl.` : `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} (odměna: zlato a technologie).`, 'flag')}
@@ -1051,7 +1210,7 @@ export class Hud {
         return `<div class="goal ${this.me.era >= i ? 'done' : ''}">${ic(this.me.era >= i ? 'check' : 'sci')}<div>${esc(`${e.name}: objevte ${e.techs} technologií (máte ${this.me.techs.length}). Odměna ${30 * i} zlata a ${15 * i} kultury; první národ získá zlatý věk na ${GOLDEN_TURNS} tahů.${who}`)}</div></div>`
       }).join('')}
       <h4>Stav sil</h4><table class="scores"><tr><th>Národ</th><th>Skóre</th><th>Města</th><th>Technologie</th></tr>${rows}</table>
-      <p style="color:var(--muted);margin-top:10px">Tah ${Math.min(s.turn, s.maxTurns)} z ${s.maxTurns}.${s.scenario === 'random' ? ` Kód mapy: ${s.seed}.` : ''} Porážka: ztráta všech měst, nebo když Sluneční chrám dostaví soupeř.</p>`, undefined, '760px')
+      <p style="color:var(--muted);margin-top:10px">Tah ${Math.min(s.turn, s.maxTurns)} z ${s.maxTurns}.${s.scenario === 'random' ? ` Kód mapy: ${s.seed}.` : ''} Porážka: ztráta všech měst, nebo když Sluneční chrám dostaví a udrží soupeř.</p>`, undefined, '760px')
   }
 
   showTech(): void {
@@ -1059,7 +1218,7 @@ export class Hud {
     const inc = playerIncome(this.s, this.my)
     const avail = availableTechs(p)
     const recTech = this.app.hints ? adviseTech(this.s, p) : null
-    const W = 196, H = 70, GX = 34, GY = 12
+    const W = 192, H = 70, GX = 20, GY = 12
     const pos = (t: TechId) => [(TECHS[t].tier - 1) * (W + GX), TECHS[t].row * (H + GY)]
     let lines = ''
     let cards = ''
@@ -1079,10 +1238,11 @@ export class Hud {
       if (qi >= 0) pts = (p.research ? TECHS[p.research].cost - p.progress : 0) + p.techQueue.slice(0, qi + 1).reduce((a, q) => a + TECHS[q].cost, 0)
       const left = Math.max(1, Math.ceil(pts / Math.max(1, inc.sci)))
       const order = p.research === id ? '1' : qi >= 0 ? String(qi + (p.research ? 2 : 1)) : ''
-      cards += `<div class="tech ${cls}${isRec ? ' rec' : ''}" style="left:${x}px;top:${y}px"${tip(`${this.techTip(id)}${p.techs.includes(id) ? '' : avail.includes(id) ? '\nKlik: zkoumat hned · Shift + klik: zařadit za dosavadní plán' : `\nKlik: naplánovat cestu sem (${techPath(p, id).map(q => TECHS[q].name).join(' → ')}) · Shift + klik: zařadit za dosavadní plán`}`)} ${p.techs.includes(id) ? '' : `data-a="tech" data-v="${id}"`}>
+      cards += `<div class="tech ${cls}${isRec ? ' rec' : ''}" style="left:${x}px;top:${y}px;width:${W}px"${tip(`${this.techTip(id)}${p.techs.includes(id) ? '' : avail.includes(id) ? '\nKlik: zkoumat hned · Shift + klik: zařadit za dosavadní plán' : `\nKlik: naplánovat cestu sem (${techPath(p, id).map(q => TECHS[q].name).join(' → ')}) · Shift + klik: zařadit za dosavadní plán`}`)} ${p.techs.includes(id) ? '' : `data-a="tech" data-v="${id}"`}>
         ${isRec ? REC : ''}${order ? `<i class="ord">${order}</i>` : ''}<span class="cost">${p.techs.includes(id) ? '✓' : `${t.cost} · ${left}${NB}t.`}</span><b>${t.name}</b><small>${esc(t.unlocks)}</small></div>`
     }
-    const w = 5 * W + 4 * GX, hh = 7 * (H + GY)
+    const tiers = Math.max(...TECH_IDS.map(t => TECHS[t].tier))
+    const w = tiers * W + (tiers - 1) * GX, hh = 7 * (H + GY)
     this.open('tech', `${ic('sci')}Strom technologií`, `<p style="color:var(--muted)">${esc(`Klikněte na kteroukoli technologii: u vzdálené se naplánuje celá cesta k ní a výzkum pak pokračuje sám. Shift + klik ji zařadí za dosavadní plán. Čísla ukazují pořadí. Vaše věda: ${inc.sci} za tah.${p.techQueue.length ? ` Ve frontě: ${p.techQueue.map(q => TECHS[q].name).join(' → ')}.` : ''}`)}${p.progress && !p.research ? esc(` Nastřádáno ${p.progress} bodů.`) : ''}</p>
       <div class="tree" style="width:${w}px;height:${hh}px"><svg width="${w}" height="${hh}">${lines}</svg>${cards}</div>`)
   }
@@ -1126,12 +1286,12 @@ export class Hud {
       // Lidský soupeř: jen válka, mír a dar; ostatní si hráči domluví sami.
       if (p.human) return `<div class="rival" style="--c:${n.css}"><div class="top"><img class="p" src="${UI}p_${p.nation}.png" alt=""><div><h3>${n.name}</h3><div>${esc(n.leader)}</div>
         <div class="st ${war ? 'war' : 'peace'}">${ic(war ? 'war' : 'peace', 's')}${war ? 'Válka' : 'Mír'}</div></div></div>
-        <p>${esc(`Národ vede jiný hráč. Vojsko: ${cmp}. Skóre ${score(s, p.id)}, měst ${citiesOf(s, p.id).length}.`)}${others.length ? esc(` Válčí s: ${others.join(', ')}.`) : ''}</p>
+        <p>${esc(`Národ vede ${this.app.seatName(p.id) || 'jiný hráč'}. Vojsko: ${cmp}. Skóre ${score(s, p.id)}, měst ${citiesOf(s, p.id).length}.`)}${others.length ? esc(` Válčí s: ${others.join(', ')}.`) : ''}</p>
         ${asked ? `<p class="deal">${ic('peace', 's')}Vaše nabídka míru čeká na odpověď.</p>` : ''}
         ${war ? '' : `<div class="dip">${gift}</div>`}${foot}`
       return `<div class="rival" style="--c:${n.css}"><div class="top"><img class="p" src="${UI}p_${p.nation}.png" alt=""><div><h3>${n.name}</h3><div>${esc(n.leader)}</div>
         <div class="st ${war ? 'war' : 'peace'}">${ic(war ? 'war' : 'peace', 's')}${war ? 'Válka' : 'Mír'}</div></div></div>
-        <p>${esc(`${p.personality === 'aggressive' ? 'Výbojný národ.' : 'Národ stavitelů.'} Vojsko: ${cmp}. Skóre ${score(s, p.id)}, měst ${citiesOf(s, p.id).length}.`)}${others.length ? esc(` Válčí s: ${others.join(', ')}.`) : ''}</p>
+        <p>${esc(`${PERSONAS[p.personality as PersonaId]?.desc ?? ''} Vojsko: ${cmp}. Skóre ${score(s, p.id)}, měst ${citiesOf(s, p.id).length}.`)}${others.length ? esc(` Válčí s: ${others.join(', ')}.`) : ''}</p>
         <p${tip('Vztah k vám|Zlepšují ho dary, obchod a společný boj; kazí ho vyhlášení války a odmítnutí pomoci. Přátelský národ vás nenapadne a spíš přijme spojenectví.')}>Vztah k vám: <b style="color:${p.attitude[my] >= 15 ? 'var(--good)' : p.attitude[my] <= -15 ? 'var(--bad)' : 'var(--text)'}">${attitudeWord(p, my)}</b> (${signed(p.attitude[my])})${s.turn < p.pactUntil[my] ? ` · spojenec ještě ${p.pactUntil[my] - s.turn}${NB}${turnsWord(p.pactUntil[my] - s.turn)}` : ''}</p>
         ${s.deals.filter(d => (d.seller === p.id && d.buyer === my) || (d.buyer === p.id && d.seller === my)).map(d => `<p class="deal">${ic('trade', 's')}${d.seller === my ? 'Prodáváte' : 'Kupujete'}: ${RESOURCES[d.res].name.toLowerCase()}, ${d.seller === my ? '+' : '−'}${d.gpt} zlata za tah, ještě ${d.until - s.turn}${NB}${turnsWord(d.until - s.turn)}</p>`).join('')}
         ${war ? '' : `<div class="dip">${TRADABLE.map(r => {
@@ -1195,7 +1355,7 @@ export class Hud {
       <h4>Suroviny</h4><p>${esc('Obilí, zvěř, ryby, kámen a zlato zvyšují výnos pole. Koně a železo jsou strategické: teprve s ohradou (koně) či dolem (železo) na vašem území jdou stavět jezdci a šermíři, a každý takový zdroj uživí jen 2 jednotky. Kdo chce víc jezdců či šermířů, potřebuje víc ložisek nebo surovinu dokoupit; přijdete-li o zdroj, hotové jednotky vám zůstanou, ale nové nepostavíte. Železo se na mapě objeví až po objevu Bronzu. Stav obou surovin ukazují ikony v horní liště, všechny suroviny na vašem území najdete v Přehledu (L). Chybějící surovinu lze koupit v Diplomacii.')}</p>
       <h4>Pole a vylepšení</h4><p>${esc('Louky dávají jídlo, pláně jídlo i výrobu, pahorkatina výrobu, les výrobu. Dělníci staví farmy (+jídlo), doly (+výroba), ohrady (koně, zvěř) a pily (les). Koně a železo je nutné vylepšit, aby šlo stavět jezdce a šermíře.')}</p>
       <h4>Boj</h4><p>${esc('Na jednom poli může stát jedna vojenská a jedna civilní jednotka. V boji zblízka utrpí ztráty obě strany, střelci (dostřel 2) odvetu nedostanou. Pahorkatina a les dávají obránci +25 %, opevnění dalších +25 %. Kopiníci mají +50 % proti jízdě, katapulty dvojnásobný účinek proti městům. Jednotka, která se celý tah nehýbe, se léčí (nejrychleji ve městě).')}</p>
-      <p>${esc('Město se dobývá tak, že mu útoky srazíte hradby na nulu a vstoupíte do něj jednotkou pro boj zblízka. Města sama střílejí na nepřátele do 2 polí.')}</p>
+      <p>${esc(`Město se dobývá tak, že mu útoky srazíte hradby na nulu a vstoupíte do něj jednotkou pro boj zblízka. Města sama střílejí na nepřátele do 2 polí a každý tah si opraví 10 životů. Obléhejte proto se stroji: beranidlo samo neútočí, ale pěchotě útočící na město, u kterého stojí, přidá +50 % síly a jednotkám hned u města +50 % obrany proti odvetě i střelbě z hradeb; katapult, balista a trebuchet mají proti městům trojnásobný účinek, proti jednotkám jen poloviční. Stojí-li hned u města aspoň ${SIEGE_UNITS} vaše bojové jednotky, je v obležení a neopravuje se.`)}</p>
       <h4>Více hráčů</h4><p>${esc('Při zakládání hry zvolte, kolik národů se utká (2–8) a kolik z nich vedou lidé u tohoto počítače. Každý si vybere národ a pak táhnete jeden po druhém; mezi tahy mapu zakryje opona a počítač si předáte. Po posledním z vás táhnou soupeři vedení počítačem a barbaři. Zprávy, mlhu i rady má každý své. Mezi sebou si můžete vyhlásit válku, nabídnout mír (druhý hráč odpoví, až bude na tahu) a poslat dar; vše ostatní si domluvíte u stolu.')}</p>
       <h4>Pokladna</h4><p>${esc('Každá vojenská jednotka nad volný limit (3 + 2 za město) stojí 1 zlato za tah, některé budovy také. Prázdná pokladna brzdí výzkum.')}</p>`, `<button class="btn" data-a="guide" data-v="0">Návod krok za krokem</button><button class="btn" data-a="close">Zavřít</button>`, '820px')
   }
@@ -1210,8 +1370,8 @@ export class Hud {
     const pages: [string, string, string][] = [
       ['O co jde', pic(`p_${nat}`, 120) + pic('f_ruins', 96) + pic('b_wonder', 80),
         `<p>${esc('Vedete svůj národ v zemi, kde osiřel trůn staré říše. Hraje se na tahy: nejdřív rozdáte rozkazy vy, potom táhnou soupeři a barbaři. Délku hry volíte při zakládání (běžně 120 tahů).')}</p>` +
-        li(['Dobytí: držte své sídelní město a většinu cizích po 5 tahů.', 'Div: vyzkoumejte astronomii a dostavte Sluneční chrám jako první.', 'Sláva: mějte po posledním tahu nejvyšší skóre.']) +
-        `<p>${esc('Stačí jedna z cest. Prohrajete, když ztratíte všechna města nebo když Sluneční chrám dostaví soupeř.')}</p>`],
+        li(['Dobytí: držte své sídelní město a většinu cizích po 5 tahů.', `Div: vyzkoumejte astronomii, dostavte Sluneční chrám jako první a udržte jeho město ${WONDER_TURNS} tahů. Kdo město dobude, získá chrám pro sebe.`, 'Sláva: mějte po posledním tahu nejvyšší skóre.']) +
+        `<p>${esc('Stačí jedna z cest. Prohrajete, když ztratíte všechna města nebo když Sluneční chrám dostaví a udrží soupeř.')}</p>`],
       ['Mapa a ovládání', pic('t_grass_1', 96) + pic('hex_move', 96) + pic('hex_attack', 96),
         li(['Mapu posouváte tažením myši nebo klávesami WASD, kolečkem přibližujete.', 'Kliknutím vyberete jednotku nebo město. Esc výběr zruší.', 'S vybranou jednotkou: klik na světlé pole = pohyb ještě tento tah, klik kamkoli dál = cesta na více tahů (jednotka pak chodí sama), klik na červený rámeček = útok.', 'Shift + klik přidá jednotce další průjezdní bod.', 'Najeďte myší na cokoli v rozhraní a zobrazí se nápověda. Dole uprostřed vidíte popis pole pod kurzorem.'])],
       ['První město', upic('settler', 88) + img(cityIconUrl(1, nat), 110),

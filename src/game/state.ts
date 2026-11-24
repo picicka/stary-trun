@@ -83,7 +83,7 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
     const rest = PLAYABLE.filter(n => !humans.includes(n))
     rivals = total > humans.length ? [(['khar', 'sylv'] as NationId[]).find(n => rest.includes(n)) ?? rest[0]] : []
   }
-  for (const n of rivals) players.push(makePlayer(players.length, n, false, custom || humans.length > 1 ? NATIONS[n].temper : players.length === 1 ? 'aggressive' : 'builder', slots))
+  for (const n of rivals) players.push(makePlayer(players.length, n, false, custom ? NATIONS[n].persona : humans.length > 1 ? NATIONS[n].temper : players.length === 1 ? 'aggressive' : 'builder', slots))
   const BARB = players.length
   players.push(makePlayer(BARB, 'barb', false, 'barbarian', slots))
   const s: GameState = {
@@ -116,6 +116,25 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
   return s
 }
 
+/** Odehrají všichni soupeři vedení počítačem a barbaři a začne nový tah. Samotné stačí na hru bez lidí (simulace). */
+export function aiRound(s: GameState): void {
+  for (const p of s.players) {
+    if (s.over) break
+    if (p.human || p.id === barbId(s) || !p.alive) continue
+    beginTurn(s, p.id)
+    aiTurn(s, p.id)
+    endPlayerTurn(s, p.id)
+    checkVictory(s)
+  }
+  if (!s.over) {
+    beginTurn(s, barbId(s))
+    barbTurn(s)
+    endPlayerTurn(s, barbId(s))
+  }
+  s.turn += 1
+  checkVictory(s)
+}
+
 /**
  * Ukončí tah hráče, který je na řadě (`s.cur`). Je-li ve hře další lidský hráč, přijde na řadu on;
  * po posledním odehrají soupeři a barbaři a začne nový tah.
@@ -127,21 +146,7 @@ export function endTurn(s: GameState): void {
   const alive = () => s.players.filter(p => p.human && p.alive).map(p => p.id)
   let next = s.over ? undefined : alive().find(id => id > s.cur)
   if (next === undefined && !s.over) {
-    for (const p of s.players) {
-      if (s.over) break
-      if (p.human || p.id === barbId(s) || !p.alive) continue
-      beginTurn(s, p.id)
-      aiTurn(s, p.id)
-      endPlayerTurn(s, p.id)
-      checkVictory(s)
-    }
-    if (!s.over) {
-      beginTurn(s, barbId(s))
-      barbTurn(s)
-      endPlayerTurn(s, barbId(s))
-    }
-    s.turn += 1
-    checkVictory(s)
+    aiRound(s)
     next = alive()[0]
     if (!s.over && s.turn === s.maxTurns - 10) noteAll(s, 'Zbývá posledních 10 tahů. Po nich rozhodne skóre.', 'info')
   }
@@ -157,6 +162,14 @@ export function endTurn(s: GameState): void {
 
 export function serialize(s: GameState): string {
   return JSON.stringify(s, (k, v) => (k === 'visible' ? [] : v))
+}
+
+/** Otisk stavu hry: po stejných příkazech ho mají všichni hráči síťové hry stejný. Okna čekající na hráče se nepočítají, ta si každý odklízí sám. */
+export function stateHash(s: GameState): string {
+  const json = JSON.stringify(s, (k, v) => (k === 'visible' || k === 'popups' ? undefined : v))
+  let h = 0x811c9dc5
+  for (let i = 0; i < json.length; i++) { h ^= json.charCodeAt(i); h = Math.imul(h, 0x01000193) }
+  return (h >>> 0).toString(36) + ':' + json.length.toString(36)
 }
 
 export function deserialize(json: string): GameState | null {

@@ -410,6 +410,24 @@ bicon("b_court", (c) => {
   c.rect(12, 10, 6, 2, "y"); c.hline(13, 12, 4, "Y"); c.hline(12, 10, 6, "x")
   c.rect(5, 15, 8, 1, "y"); c.rect(3, 16, 12, 2, "Y"); c.hline(3, 16, 12, "y")
 })
+bicon("b_bastion", (c) => {
+  c.rect(0, 9, 18, 9, "u"); c.rect(0, 15, 18, 3, "t"); c.hline(0, 9, 18, "W")
+  for (let y = 11; y < 18; y += 3) for (let x = (y % 2) * 2; x < 18; x += 5) c.hline(x, y, 3, "t")
+  c.rect(5, 2, 8, 16, "W"); c.rect(11, 2, 2, 16, "u"); c.vline(5, 2, 16, "w"); c.hline(5, 17, 8, "t")
+  c.rect(4, 2, 10, 2, "W"); c.hline(4, 3, 10, "t")
+  for (const x of [4, 7, 10, 13]) c.rect(x, 0, 1, 2, "w")
+  c.rect(8, 6, 2, 4, "E"); c.rect(7, 12, 4, 6, "E"); c.px(7, 12, "t"); c.px(10, 12, "t")
+  for (const x of [0, 2, 15, 17]) c.px(x, 8, "W")
+  c.px(1, 5, "r"); c.px(2, 5, "r"); c.px(1, 6, "R"); c.vline(0, 4, 5, "b")
+})
+bicon("b_bank", (c) => {
+  c.poly([9, 0, 17, 5, 0, 5], "W"); c.poly([9, 2, 13, 4, 5, 4], "u"); c.hline(0, 5, 18, "t")
+  c.rect(1, 6, 16, 9, "E")
+  for (const x of [1, 5, 11, 15]) { c.rect(x, 6, 2, 9, "W"); c.vline(x + 1, 6, 9, "u") }
+  c.rect(0, 15, 18, 3, "u"); c.hline(0, 15, 18, "W"); c.hline(0, 17, 18, "t")
+  c.circ(9, 10, 2, "y"); c.px(8, 9, "x"); c.px(10, 11, "Y"); c.px(9, 10, "Y")
+  c.rect(7, 13, 5, 2, "y"); c.hline(7, 13, 5, "x"); c.px(11, 14, "Y")
+})
 bicon("b_wonder", (c) => {
   for (const [x, y, w] of [[0, 14, 18], [2, 11, 14], [4, 8, 10]]) { c.rect(x, y, w, 4, "y"); c.hline(x, y, w, "x"); c.rect(x + w - 2, y + 1, 2, 3, "Y") }
   c.rect(7, 8, 4, 10, "z"); for (let y = 9; y < 18; y += 2) c.hline(7, y, 4, "S")

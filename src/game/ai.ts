@@ -1,9 +1,9 @@
 // Umělá inteligence soupeřů a barbarů.
-import { BUILDINGS, DIFFICULTY, NATIONS, RESOURCES, TECHS, TERRAIN, UNITS, unitFor, type BuildingId, type TechId, type UnitId } from './data.ts'
+import { BUILDINGS, DIFFICULTY, NATIONS, PERSONAS, RESOURCES, TECHS, TERRAIN, UNITS, unitFor, type BuildingId, type PersonaDef, type PersonaId, type TechId, type UnitId } from './data.ts'
 import { hexDist } from './hex.ts'
 import { rand, randInt } from './rng.ts'
 import {
-  assignWorkers, atWar, attack, availableTechs, buy, buyCost, canBuildBuilding, canBuildUnit, canFoundCity, cityAt, citiesOf, cityYields,
+  assignWorkers, atWar, attack, availableTechs, buy, buyCost, canBuildBuilding, canBuildUnit, canFoundCity, cityAt, citiesOf, cityMaxHp, cityStrength, cityYields, unitStrength, SIEGE_UNITS,
   declareWar, foundCity, idx, improvementsFor, isCivilian, isCoastal, isNaval, isWater, stopUnit, itemCost, makePeace, makeUnit, militaryAt, militaryPower, moveUnit, neighbors,
   note, pathMap, pathTo, playerIncome, previewAttack, startWork, tileYield, tilesWithin, unitsAt, unitsOf, updateVisibility, emit,
   canWork, hasRoad, hasTech, isEmbarked, resourceCap, resourceVisible, unitsNeeding, upgradeBlock, upgradeCost, upgradeUnit,
@@ -11,15 +11,8 @@ import {
 } from './rules.ts'
 import { barbId, type BuildItem, type City, type GameState, type Player, type Unit } from './types.ts'
 
-const RESEARCH: Record<string, TechId[]> = {
-  builder: ['agriculture', 'pottery', 'mining', 'husbandry', 'archery', 'writing', 'bronze', 'wheel', 'mysticism', 'masonry', 'currency', 'philosophy', 'math', 'astronomy', 'sailing', 'forestry', 'construction', 'iron', 'tactics', 'riding', 'irrigation', 'navigation', 'law'],
-  aggressive: ['mining', 'archery', 'agriculture', 'bronze', 'husbandry', 'pottery', 'wheel', 'iron', 'riding', 'tactics', 'writing', 'masonry', 'math', 'sailing', 'forestry', 'construction', 'navigation', 'mysticism', 'currency', 'irrigation', 'philosophy', 'law', 'astronomy'],
-}
-
-const BUILD_ORDER: Record<string, BuildingId[]> = {
-  builder: ['monument', 'granary', 'library', 'workshop', 'temple', 'market', 'academy', 'harbor', 'aqueduct', 'court', 'walls', 'barracks'],
-  aggressive: ['monument', 'granary', 'barracks', 'workshop', 'library', 'walls', 'market', 'temple', 'aqueduct', 'academy', 'court', 'harbor'],
-}
+/** Povaha, podle které se národ rozhoduje; lidskému hráči radí stavitel. */
+const per = (p: Player): PersonaDef => PERSONAS[p.personality as PersonaId] ?? PERSONAS.builder
 
 export function aiTurn(s: GameState, pid: number): void {
   const p = s.players[pid]
@@ -46,7 +39,7 @@ function aiResearch(s: GameState, p: Player): void {
   if (p.research) return
   const avail = availableTechs(p)
   if (!avail.length) return
-  let order = RESEARCH[p.personality] ?? RESEARCH.builder
+  let order = per(p).research
   if (seafarer(s, p)) order = ['sailing', ...(p.techs.length >= 5 ? ['navigation' as TechId] : []), ...order]
   p.research = order.find(t => avail.includes(t)) ?? avail[0]
 }
@@ -62,6 +55,8 @@ export function warDuration(s: GameState, p: Player): number { return s.turn - p
 /** Přijme AI nabídku míru od hráče `from`? */
 export function aiAcceptsPeace(s: GameState, aiId: number, from = 0): boolean {
   const p = s.players[aiId]
+  // Kdo drží Sluneční chrám, s tím se mír neuzavírá.
+  if (s.mission.wonderBy === from) return false
   if (warDuration(s, p) < 6) return false
   const mine = militaryPower(s, aiId), theirs = militaryPower(s, from)
   if (mine < theirs * 1.35) return true
@@ -70,38 +65,66 @@ export function aiAcceptsPeace(s: GameState, aiId: number, from = 0): boolean {
 
 function aiDiplomacy(s: GameState, p: Player): void {
   const aggro = DIFFICULTY[s.difficulty].aiAggro
+  const k = per(p)
   const mine = militaryPower(s, p.id)
   const myMil = unitsOf(s, p.id).filter(u => !isCivilian(u)).length
-  for (const q of majors(s, p)) {
+  // Jak daleko má k nejbližšímu městu soupeře; válka přes půl světa nedává smysl.
+  const myCities = citiesOf(s, p.id)
+  const reach = (q: Player): number => {
+    let d = Infinity
+    for (const a of myCities) for (const b of s.cities) if (b.owner === q.id) d = Math.min(d, hexDist(a.x, a.y, b.x, b.y))
+    return d
+  }
+  const far = 16 + Math.floor(s.turn / 8)
+  // Nejdřív sousedé: nejbližší a nejslabší soupeř je nejlákavější cíl.
+  const order = majors(s, p).map(q => ({ q, d: reach(q) })).sort((a, b) => (a.d + militaryPower(s, a.q.id) / 4) - (b.d + militaryPower(s, b.q.id) / 4) || a.q.id - b.q.id)
+  for (const { q, d: dist } of order) {
     if (!p.met.includes(q.id)) continue
     const theirs = militaryPower(s, q.id)
     if (atWar(s, p.id, q.id)) {
       const dur = warDuration(s, p)
-      if (dur >= 10 && (mine < theirs * 0.9 || dur >= 26)) {
+      // Mír se neuzavírá s držitelem chrámu, při slibném obléhání, a mezi počítači ani tehdy, když obléhá druhá strana.
+      if (s.mission.wonderBy === q.id || pressing(s, p, q) || (!q.human && pressing(s, q, p))) continue
+      if (dur >= 10 && (mine < theirs * k.peaceRatio || dur >= k.peaceAfter)) {
         if (q.human) {
           if (!s.offers.some(o => o.from === p.id && o.to === q.id) && s.turn % 4 === p.id % 4) s.offers.push({ from: p.id, to: q.id })
-        } else if (militaryPower(s, q.id) < mine * 1.6 || dur >= 26) makePeace(s, p.id, q.id)
+        } else if (militaryPower(s, q.id) < mine * 1.6 || dur >= k.peaceAfter) makePeace(s, p.id, q.id)
       }
       continue
     }
+    // Držitel Slunečního chrámu vítězí za pár tahů: proti němu se zvedne každý, kdo na něj dosáhne, bez ohledu na smlouvy.
+    if (s.mission.wonderBy === q.id && myMil >= 2 && dist <= far + 12) { declareWar(s, p.id, q.id); continue }
     if (s.turn < (p.peaceUntil[q.id] ?? 0)) continue
     // Spojenec ani přítel hráče nenapadne.
     if (q.human && (s.turn < p.pactUntil[q.id] || p.attitude[q.id] >= 40)) continue
     if (p.war.length > 0) continue
     let want = false
     // Soupeř, který staví div, je hrozbou pro každého.
-    const qWonder = s.cities.some(c => c.owner === q.id && c.build?.kind === 'building' && c.build.id === 'wonder' && c.prod > 90)
-    if (qWonder && mine >= theirs * 0.8 && myMil >= 3) want = true
-    if (p.personality === 'aggressive') {
-      if (s.turn >= 24 / aggro && myMil >= 4 && mine >= theirs * (1.3 / aggro)) want = rand(s) < 0.22 * aggro
-    } else if (s.turn >= 55 / aggro && myMil >= 5 && mine >= theirs * (2.0 / aggro)) want = rand(s) < 0.1 * aggro
+    const wCity = s.cities.find(c => c.owner === q.id && c.build?.kind === 'building' && c.build.id === 'wonder')
+    const qWonder = !!wCity && wCity.prod > 150
+    // Na stavitele chrámu se chystá tažení hned, jak stavbu začne; válka přijde, až bude vojsko připravené nebo stavba pokročí.
+    if (wCity && myMil >= 3 && dist <= far + 8 && s.turn >= (p.peaceUntil[q.id] ?? 0) && (!p.siege || (p.siege.pre && p.siege.city !== wCity.id))) {
+      p.siege = { city: wCity.id, go: false, since: s.turn, pre: true }
+      continue
+    }
+    if (qWonder && mine >= theirs * 0.8 && myMil >= 3 && dist <= far + 8) want = true
+    if (dist <= far && s.turn >= k.warFrom / aggro && myMil >= k.warMil && mine >= theirs * (k.warRatio / aggro)) want = rand(s) < k.warChance * aggro
+    // Vypočítavý národ udeří na toho, kdo už válčí s někým jiným a nemá navrch.
+    if (!want && k.dogpile > 0 && dist <= far && s.turn >= 20 / aggro && myMil >= 3 && mine >= theirs * 0.85 && q.war.some(w => w !== barbId(s) && w !== p.id && s.players[w].alive)) want = rand(s) < k.dogpile * aggro
     // Na lehké obtížnosti dostane hráč na začátku klid.
     if (q.human && s.difficulty === 'easy' && s.turn < 45 && !qWonder) want = false
     // Dobré vztahy válku oddalují.
     if (want && q.human && p.attitude[q.id] >= 15 && !qWonder && rand(s) < 0.6) want = false
     // Kdo drží většinu sídel a blíží se vítězství dobytím, proti tomu se zvedne každý, kdo může.
-    if (s.conquest?.by === q.id && myMil >= 2) want = true
-    if (want) declareWar(s, p.id, q.id)
+    const urgent = (qWonder && want) || (s.conquest?.by === q.id && myMil >= 2)
+    if (urgent) { declareWar(s, p.id, q.id); continue }
+    // Válku nevyhlašuje hned: nejdřív si u hranic nachystá vojsko a stroje (aiMilitary), vyhlásí ji až s připraveným tažením.
+    if (want && !p.siege) {
+      let best: City | null = null, bd = Infinity
+      for (const c of s.cities) if (c.owner === q.id) for (const a of myCities) { const d = hexDist(a.x, a.y, c.x, c.y) + c.hp / 80; if (d < bd) { bd = d; best = c } }
+      if (best) p.siege = { city: best.id, go: false, since: s.turn, pre: true }
+      else declareWar(s, p.id, q.id)
+    }
   }
   // Žádost o pomoc: soupeř ve válce s jiným národem zve hráče do spojenectví.
   for (const me of s.players) {
@@ -253,14 +276,20 @@ function aiRoad(s: GameState, p: Player, u: Unit, pm: PathMap, claimed: Set<numb
 function bestMilitary(s: GameState, p: Player, c: City, defensive: boolean): UnitId | null {
   const mine = unitsOf(s, p.id).filter(u => !isCivilian(u) && !isNaval(u))
   const ranged = mine.filter(u => UNITS[u.type].ranged && !UNITS[u.type].siege).length
-  const siege = mine.filter(u => UNITS[u.type].siege).length
-  const melee = mine.length - ranged - siege
+  // Počítají se i beranidla, která už některé město staví, ať jich nevznikne pět najednou.
+  const rams = mine.filter(u => UNITS[u.type].ram).length + citiesOf(s, p.id).filter(o => o.build?.kind === 'unit' && UNITS[o.build.id].ram).length
+  const siege = mine.filter(u => UNITS[u.type].siege).length - rams
+  const melee = mine.length - ranged - siege - rams
+  const planning = p.war.some(w => w !== barbId(s)) || !!p.siege?.pre
   const can = (id: UnitId) => { const a = unitFor(p.nation, id); return canBuildUnit(s, c, a) ? a : null }
   const archer = can('archer')
   if (defensive && archer) return archer
-  if (p.war.length && melee >= 3 && siege < 2) { const k = can('catapult'); if (k) return k }
-  if (archer && ranged < (mine.length + 1) * 0.35) return archer
-  const opts = (['swordsman', 'horseman', 'spearman', 'warrior'] as UnitId[]).map(can).filter((x): x is UnitId => !!x)
+  if (planning && melee >= 2 && siege < Math.max(3, Math.floor(melee / 2))) { const k = can('trebuchet') ?? can('catapult'); if (k) return k }
+  // Beranidlo: jedno na výpravu, u větší armády dvě (hradby na ně střílejí).
+  if (planning && melee >= 3 && rams < (melee >= 7 ? 2 : 1)) { const k = can('ram'); if (k) return k }
+  // Na tažení je potřeba hlavně pěchota: obklíčí město a obsadí ho.
+  if (archer && ranged < (mine.length + 1) * (planning ? 0.2 : 0.35)) return archer
+  const opts = (['manatarms', 'knight', 'swordsman', 'horseman', 'spearman', 'warrior'] as UnitId[]).map(can).filter((x): x is UnitId => !!x)
   if (!opts.length) return archer
   opts.sort((a, b) => UNITS[b].str - UNITS[a].str)
   // Občas jízda kvůli pestrosti.
@@ -284,7 +313,7 @@ function aiCityBuild(s: GameState, p: Player, c: City): void {
   const workers = units.filter(u => u.type === 'worker').length + cities.filter(o => o.id !== c.id && o.build?.kind === 'unit' && o.build.id === 'worker').length
   const threat = threatNear(s, p.id, c.x, c.y, 4)
   const garrison = militaryAt(s, c.x, c.y)
-  const war = p.war.length > 0
+  const war = p.war.length > 0 || !!p.siege?.pre
   const hard = DIFFICULTY[s.difficulty].aiExtra
   const setU = (id: UnitId | null) => { if (id) { c.build = { kind: 'unit', id }; return true } return false }
   const setB = (id: BuildingId) => { c.build = { kind: 'building', id } }
@@ -292,8 +321,9 @@ function aiCityBuild(s: GameState, p: Player, c: City): void {
 
   if ((threat > 0 && (!garrison || threat > 1)) || mil < cities.length) { if (setU(bestMilitary(s, p, c, !garrison))) return }
   if (cities.length === 1 && !units.some(u => u.type === 'scout') && s.turn < 12 && mil >= 1 && canBuildUnit(s, c, 'scout')) { setU('scout'); return }
-  const targetCities = (p.personality === 'builder' ? 5 : 4) + hard
-  if (cities.length + settlers < targetCities && settlers === 0 && c.pop >= 2 && threatNear(s, p.id, c.x, c.y, 2) === 0 && s.turn < 85) {
+  const k = per(p)
+  const targetCities = k.cities + hard
+  if (cities.length + settlers < targetCities && settlers === 0 && c.pop >= 2 && threatNear(s, p.id, c.x, c.y, 2) === 0 && s.turn < k.settleUntil) {
     // Stojí za to jen tehdy, když je kde stavět.
     let any = false
     for (const [x, y] of tilesWithin(s, c.x, c.y, 7)) if (siteScore(s, p.id, x, y) > 16) { any = true; break }
@@ -303,21 +333,24 @@ function aiCityBuild(s: GameState, p: Player, c: City): void {
   if (anyImpTech && workers < Math.min(cities.length, 3) + (cities.length >= 3 ? 1 : 0)) { setU('worker'); return }
   if (canBuildBuilding(s, c, 'wonder')) {
     const bestProd = cities.slice().sort((a, b) => cityYields(s, b).prod - cityYields(s, a).prod)[0]
-    if (bestProd.id === c.id && (p.personality === 'builder' || !war)) { setB('wonder'); return }
+    if (bestProd.id === c.id && (k.wonderInWar || !war)) { setB('wonder'); return }
   }
   // Loďstvo: pár lodí na obranu pobřeží, ve válce o jednu víc.
   const sea = seafarer(s, p)
   if (sea && isCoastal(s, c.x, c.y) && c.buildings.length >= 2 && canBuildBuilding(s, c, 'harbor')) { setB('harbor'); return }
   if (isCoastal(s, c.x, c.y) && mil >= cities.length + (sea ? 0 : 1) && s.turn > (sea ? 14 : 30)) {
-    const want = Math.min(3, cities.filter(o => isCoastal(s, o.x, o.y)).length) + (war ? 1 : 0) - (p.personality === 'builder' && !war && !sea ? 1 : 0) + (sea ? 1 : 0)
+    const want = Math.min(3, cities.filter(o => isCoastal(s, o.x, o.y)).length) + (war ? 1 : 0) - (!k.alwaysArm && !war && !sea ? 1 : 0) + (sea ? 1 : 0)
     const ship: UnitId | null = canBuildUnit(s, c, 'trireme') ? 'trireme' : canBuildUnit(s, c, 'galley') ? 'galley' : null
     if (ship && navy < want && playerIncome(s, p.id).gold > 0) { setU(ship); return }
   }
-  const armyTarget = cities.length * 1.6 + (p.personality === 'aggressive' ? 3 + s.turn / 18 : 1 + s.turn / 40) + (war ? 3 : 0)
-  if ((war || p.personality === 'aggressive') && mil < armyTarget) { if (setU(bestMilitary(s, p, c, false))) return }
-  for (const b of BUILD_ORDER[p.personality] ?? BUILD_ORDER.builder) {
+  // Kdo drží chrám, musí ho ubránit.
+  const holds = s.mission.wonderBy === p.id
+  if (holds && c.buildings.includes('wonder')) for (const b of ['walls', 'bastion'] as BuildingId[]) if (canBuildBuilding(s, c, b)) { setB(b); return }
+  const armyTarget = cities.length * 1.6 + k.armyBase + s.turn / k.armyPace + (war ? 3 : 0) + (holds ? 4 : 0) + (p.siege ? 3 : 0)
+  if ((war || k.alwaysArm || holds) && mil < armyTarget) { if (setU(bestMilitary(s, p, c, false))) return }
+  for (const b of k.build) {
     if (!canBuildBuilding(s, c, b)) continue
-    if (b === 'walls' && !war && threat === 0 && p.personality === 'builder') continue
+    if ((b === 'walls' || b === 'bastion') && !war && threat === 0 && !k.wallsAlways) continue
     if (BUILDINGS[b].maint > 0 && playerIncome(s, p.id).gold < 0 && p.gold < 30) continue
     setB(b); return
   }
@@ -326,7 +359,7 @@ function aiCityBuild(s: GameState, p: Player, c: City): void {
 }
 
 function aiSpend(s: GameState, p: Player): void {
-  const reserve = p.personality === 'builder' ? 90 : 60
+  const reserve = per(p).reserve
   if (p.gold < reserve) return
   // Zastaralé jednotky přezbrojit, když je to levné.
   for (const u of unitsOf(s, p.id)) {
@@ -395,7 +428,57 @@ function approach(s: GameState, u: Unit, tx: number, ty: number, range: number):
     best = bi
   }
   if (best === idx(s, u.x, u.y)) return false
-  return moveUnit(s, u, best % s.W, (best / s.W) | 0)
+  const bx = best % s.W, by = (best / s.W) | 0
+  if (moveUnit(s, u, bx, by)) return true
+  if (u.moves <= 0 || !s.units.includes(u)) return false
+  // Cestu ucpaly vlastní jednotky (kolona na úzké stezce): obejít je po nejbližším volném poli směrem k cíli.
+  let side = -1, sh = hexDist(u.x, u.y, bx, by), sd = Infinity
+  for (const [x, y] of tilesWithin(s, u.x, u.y, 2)) {
+    const i = idx(s, x, y)
+    if (!pm.stop[i] || pm.dist[i] > Math.max(u.moves, 2) || (!isNaval(u) && !u.sea && isWater(s.tiles[i]))) continue
+    const h = hexDist(x, y, bx, by)
+    if (h < sh || (h === sh && h < hexDist(u.x, u.y, bx, by) && pm.dist[i] < sd)) { sh = h; sd = pm.dist[i]; side = i }
+  }
+  return side >= 0 && moveUnit(s, u, side % s.W, (side / s.W) | 0)
+}
+
+/**
+ * Kolik životů města dokáže skupina ubrat: stroje a střelci za `rounds` kol palby, pěchota za dvě kola zteče
+ * (druhé už oslabená). Podle toho se rozhoduje, zda má smysl vyrazit a kdy jít na hradby.
+ */
+function punch(s: GameState, units: Unit[], c: City, rounds: number): number {
+  const cs = cityStrength(s, c)
+  const ram = units.some(u => UNITS[u.type].ram)
+  let v = 0, melee = 0
+  for (const u of units) {
+    if (UNITS[u.type].ram) continue
+    const ranged = !!UNITS[u.type].ranged
+    const hit = Math.max(4, Math.min(100, 28 * Math.pow(unitStrength(s, u, { ranged, vsCity: true, ram }) / cs, 1.15)))
+    v += ranged ? hit * rounds : hit * 1.6
+    if (!ranged) melee++
+  }
+  // Město se mezitím opravuje – dokud ho pěchota neobklíčí.
+  return v - (melee >= SIEGE_UNITS ? 10 * Math.max(0, rounds - 2) : 10 * rounds)
+}
+
+/** Staví se ve městě Sluneční chrám, nebo už v něm stojí? */
+function isWonderSite(c: City): boolean {
+  return c.buildings.includes('wonder') || (c.build?.kind === 'building' && c.build.id === 'wonder')
+}
+
+/** Umí národ postavit obléhací stroj? */
+function canSiege(s: GameState, p: Player, cities: City[]): boolean {
+  return cities.length > 0 && (['trebuchet', 'catapult', 'ram'] as UnitId[]).some(id => canBuildUnit(s, cities[0], unitFor(p.nation, id)))
+}
+
+/** Vede národ právě slibné obléhání města národa `q`? Pak se mír neuzavírá. */
+function pressing(s: GameState, p: Player, q: Player): boolean {
+  const plan = p.siege
+  if (!plan?.go) return false
+  const c = s.cities.find(o => o.id === plan.city)
+  if (!c || c.owner !== q.id) return false
+  const near = unitsOf(s, p.id).filter(u => !isCivilian(u) && u.hp >= 50 && hexDist(u.x, u.y, c.x, c.y) <= 4).length
+  return near >= 3 || (near >= 2 && c.hp < cityMaxHp(c) * 0.6) || s.turn - plan.since < 12
 }
 
 function nearestCity(s: GameState, pid: number, x: number, y: number): City | null {
@@ -441,20 +524,77 @@ function aiMilitary(s: GameState, p: Player): void {
   const field = army.filter(u => !assigned.has(u.id) && s.units.includes(u))
   if (!field.length) return
 
-  // Válečný cíl: nejbližší nepřátelské město.
-  let target: City | null = null
+  // Válečný cíl: nejbližší nepřátelské město. Jednou zvoleného cíle se vojsko drží, dokud město nepadne nebo nenastane mír.
+  const temple = s.cities.find(c => c.buildings.includes('wonder') && p.war.includes(c.owner)) ?? null
+  const kept = p.siege ? s.cities.find(c => c.id === p.siege!.city && p.war.includes(c.owner)) ?? null : null
+  const busy = !!kept && !!p.siege?.go && (kept.hp < cityMaxHp(kept) * 0.6 || army.filter(u => hexDist(u.x, u.y, kept.x, kept.y) <= 4).length >= 3)
+  let target: City | null = busy ? kept : temple ?? kept
+  // Chystané tažení před vyhlášením války; skutečná válka s někým jiným má přednost.
+  let pre = false
+  if (!target && p.siege?.pre) {
+    const c = s.cities.find(o => o.id === p.siege!.city)
+    const o = c ? s.players[c.owner] : null
+    const ok = !!c && !!o && o.id !== pid && o.id !== barbId(s) && o.alive && !p.war.some(w => w !== barbId(s))
+      && s.turn >= (p.peaceUntil[o.id] ?? 0) && !(o.human && s.turn < (p.pactUntil[o.id] ?? 0)) && (s.turn - p.siege.since <= 24 || isWonderSite(c!))
+    if (ok) { target = c!; pre = true } else p.siege = null
+  }
   const home = cities.find(c => c.capital) ?? cities[0]
-  if (p.war.length && home) {
+  if (!target && p.war.length && home) {
     let bd = Infinity
     for (const c of s.cities) {
-      if (!p.war.includes(c.owner) || !p.explored[idx(s, c.x, c.y)]) continue
-      const d = hexDist(home.x, home.y, c.x, c.y) + c.hp / 80
+      // Kde leží města národa, se kterým se zná, ví každý (poslové, kupci) – bez toho by vojsko nemělo kam táhnout.
+      if (!p.war.includes(c.owner) || c.owner === barbId(s) && !p.explored[idx(s, c.x, c.y)]) continue
+      // Město se Slunečním chrámem má přednost před vším ostatním.
+      const d = hexDist(home.x, home.y, c.x, c.y) + c.hp / 80 - (c.buildings.includes('wonder') ? 100 : 0)
       if (d < bd) { bd = d; target = c }
     }
   }
-  const strong = field.filter(u => u.hp >= 60).length
-  const march = !!target && strong >= (p.personality === 'aggressive' ? 3 : 4)
+  // Tažení: vojsko se nejdřív shromáždí u vlastního města nejblíž cíli, počká na obléhací stroje a teprve pak vyrazí pohromadě.
+  const fit = field.filter(u => u.hp >= 60)
+  let march = false
+  let stage: City | null = null
+  let storm = false, engines = false, core = 0
+  const dT = (u: Unit) => hexDist(u.x, u.y, target!.x, target!.y)
+  if (!target) p.siege = null
+  else {
+    if (p.siege?.city !== target.id) p.siege = { city: target.id, go: false, since: s.turn }
+    if (!pre) p.siege.pre = false
+    const plan = p.siege
+    stage = cities.slice().sort((a, b) => hexDist(a.x, a.y, target!.x, target!.y) - hexDist(b.x, b.y, target!.x, target!.y) || a.id - b.id)[0] ?? null
+    const k = per(p)
+    const rush = target.buildings.includes('wonder') || (isWonderSite(target) && target.prod > 150)
+    const need = rush ? 2 : k.marchAt
+    const full = cityMaxHp(target)
+    if (!plan.go) {
+      // Vyráží se, až má shromážděné vojsko na město sílu: stroje mu dají čtyři kola palby, pěchota pak zteč.
+      const ready = fit.filter(u => !stage || hexDist(u.x, u.y, stage.x, stage.y) <= 3 || dT(u) <= 6)
+      const melee = ready.filter(u => !UNITS[u.type].ranged && !UNITS[u.type].ram).length
+      const power = punch(s, ready, target, 4)
+      const waited = s.turn - plan.since
+      // Kdo umí stavět stroje, nevyráží bez beranidla (pěchotě přidá sílu) nebo tří střílejících strojů, leda by se čekání protáhlo.
+      const eng = ready.filter(u => UNITS[u.type].siege && !UNITS[u.type].ram).length
+      // Před válkou se čeká v klidu na plnou sílu; už ve válce se po čase vyráží i s menší.
+      const late = !pre && waited > 10
+      const engOk = !canSiege(s, p, cities) || ready.some(u => UNITS[u.type].ram) || eng >= (late ? 1 : 3)
+      const enough = melee >= (late ? 2 : 4) && engOk && power >= full * (late ? 0.8 : 1.1)
+      if (ready.length >= need && (enough || rush)) {
+        if (pre) { declareWar(s, pid, target.owner); plan.pre = false }
+        plan.go = true; plan.since = s.turn
+      }
+    } else if (fit.length < 2 || (!rush && s.turn - plan.since > 6 && punch(s, fit, target, 4) < target.hp * 0.6)) { plan.go = false; plan.since = s.turn }
+    march = plan.go
+    // Zteč: jakmile vojsko u města dokáže hradby srazit do dvou kol, jde pěchota na věc.
+    const at = fit.filter(u => dT(u) <= 4)
+    storm = at.some(u => !UNITS[u.type].ranged && !UNITS[u.type].ram) && punch(s, at, target, 2) >= target.hp
+    engines = at.some(u => UNITS[u.type].siege)
+    // Výprava = kdo už je u shromaždiště nebo za ním; posily, které teprve vycházejí z domova, se nepočítají.
+    const reach = stage ? hexDist(stage.x, stage.y, target.x, target.y) + 3 : Infinity
+    const ds = fit.map(dT).filter(d => d <= reach).sort((a, b) => a - b)
+    core = ds.length ? ds[Math.floor(ds.length / 2)] : 0
+  }
 
+  // Na pochodu táhne napřed čelo, ať zadní řady nenarážejí do stojících.
+  if (target && march) field.sort((a, b) => dT(a) - dT(b) || a.id - b.id)
   for (const u of field) {
     if (!s.units.includes(u)) continue
     const ud = UNITS[u.type]
@@ -474,9 +614,13 @@ function aiMilitary(s: GameState, p: Player): void {
       if (!atWar(s, pid, o.owner) || !p.visible[idx(s, o.x, o.y)]) continue
       const d = hexDist(u.x, u.y, o.x, o.y)
       const own = near ? hexDist(near.x, near.y, o.x, o.y) : 99
+      // Pěchota na loď nedosáhne.
+      if (!ud.ranged && isWater(s.tiles[idx(s, o.x, o.y)])) continue
       if (d <= 5 && own <= 6 && d < fd) { fd = d; foe = o }
     }
-    if (foe && u.hp >= 50) {
+    // Výprava se nenechá odlákat: domov brání posádky a jednotky, které ještě nevyrazily.
+    const away = march && !!target && !!stage && dT(u) < hexDist(stage.x, stage.y, target.x, target.y) - 1
+    if (foe && u.hp >= 50 && !(away && fd > 2)) {
       approach(s, u, foe.x, foe.y, ud.ranged ? ud.range! : 1)
       if (s.units.includes(u)) tryAttack(s, u)
       continue
@@ -492,8 +636,27 @@ function aiMilitary(s: GameState, p: Player): void {
         const sea = goal(pathMap(s, u))
         if (!(sea < Infinity && (land === Infinity || sea < land * 0.7))) u.sea = false
       }
-      approach(s, u, target.x, target.y, ud.ranged ? ud.range! : 1)
-      if (s.units.includes(u)) tryAttack(s, u, 6)
+      const d = dT(u)
+      // Předvoj nejde sám: kdo je o víc než dvě pole před středem výpravy, počká. Zadní polovina jde vždy, takže se průvod nezasekne.
+      if (d > 4 && d < core - 2) { if (u.moves >= ud.move) u.fortified = true; continue }
+      // Stroje a střelci pálí hned. Pěchota čeká mimo dostřel hradeb, dokud není město zralé na zteč.
+      if (ud.ranged) {
+        // Stroje nejdou napřed bez krytí: drží se za pěchotou.
+        const covered = !ud.siege || d <= ud.range! || fit.some(o => !UNITS[o.type].ranged && dT(o) <= d + 1)
+        if (covered) approach(s, u, target.x, target.y, ud.range!)
+        else if (u.moves >= ud.move) u.fortified = true
+        if (s.units.includes(u)) tryAttack(s, u, 6)
+        continue
+      }
+      if (storm) { approach(s, u, target.x, target.y, 1); if (s.units.includes(u)) tryAttack(s, u, 55); continue }
+      approach(s, u, target.x, target.y, 3)
+      if (s.units.includes(u)) tryAttack(s, u, engines ? 0 : 6)
+      continue
+    }
+    // Shromaždiště před tažením.
+    if (target && stage && !march && u.hp >= 60) {
+      if (hexDist(u.x, u.y, stage.x, stage.y) > 2) approach(s, u, stage.x, stage.y, 2)
+      else if (u.moves >= ud.move) u.fortified = true
       continue
     }
     // Barbarské tábory v dosahu.
@@ -716,7 +879,7 @@ export function recommendBuild(s: GameState, c: City): BuildItem | null {
 export function adviseTech(s: GameState, p: Player): TechId | null {
   const avail = availableTechs(p)
   if (!avail.length) return null
-  let order = p.war.length ? RESEARCH.aggressive : RESEARCH.builder
+  let order = p.war.length ? PERSONAS.aggressive.research : PERSONAS.builder.research
   if (seafarer(s, p)) order = ['sailing', ...(p.techs.length >= 5 ? ['navigation' as TechId] : []), ...order]
   return order.find(t => avail.includes(t)) ?? avail[0]
 }
@@ -736,7 +899,7 @@ export function adviseBuild(s: GameState, c: City): void {
 
 export function describeAI(p: Player): string {
   const n = NATIONS[p.nation]
-  return `${n.leader}, ${n.title.toLowerCase()} – ${p.personality === 'aggressive' ? 'výbojný sok' : 'trpělivý stavitel'}`
+  return `${n.leader}, ${n.title.toLowerCase()} – ${per(p).label}`
 }
 
 void TECHS; void note

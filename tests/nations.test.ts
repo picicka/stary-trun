@@ -42,7 +42,7 @@ test('počet národů: 2 až 8, lidé první, barbaři poslední', () => {
         at.add(idx(s, u.x, u.y))
         const p = s.players[pid]
         assert.equal(p.attitude.length, n + 1); assert.equal(p.pactUntil.length, n + 1); assert.equal(p.peaceUntil.length, n + 1)
-        if (!p.human) assert.equal(p.personality, NATIONS[p.nation].temper)
+        if (!p.human) assert.equal(p.personality, NATIONS[p.nation].persona)
       }
       assert.equal(at.size, n, 'každý začíná jinde')
       assert.ok(s.W * s.H >= 40 * 26)
