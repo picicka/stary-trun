@@ -7,9 +7,10 @@ import { answerAlly, askAlliance, buyResource, giveGold, sellResource } from './
 import {
   adoptTradition, atWar, attack, buy, canFoundCity, canWork, cityAt, cityById, declareWar, dequeue, enqueue, foundCity, killUnit, makePeace, moveUnit, note, pathMap, pathTo,
   planResearch, previewAttack, promote, promoteUnit, roadStep, startWork, stopUnit, unitById, unitsOf, updateVisibility, upgradeBlock, upgradeUnit,
+  assignWorkers, cityShoot, cityTargets, escortBlock, follow, followAll,
 } from './rules.ts'
 import { canAct, endTurn, settle } from './state.ts'
-import { barbId, type BuildItem, type GameState, type JobId } from './types.ts'
+import { barbId, type BuildItem, type CityFocus, type GameState, type JobId } from './types.ts'
 
 export type Command =
   /** Pohyb na pole (i na více tahů). `todo` = co udělat po příchodu: práce dělníků, nebo založení města. */
@@ -26,10 +27,16 @@ export type Command =
   | { t: 'upgrade'; unit: number; all?: boolean }
   | { t: 'order'; unit: number; o: 'auto' | 'fortify' | 'sleep' | 'skip' | 'wake' }
   | { t: 'disband'; unit: number }
+  /** Doprovod: vojenská jednotka bude následovat a chránit vlastní civilní jednotku `ward`. */
+  | { t: 'escort'; unit: number; ward: number }
   | { t: 'build'; city: number; item: BuildItem; front?: boolean }
   | { t: 'unqueue'; city: number; i: number }
   | { t: 'promote'; city: number; i: number }
   | { t: 'advise'; city: number }
+  /** Střelba z hradeb na jednotku na daném poli; město střílí jednou za tah. */
+  | { t: 'cityShoot'; city: number; x: number; y: number }
+  /** Zaměření města na jídlo, výrobu, nebo zlato; null = vyváženě (automatika). */
+  | { t: 'focus'; city: number; focus: CityFocus | null }
   | { t: 'buy'; city: number }
   | { t: 'tradition'; id: TraditionId }
   | { t: 'research'; tech: TechId; append?: boolean }
@@ -73,12 +80,25 @@ function run(s: GameState, pid: number, c: Command): Result {
   if ('unit' in c) {
     const u = unitById(s, c.unit)
     if (!u || u.owner !== pid) return no('Tato jednotka vám nepatří.')
+    // Vlastní rozkaz doprovod ruší; povýšení a přezbrojení ne.
+    if (c.t !== 'promo' && c.t !== 'upgrade') delete u.escort
     switch (c.t) {
+      case 'escort': {
+        const ward = unitById(s, c.ward)
+        const err = escortBlock(s, u, ward)
+        if (err || !ward) return no(err ?? undefined)
+        for (const o of unitsOf(s, pid)) if (o.escort === ward.id) delete o.escort
+        stopUnit(u); u.auto = false; u.sleep = false; u.fortified = false
+        u.escort = ward.id
+        follow(s, u)
+        return OK
+      }
       case 'move': {
         stopUnit(u); u.auto = false
         if (!pathTo(s, pathMap(s, u, undefined, me), c.x, c.y)) return no(c.todo ? 'Tam dělníci cestu nedovedou.' : 'Tam se jednotka nedostane.')
         if (c.todo) u.todo = c.todo
         moveUnit(s, u, c.x, c.y)
+        followAll(s, pid)
         const city = cityAt(s, c.x, c.y)
         return { ok: true, city: c.todo === 'found' && city?.owner === pid && !s.units.includes(u) ? city.id : undefined }
       }
@@ -106,6 +126,7 @@ function run(s: GameState, pid: number, c: Command): Result {
         if (!pathTo(s, pathMap(s, u, undefined, me), c.x, c.y)) return no('Tam dělníci cestu nedovedou.')
         stopUnit(u); u.auto = false; u.roadTo = [c.x, c.y]
         roadStep(s, u)
+        followAll(s, pid)
         return OK
       case 'promo':
         return promoteUnit(s, u, c.id) ? OK : no()
@@ -143,6 +164,19 @@ function run(s: GameState, pid: number, c: Command): Result {
       case 'unqueue': if (c.i >= city.queue.length) return no(); dequeue(s, city, c.i); return OK
       case 'promote': if (c.i < 0 || c.i >= city.queue.length) return no(); promote(s, city, c.i); return OK
       case 'advise': adviseBuild(s, city); return OK
+      case 'cityShoot': {
+        if (city.fired) return no('Město už v tomto tahu střílelo.')
+        const target = cityTargets(s, city).find(u => u.x === c.x && u.y === c.y && me.visible[c.y * s.W + c.x])
+        if (!target) return no('Na tento cíl hradby nedostřelí.')
+        cityShoot(s, city, target)
+        city.fired = true
+        updateVisibility(s, pid)
+        return OK
+      }
+      case 'focus':
+        if (c.focus) city.focus = c.focus; else delete city.focus
+        assignWorkers(s, city)
+        return OK
       case 'buy': return buy(s, city) ? OK : no()
     }
   }

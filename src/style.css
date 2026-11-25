@@ -1,7 +1,9 @@
+/* Číslice v nadpisovém písmu: Pixelify Sans má 2 a 5 těžko čitelné, bereme je z VT323. */
+@font-face { font-family: 'Cislice'; src: url('../node_modules/@fontsource/vt323/files/vt323-latin-400-normal.woff2') format('woff2'); unicode-range: U+30-39; font-weight: 400 700; size-adjust: 125%; }
 :root {
   --bg: #141a2e; --panel: #1d2540; --panel2: #262f52; --line: #3a466f; --gold: #f2c230; --bronze: #c98a3c;
   --text: #f0e9d2; --muted: #a6adc8; --good: #7ddc6a; --bad: #ff6b5e; --war: #ff9d4a; --sci: #6cc6ff;
-  --font: 'VT323', ui-monospace, monospace; --head: 'Pixelify Sans', 'VT323', monospace;
+  --font: 'VT323', ui-monospace, monospace; --head: 'Cislice', 'Pixelify Sans', 'VT323', monospace;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1020; color: var(--text); font-family: var(--font); font-size: 21px; line-height: 1.1; -webkit-font-smoothing: none; user-select: none; -webkit-user-select: none; }
@@ -402,3 +404,13 @@ table.ptab td:first-child { white-space: nowrap; }
 table.ptab .ri { width: 28px; height: 28px; image-rendering: pixelated; vertical-align: middle; margin-right: 6px; }
 table.keys td:first-child { width: 250px; }
 table.keys kbd { margin-left: 0; font-size: 18px; padding: 1px 7px; }
+
+/* obrázek na pozadí technologie */
+.tech .art { position: absolute; right: 2px; bottom: 0; width: 64px; height: 62px; object-fit: contain; object-position: right bottom; image-rendering: pixelated; opacity: .38; pointer-events: none; }
+.tech .art[src*="/i_"] { object-fit: cover; object-position: center 75%; }
+.tech .art[src*="/r_"] { object-fit: cover; object-position: center; }
+.tech.locked .art { filter: grayscale(.8); opacity: .22; }
+.tech.done .art { opacity: .5; }
+.tech b, .tech small, .tech .cost { position: relative; text-shadow: 0 1px 0 #0b1024, 1px 0 0 #0b1024; }
+.tech .cost { position: absolute; }
+#city .seg.focus button { font-family: var(--font); font-size: 18px; padding: 2px 8px; display: flex; align-items: center; gap: 4px; }

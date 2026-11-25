@@ -6,6 +6,7 @@ import { atWar, hasRoad, idx, inMap, isCivilian, resourceVisible, isEmbarked } f
 import type { GameEvent, GameState, Unit } from '../game/types.ts'
 import { sfx } from '../audio.ts'
 import { addNationFrames } from './nationArt.ts'
+import { cursorCss, type CursorKind } from './cursor.ts'
 
 export interface MapHost {
   state: GameState
@@ -40,6 +41,14 @@ export class MapScene extends Phaser.Scene {
   private zoomAcc = 0
   private keys!: Record<string, Phaser.Input.Keyboard.Key>
   private playing = false
+  /** Obrázky, které se hýbou samy: lesy a tábory (snímek „_w“), stíny mraků, čas a krok oživení mapy. */
+  private swaying = new Map<number, { img: Phaser.GameObjects.Image; frame: string; on: boolean }>()
+  private clouds: Phaser.GameObjects.Image[] = []
+  private ambientAcc = 0
+  private tick = 0
+  private flockAt = 40
+  private selId = -1
+  private calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
   private ready = false
   lastHover: [number, number] = [-1, -1]
 
@@ -64,6 +73,8 @@ export class MapScene extends Phaser.Scene {
     this.cursor = this.add.sprite(0, 0, A, 'hex_cursor_0').setOrigin(0, 0).setDepth(D_FOG + 5).setAlpha(0.55).setVisible(false)
     this.selRing = this.add.sprite(0, 0, A, 'hex_cursor_0').setOrigin(0, 0).setDepth(D_FOG - 10).setVisible(false)
     this.selRing.play('cursor')
+    this.makeAmbientTextures()
+    this.makeGhosts()
 
     const cam = this.cameras.main
     cam.setRoundPixels(true)
@@ -139,6 +150,7 @@ export class MapScene extends Phaser.Scene {
 
   update(_t: number, dt: number): void {
     if (!this.host?.state) return
+    this.ambient(dt)
     const k = this.keys
     const cam = this.cameras.main
     let dx = 0, dy = 0
@@ -170,6 +182,13 @@ export class MapScene extends Phaser.Scene {
       this.cursor.setVisible(false)
       this.host.onHover(-1, -1)
     }
+  }
+
+  private cursorKind: CursorKind = ''
+  /** Kurzor myši nad mapou podle toho, co kliknutí udělá. */
+  setCursor(kind: CursorKind): void {
+    this.cursorKind = kind
+    this.game.canvas.style.cursor = cursorCss(kind, () => this.setCursor(this.cursorKind))
   }
 
   // ------------------------------------------------------------ kamera
@@ -230,6 +249,8 @@ export class MapScene extends Phaser.Scene {
     this.borders = []
     this.borderSig = ''
     this.units.clear()
+    this.swaying.clear()
+    this.placeClouds()
     this.selRing.setVisible(false)
     this.cameras.main.setZoom(this.defaultZoom())
     this.syncAll()
@@ -287,9 +308,11 @@ export class MapScene extends Phaser.Scene {
     if (sig === this.tileSig[i]) return
     this.tileSig[i] = sig
     for (const o of this.tileDyn[i]) o.destroy()
+    this.swaying.delete(i)
     const objs: Phaser.GameObjects.GameObject[] = []
     const d = y * 10
-    const tall = (frame: string, dd = 3) => objs.push(this.add.image(px, py - 16, A, frame).setOrigin(0, 0).setDepth(d + dd))
+    const tall = (frame: string, dd = 3) => { const img = this.add.image(px, py - 16, A, frame).setOrigin(0, 0).setDepth(d + dd); objs.push(img); return img }
+    const sway = (frame: string, dd = 3) => this.swaying.set(i, { img: tall(frame, dd), frame, on: false })
     if (roads) {
       if (t.road) objs.push(this.add.image(px, py, A, 'road_c').setOrigin(0, 0).setDepth(d + 1.4))
       for (let dir = 0; dir < 6; dir++) if (roads & (1 << dir)) objs.push(this.add.image(px, py, A, `road_${dir}`).setOrigin(0, 0).setDepth(d + 1.5))
@@ -298,11 +321,11 @@ export class MapScene extends Phaser.Scene {
       tall(`city_${size}_${s.players[city.owner].nation}`, 4)
     } else {
       if (t.imp === 'farm') tall('i_farm', 2)
-      if (t.forest) tall(`f_forest_${1 + ((x * 3 + y * 5 + t.variant) % 2)}`)
+      if (t.forest) sway(`f_forest_${1 + ((x * 3 + y * 5 + t.variant) % 2)}`)
       if (res) objs.push(this.add.image(px, py, A, `r_${res}`).setOrigin(0, 0).setDepth(d + 4))
       if (t.imp && t.imp !== 'farm') tall(`i_${t.imp}`, 4)
       if (t.special === 'ruins') tall('f_ruins', 4)
-      if (t.special === 'camp') tall('f_camp', 4)
+      if (t.special === 'camp') sway('f_camp', 4)
       if (wonder) tall('f_wonder', 5)
     }
     this.tileDyn[i] = objs
@@ -376,6 +399,93 @@ export class MapScene extends Phaser.Scene {
         const o = inMap(s, nx, ny) ? s.tiles[idx(s, nx, ny)].owner : -1
         if (o === t.owner) continue
         this.borders.push(this.add.image(px, py, A, `border_${dir}`).setOrigin(0, 0).setTint(col).setAlpha(0.9).setDepth(y * 10 + 2))
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ život na mapě
+
+  /** Drobné textury pro oživení mapy: pták ve dvou snímcích a stín mraku. */
+  private makeAmbientTextures(): void {
+    if (this.textures.exists('bird')) return
+    const bird = this.textures.createCanvas('bird', 10, 3)!
+    const b = bird.getContext()
+    b.fillStyle = '#1a1426'
+    // křídla nahoře, křídla dole
+    for (const [x, y] of [[0, 0], [1, 1], [2, 2], [3, 1], [4, 0], [5, 1], [6, 1], [7, 0], [8, 1], [9, 1]]) b.fillRect(x, y, 1, 1)
+    bird.add('up', 0, 0, 0, 5, 3); bird.add('down', 0, 5, 0, 5, 3)
+    bird.refresh()
+    const cloud = this.textures.createCanvas('cloud', 40, 18)!
+    const c = cloud.getContext()
+    c.fillStyle = '#0a1024'
+    for (const [cx, cy, rx, ry] of [[14, 10, 12, 6], [25, 8, 11, 6], [22, 12, 14, 5], [8, 12, 7, 4]]) {
+      for (let y = 0; y < 18; y++) for (let x = 0; x < 40; x++) if (((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1) c.fillRect(x, y, 1, 1)
+    }
+    cloud.refresh()
+    if (!this.anims.exists('bird')) this.anims.create({ key: 'bird', frames: [{ key: 'bird', frame: 'up' }, { key: 'bird', frame: 'down' }], frameRate: 5, repeat: -1 })
+  }
+
+  /** Stíny mraků rozmístí po nové mapě; dál už jen plují po větru. */
+  private placeClouds(): void {
+    for (const c of this.clouds) c.destroy()
+    this.clouds = []
+    if (this.calm) return
+    const s = this.host.state
+    const w = s.W * TILE_W, h = s.H * ROW_H
+    const n = Math.max(2, Math.round((s.W * s.H) / 260))
+    for (let i = 0; i < n; i++) {
+      const sc = 3 + (i % 3)
+      this.clouds.push(this.add.image(((i * 0.618 + 0.2) % 1) * w, ((i * 0.381 + 0.15) % 1) * h, 'cloud').setScale(sc).setAlpha(0.1).setDepth(D_FOG - 30).setData('v', 5 + (i % 3) * 1.5))
+    }
+  }
+
+  /** Mapa žije i mezi tahy: vítr v lesích, ohně táborů, kouř nad městy, ptáci, stíny mraků a přešlapující vybraná jednotka. */
+  private ambient(dt: number): void {
+    if (this.calm) return
+    const s = this.host.state
+    const mapW = s.W * TILE_W
+    for (const c of this.clouds) {
+      c.x += (c.getData('v') as number) * (dt / 1000)
+      if (c.x - c.displayWidth / 2 > mapW + 40) c.x = -c.displayWidth / 2 - 40
+    }
+    this.ambientAcc += dt
+    if (this.ambientAcc < 170) return
+    this.ambientAcc = Math.min(this.ambientAcc - 170, 170)
+    const tick = ++this.tick
+    const view = this.cameras.main.worldView
+    const me = s.players[this.host.me]
+    // Poryvy větru běží přes mapu zleva doprava; oheň v táboře plápolá nahodile.
+    for (const [i, f] of this.swaying) {
+      const x = i % s.W, y = (i / s.W) | 0
+      const on = f.frame === 'f_camp' ? Math.random() < 0.5 : Math.sin(x * 0.5 + y * 0.28 - tick * 0.22) + Math.sin(x * 1.7 - y * 1.3 + tick * 0.6) * 0.35 > 0.72
+      if (on !== f.on) { f.on = on; f.img.setFrame(on ? `${f.frame}_w` : f.frame) }
+    }
+    // Přešlapuje jen vybraná jednotka.
+    for (const [id, v] of this.units) v.spr.y = id === this.selId && !v.work && tick % 6 < 2 ? -1 : 0
+    // Kouř z komínů viditelných měst a jiskření Slunečního chrámu.
+    for (const c of s.cities) {
+      if (!me.visible[idx(s, c.x, c.y)] || Math.random() > 0.22) continue
+      const [cx, cy] = hexCenter(c.x, c.y)
+      if (!view.contains(cx, cy)) continue
+      const size = c.pop < 4 ? 1 : c.pop < 8 ? 2 : 3
+      const puff = this.add.rectangle(cx - 5 + Math.floor(Math.random() * 3) * 5, cy - 9 - size * 3, 2, 2, 0xdfe2ee, 0.75).setDepth(c.y * 10 + 5)
+      this.tweens.add({ targets: puff, x: puff.x + 5 + Math.random() * 4, y: puff.y - 11, alpha: 0, duration: 1900, onComplete: () => puff.destroy() })
+    }
+    if (this.wonderTile >= 0 && me.visible[this.wonderTile] && Math.random() < 0.5) {
+      const [, wy, px, py] = this.tilePos(this.wonderTile)
+      const sp = this.add.rectangle(px + 7 + Math.random() * 18, py - 10 + Math.random() * 22, 1, 1, Math.random() < 0.5 ? 0xfff6c8 : 0xf2c230).setDepth(wy * 10 + 6)
+      this.tweens.add({ targets: sp, alpha: 0, y: sp.y - 3, duration: 650, onComplete: () => sp.destroy() })
+    }
+    // Čas od času přeletí přes výřez hejno ptáků.
+    if (--this.flockAt <= 0) {
+      this.flockAt = 110 + Math.floor(Math.random() * 140)
+      const n = 3 + Math.floor(Math.random() * 3)
+      const y0 = view.y + view.height * (0.15 + Math.random() * 0.6)
+      const dur = (view.width + 120) / 26 * 1000
+      for (let k = 0; k < n; k++) {
+        const b = this.add.sprite(view.x - 20 - k * 9 - Math.random() * 4, y0 + (k % 2 ? -1 : 1) * Math.ceil(k / 2) * 6, 'bird', 'up').setDepth(D_FOG + 3).setAlpha(0.85)
+        b.play({ key: 'bird', startFrame: k % 2 })
+        this.tweens.add({ targets: b, x: b.x + view.width + 120, y: b.y - 18, duration: dur, onComplete: () => b.destroy() })
       }
     }
   }
@@ -554,6 +664,7 @@ export class MapScene extends Phaser.Scene {
   }
 
   showSelection(u: Unit | null, reach: number[], targets: number[]): void {
+    this.selId = u?.id ?? -1
     this.clearMarks()
     if (!u) { this.selRing.setVisible(false); return }
     this.selRing.setVisible(true).setPosition(u.x * TILE_W + (u.y & 1) * 16, u.y * ROW_H)
@@ -561,6 +672,14 @@ export class MapScene extends Phaser.Scene {
       const [, y, px, py] = this.tilePos(i)
       this.marks.push(this.add.image(px, py, A, 'hex_move').setOrigin(0, 0).setTint(0xbfe8ff).setAlpha(0.75).setDepth(y * 10 + 5))
     }
+    for (const i of targets) {
+      const [, y, px, py] = this.tilePos(i)
+      this.marks.push(this.add.image(px, py, A, 'hex_attack').setOrigin(0, 0).setDepth(y * 10 + 9))
+    }
+  }
+
+  /** Červené rámy cílů (střelba z hradeb otevřeného města); dosavadní značky nechává. */
+  showTargets(targets: number[]): void {
     for (const i of targets) {
       const [, y, px, py] = this.tilePos(i)
       this.marks.push(this.add.image(px, py, A, 'hex_attack').setOrigin(0, 0).setDepth(y * 10 + 9))
@@ -606,22 +725,56 @@ export class MapScene extends Phaser.Scene {
     this.marks.push(this.add.image(px + 25, py + 7, A, 'ic_tip').setDepth(D_FOG - 9))
   }
 
+  /** Šedobílé obrázky vylepšení a města pro návrhy na mapě (textura „ghost“). */
+  private makeGhosts(): void {
+    if (this.textures.exists('ghost')) return
+    const names = ['i_farm', 'i_mine', 'i_pasture', 'i_lumber', 'city_1'].filter(n => this.textures.get(A).has(n))
+    const frames = names.map(n => this.textures.getFrame(A, n))
+    const tex = this.textures.createCanvas('ghost', frames.reduce((a, f) => a + f.cutWidth + 2, 0), Math.max(...frames.map(f => f.cutHeight)))!
+    const ctx = tex.getContext()
+    let x = 0
+    frames.forEach((f, k) => {
+      ctx.drawImage(f.source.image as CanvasImageSource, f.cutX, f.cutY, f.cutWidth, f.cutHeight, x, 0, f.cutWidth, f.cutHeight)
+      const img = ctx.getImageData(x, 0, f.cutWidth, f.cutHeight)
+      const d = img.data
+      for (let q = 0; q < d.length; q += 4) {
+        // stín pod obrázkem (poloprůhledný) pryč, zbytek do světlé šedi
+        if (d[q + 3] < 255) { d[q + 3] = 0; continue }
+        const l = Math.round(105 + (0.3 * d[q] + 0.59 * d[q + 1] + 0.11 * d[q + 2]) * 0.59)
+        d[q] = l; d[q + 1] = l; d[q + 2] = Math.min(255, l + 8)
+      }
+      ctx.putImageData(img, x, 0)
+      tex.add(names[k], 0, x, 0, f.cutWidth, f.cutHeight)
+      x += f.cutWidth + 2
+    })
+    tex.refresh()
+  }
+
+  /** Návrh na mapě: šedobílý obrázek, který pomalu bliká, aby nešel splést s hotovou stavbou. */
+  private ghost(frame: string, x: number, y: number, scale: number): void {
+    const has = this.textures.get('ghost').has(frame)
+    const img = this.add.image(x, y, has ? 'ghost' : A, frame).setScale(scale).setAlpha(0.95).setDepth(D_FOG - 11)
+    this.marks.push(img)
+    this.markTweens.push(this.tweens.add({ targets: img, alpha: 0.3, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }))
+  }
+
+  /** Návrhy pro dělníky: světlý rám a blikající šedobílé vylepšení. */
   showJobs(jobs: { i: number; job: string }[], best = -1): void {
     if (best >= 0) this.tipIcon(best)
     for (const { i, job } of jobs) {
       const [, y, px, py] = this.tilePos(i)
-      this.marks.push(this.add.image(px, py, A, 'hex_move').setOrigin(0, 0).setTint(0x8dffb0).setAlpha(0.8).setDepth(y * 10 + 5))
-      this.marks.push(this.add.image(px + 16, py + 12, A, `i_${job}`).setScale(0.5).setAlpha(0.9).setDepth(D_FOG - 12))
+      this.marks.push(this.add.image(px, py, A, 'hex_move').setOrigin(0, 0).setTint(0xe8ecf5).setAlpha(0.7).setDepth(y * 10 + 5))
+      this.ghost(`i_${job}`, px + 16, py + 12, 0.5)
     }
   }
 
-  /** Doporučená místa pro město: zlatý rám a zmenšené město, nejlepší místo výrazněji. */
-  showSites(sites: { i: number; best: boolean }[], nation: string): void {
+  /** Doporučená místa pro město: světlý rám a blikající šedobílé město, nejlepší místo větší. */
+  showSites(sites: { i: number; best: boolean }[], _nation: string): void {
     for (const { i, best } of sites) {
       if (best) this.tipIcon(i)
       const [, , px, py] = this.tilePos(i)
-      this.marks.push(this.add.image(px, py, A, 'hex_worked').setOrigin(0, 0).setTint(best ? 0xffd23a : 0xfff2a8).setAlpha(best ? 1 : 0.75).setDepth(D_FOG - 12))
-      this.marks.push(this.add.image(px + 16, py + 8, A, `city_1_${nation}`).setScale(best ? 0.6 : 0.45).setAlpha(best ? 0.95 : 0.8).setDepth(D_FOG - 11))
+      this.marks.push(this.add.image(px, py, A, 'hex_worked').setOrigin(0, 0).setTint(best ? 0xffffff : 0xcfd5e2).setAlpha(best ? 1 : 0.7).setDepth(D_FOG - 12))
+      this.ghost('city_1', px + 16, py + 8, best ? 0.6 : 0.45)
     }
   }
 

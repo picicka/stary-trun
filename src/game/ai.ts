@@ -6,7 +6,7 @@ import {
   assignWorkers, atWar, attack, availableTechs, buy, buyCost, canBuildBuilding, canBuildUnit, canFoundCity, cityAt, citiesOf, cityMaxHp, cityStrength, cityYields, unitStrength, SIEGE_UNITS,
   declareWar, foundCity, idx, improvementsFor, isCivilian, isCoastal, isNaval, isWater, stopUnit, itemCost, makePeace, makeUnit, militaryAt, militaryPower, moveUnit, neighbors,
   note, pathMap, pathTo, playerIncome, previewAttack, startWork, tileYield, tilesWithin, unitsAt, unitsOf, updateVisibility, emit,
-  canWork, hasRoad, hasTech, isEmbarked, resourceCap, resourceVisible, unitsNeeding, upgradeBlock, upgradeCost, upgradeUnit,
+  canWork, followAll, hasRoad, hasTech, isEmbarked, resourceCap, resourceVisible, unitsNeeding, upgradeBlock, upgradeCost, upgradeUnit,
   type PathMap,
 } from './rules.ts'
 import { barbId, type BuildItem, type City, type GameState, type Player, type Unit } from './types.ts'
@@ -745,6 +745,7 @@ export function autoUnits(s: GameState, pid = 0): void {
       note(s, pid, `${UNITS[u.type].name}: není už co zkoumat, automatický průzkum končí.`, 'info', u.x, u.y)
     }
   }
+  followAll(s, pid)
 }
 
 /** Pošle jednotku k nejbližší hranici poznaného světa; false = není kam. */

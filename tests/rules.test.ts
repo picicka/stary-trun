@@ -453,3 +453,47 @@ test('startovní místa se protáčejí a barbaři ze sousedního tábora útoč
   assert.ok(attacked, 'barbaři zaútočili na sousední jednotku')
   drainEvents()
 })
+
+test('zaměření města přeskupí obyvatele a nenechá město hladovět', async () => {
+  const { createGame } = await import('../src/game/state.ts')
+  const { exec } = await import('../src/game/commands.ts')
+  const { cityYields, unitsOf } = await import('../src/game/rules.ts')
+  const s = createGame('aur', 'normal', 'valley', 11)
+  exec(s, 0, { t: 'found', unit: unitsOf(s, 0).find(u => u.type === 'settler')!.id })
+  const c = s.cities[0]
+  c.pop = 5
+  const y = (focus: 'food' | 'prod' | 'gold' | null) => { assert.ok(exec(s, 0, { t: 'focus', city: c.id, focus }).ok); assert.equal(c.worked.length, 5); return cityYields(s, c) }
+  const auto = y(null), food = y('food'), prod = y('prod'), gold = y('gold')
+  assert.equal(c.focus, 'gold')
+  assert.ok(food.food >= auto.food && food.food >= prod.food && food.food >= gold.food)
+  assert.ok(prod.prod >= auto.prod && prod.prod >= food.prod && prod.prod >= gold.prod)
+  assert.ok(gold.gold >= auto.gold && gold.gold >= food.gold && gold.gold >= prod.gold)
+  assert.ok(food.food > prod.food || prod.prod > food.prod, 'zaměření něco mění')
+  if (food.foodNet >= 0) { assert.ok(prod.foodNet >= 0, 'výroba nevyhladoví'); assert.ok(gold.foodNet >= 0, 'zlato nevyhladoví') }
+  y(null); assert.equal(c.focus, undefined)
+})
+
+test('střelba z hradeb: hráč vybere cíl, město střílí jednou za tah', async () => {
+  const { createGame } = await import('../src/game/state.ts')
+  const { exec } = await import('../src/game/commands.ts')
+  const { cityShoot, declareWar, drainEvents, makeUnit, neighbors, unitsOf, updateVisibility } = await import('../src/game/rules.ts')
+  const s = createGame('aur', 'normal', 'valley', 11)
+  exec(s, 0, { t: 'found', unit: unitsOf(s, 0).find(u => u.type === 'settler')!.id })
+  const c = s.cities[0]
+  declareWar(s, 0, 1)
+  const free = neighbors(s, c.x, c.y).filter(([x, y]) => !s.units.some(u => u.x === x && u.y === y) && s.tiles[y * s.W + x].t !== 'mountain' && s.tiles[y * s.W + x].t !== 'coast' && s.tiles[y * s.W + x].t !== 'ocean')
+  const weak = makeUnit(s, 1, 'warrior', free[0][0], free[0][1]), strong = makeUnit(s, 1, 'warrior', free[1][0], free[1][1])
+  weak.hp = 60
+  updateVisibility(s, 0)
+  // Hráč míří na silnější jednotku, i když by město samo zvolilo slabší.
+  assert.ok(exec(s, 0, { t: 'cityShoot', city: c.id, x: strong.x, y: strong.y }).ok)
+  assert.ok(strong.hp < 100)
+  assert.equal(weak.hp, 60)
+  assert.equal(exec(s, 0, { t: 'cityShoot', city: c.id, x: weak.x, y: weak.y }).ok, false, 'podruhé v tahu už ne')
+  assert.equal(exec(s, 0, { t: 'cityShoot', city: c.id, x: c.x + 5, y: c.y }).ok, false)
+  drainEvents()
+  // Bez volby hráče střílí město samo na nejslabší jednotku.
+  delete c.fired
+  assert.ok(cityShoot(s, c))
+  assert.ok(weak.hp < 60)
+})

@@ -1,6 +1,17 @@
 // ---------------------------------------------------------------- features & improvements (tall 32x48)
 // Object art is drawn on a 30x46 canvas (outline adds 1px). Footprint there: y 15..46, centre (15, 31).
-sprite("_tree_r", `
+// Strom a jeho podoba ve větru ("_w"): koruna o pixel vpravo, kmen a spodek koruny stojí.
+const tree = (name, art) => {
+  const rows = art.trim().split("\n").map((r) => r.trim())
+  sprite(name, rows.map((r) => r + ".").join("\n"))
+  sprite(name + "_w", rows.map((r, i) => (i < rows.length - 4 ? "." + r : r + ".")).join("\n"))
+}
+// Les a jeho snímek ve větru.
+const forest = (name, shadow, trees) => {
+  tall(name, shadow, ...trees.map(([t, x, y]) => stamp(t, x, y)))
+  tall(name + "_w", shadow, ...trees.map(([t, x, y]) => stamp(t + "_w", x, y)))
+}
+tree("_tree_r", `
   ...hgg...
   ..hgGGG..
   .hgGGGGH.
@@ -11,7 +22,7 @@ sprite("_tree_r", `
   ..HHHJJ..
   ....B....
   ....b....`)
-sprite("_tree_r2", `
+tree("_tree_r2", `
   ..hmg..
   .hmgGG.
   hmgGGGH
@@ -20,7 +31,7 @@ sprite("_tree_r2", `
   .GHHHJ.
   ...B...
   ...b...`)
-sprite("_tree_p", `
+tree("_tree_p", `
   ...h...
   ..hGH..
   ..gGH..
@@ -33,7 +44,7 @@ sprite("_tree_p", `
   .GGHHJ.
   ...B...
   ...b...`)
-sprite("_tree_p2", `
+tree("_tree_p2", `
   ..h..
   .hGH.
   .gGH.
@@ -45,12 +56,10 @@ sprite("_tree_p2", `
   ..b..`)
 const shadowBlob = (x, y, rx, ry = 2) => ellipse(x, y, rx, ry, SHADOW)
 
-tall("f_forest_1", [shadowBlob(17, 41, 12, 3), shadowBlob(10, 34, 7, 2)],
-  stamp("_tree_p", 3, 13), stamp("_tree_r", 11, 12), stamp("_tree_p2", 22, 18),
-  stamp("_tree_r2", 1, 24), stamp("_tree_r", 9, 26), stamp("_tree_p", 20, 25))
-tall("f_forest_2", [shadowBlob(16, 41, 12, 3), shadowBlob(20, 33, 7, 2)],
-  stamp("_tree_p", 11, 9), stamp("_tree_r2", 2, 17), stamp("_tree_p", 20, 14),
-  stamp("_tree_p2", 6, 27), stamp("_tree_p", 13, 26), stamp("_tree_r2", 21, 28))
+forest("f_forest_1", [shadowBlob(17, 41, 12, 3), shadowBlob(10, 34, 7, 2)],
+  [["_tree_p", 3, 13], ["_tree_r", 11, 12], ["_tree_p2", 22, 18], ["_tree_r2", 1, 24], ["_tree_r", 9, 26], ["_tree_p", 20, 25]])
+forest("f_forest_2", [shadowBlob(16, 41, 12, 3), shadowBlob(20, 33, 7, 2)],
+  [["_tree_p", 11, 9], ["_tree_r2", 2, 17], ["_tree_p", 20, 14], ["_tree_p2", 6, 27], ["_tree_p", 13, 26], ["_tree_r2", 21, 28]])
 
 // column: lit left, fluted, optional capital; yb = base row
 const column = (c, x, yb, h, cap) => {
@@ -85,7 +94,8 @@ const tent = (c, x, y, hw, h) => {
   c.px(x - 1, y - 1, "B"); c.px(x + 1, y - 1, "B"); c.px(x, y, "B")      // crossed poles
   c.px(x - Math.round(hw / 2), y + h - 3, "l"); c.px(x - Math.round(hw / 2) - 1, y + h - 2, "l"); c.hline(x - hw, y + h, 2 * hw + 2, "b")   // hide patch stitches
 }
-tall("f_camp", [shadowBlob(15, 42, 13, 3)], (c) => {
+// Tábor ve dvou snímcích: oheň plápolá.
+const camp = (name, flick) => tall(name, [shadowBlob(15, 42, 13, 3)], (c) => {
   // palisade arc behind
   for (let i = 0; i < 9; i++) {
     const x = 2 + i * 3, top = 22 - Math.round(Math.sin(i / 8 * Math.PI) * 4) + (i % 2)
@@ -98,8 +108,11 @@ tall("f_camp", [shadowBlob(15, 42, 13, 3)], (c) => {
   c.vline(15, 12, 16, "B"); c.rect(16, 13, 5, 4, "r"); c.hline(16, 16, 5, "R"); c.px(20, 15, "."); c.px(18, 14, "w"); c.px(18, 15, "w")
   // campfire
   c.hline(12, 41, 6, "B"); c.px(11, 41, "t"); c.px(18, 41, "t"); c.px(14, 42, "T")
-  c.rect(13, 38, 4, 3, "a"); c.px(14, 37, "a"); c.px(15, 36, "y"); c.rect(14, 39, 2, 2, "y"); c.px(15, 38, "x"); c.px(13, 38, "r"); c.px(16, 38, "r")
+  if (!flick) { c.rect(13, 38, 4, 3, "a"); c.px(14, 37, "a"); c.px(15, 36, "y"); c.rect(14, 39, 2, 2, "y"); c.px(15, 38, "x"); c.px(13, 38, "r"); c.px(16, 38, "r") }
+  else { c.rect(13, 38, 4, 3, "a"); c.px(15, 37, "a"); c.px(14, 36, "a"); c.px(14, 35, "y"); c.rect(14, 39, 2, 2, "y"); c.px(14, 38, "x"); c.px(13, 39, "r"); c.px(16, 38, "r"); c.px(17, 36, "y") }
 })
+camp("f_camp", false)
+camp("f_camp_w", true)
 
 // Sun Temple: golden stepped pyramid, stair, shrine and sun disc
 tall("f_wonder", [shadowBlob(16, 43, 14, 3)], (c) => {

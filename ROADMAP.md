@@ -60,3 +60,9 @@ Věci, které jsou nasazené, ale nikdo je nevyzkoušel v podmínkách, pro kte
 - [x] Soupeři vedení počítačem v síťové hře: hostitel je přidá v místnosti a vybere jim národ.
 - [x] Encyklopedie ve hře (klávesa K, i z hlavního menu): jednotky, stavby, výzkum, národy, pole a suroviny, pravidla a klávesové zkratky, s odkazy mezi hesly.
 - [x] Přepínání jednotek čekajících na rozkaz: Tab další, Shift + Tab předchozí.
+- [x] Obrázky na pozadí technologií ve stromu výzkumu a oživená mapa: vítr v lesích, ohně táborů, kouř nad městy, ptáci, stíny mraků a přešlapující vybraná jednotka.
+- [x] Kurzor myši podle záměru vybrané jednotky; levé tlačítko vlastní jednotku vždy vybírá, pravé k ní posílá.
+- [x] Doprovod: vojenská jednotka se sváže s civilní a chodí s ní (klávesa G).
+- [x] Návrhy pro dělníky a osadníky jako šedobílé blikající značky.
+- [x] Zaměření města na jídlo, výrobu, nebo zlato: obyvatelé se sami přeskupí.
+- [x] Střelba z hradeb na cíl, který si hráč vybere v otevřeném městě.

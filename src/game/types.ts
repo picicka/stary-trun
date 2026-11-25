@@ -21,6 +21,8 @@ export interface Tile {
 
 export type BuildItem = { kind: 'unit'; id: UnitId } | { kind: 'building'; id: BuildingId }
 
+export type CityFocus = 'food' | 'prod' | 'gold'
+
 export interface City {
   id: number
   owner: number
@@ -43,6 +45,10 @@ export interface City {
   seat: number
   /** Indexy polí, na kterých obyvatelé pracují. */
   worked: number[]
+  /** Zaměření města: čemu dávají obyvatelé při výběru polí přednost (bez hodnoty = vyváženě). */
+  focus?: CityFocus
+  /** Město už v tomto tahu vystřelilo z hradeb (na cíl, který vybral hráč). */
+  fired?: boolean
 }
 
 export interface Unit {
@@ -71,6 +77,8 @@ export interface Unit {
   sea: boolean
   workLeft: number
   goto: [number, number] | null
+  /** Doprovod: id vlastní civilní jednotky, kterou tato vojenská jednotka následuje a chrání. */
+  escort?: number
   /** Další průjezdní body po dosažení cíle (fronta rozkazů). */
   way: [number, number][]
   /** Automatika: dělníci sami vylepšují pole, ostatní zkoumají mapu. */

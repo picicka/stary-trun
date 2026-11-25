@@ -6,16 +6,17 @@ import type { PromoId, ScenarioId, TraditionId } from './game/data.ts'
 import { hexDist } from './game/hex.ts'
 import {
   atWar, availableTechs, canFoundCity, cityAt, cityById, citiesOf, cityWorkable, drainEvents, idx, isCivilian, isEmbarked,
-  isNaval, traditionReady, tileJobs, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
+  cityTargets, escortOf, inMap, isNaval, isWater, traditionReady, tileJobs, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
   type PathMap,
 } from './game/rules.ts'
 import { actors, canAct, clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
 import { cleanCode, ClientSession, HostSession, roomCode, type Lobby, type NetEvents, type NetGame, type SavedSeat, type Session } from './net/session.ts'
 import { localTransport, NetError, peerTransport, type Transport } from './net/transport.ts'
-import type { BuildItem, City, GameState, JobId, Unit } from './game/types.ts'
+import type { BuildItem, City, CityFocus, GameState, JobId, Unit } from './game/types.ts'
 import { sfx, unlockAudio } from './audio.ts'
 import { Hud } from './ui/hud.ts'
 import type { MapHost, MapScene } from './view/MapScene.ts'
+import type { CursorKind } from './view/cursor.ts'
 
 export type Attention = { kind: 'research' } | { kind: 'tradition' } | { kind: 'city'; city: City } | { kind: 'unit'; unit: Unit } | { kind: 'end' }
 
@@ -456,6 +457,9 @@ export class App implements MapHost {
       this.scene.showWorked(c.worked, cityWorkable(this.state, c))
       this.scene.showCityRing(c.x, c.y)
       this.scene.showWorked(c.worked, cityWorkable(this.state, c))
+      // Cíle pro střelbu z hradeb: město střílí jednou za tah, cíl lze vybrat kliknutím.
+      if (this.myTurn && !c.fired) for (const t of cityTargets(this.state, c)) if (this.player.visible[idx(this.state, t.x, t.y)]) this.targets.add(idx(this.state, t.x, t.y))
+      this.scene.showTargets([...this.targets])
       return
     }
     if (!u || u.owner !== this.me) { this.selUnit = -1; this.scene.showSelection(null, [], []); return }
@@ -512,6 +516,29 @@ export class App implements MapHost {
     if (!this.inGame) return
     this.computeSelection()
     this.hud.render()
+    this.scene.setCursor(this.intent(...this.scene.lastHover))
+  }
+
+  /** Co udělá kliknutí na pole – podle toho se mění kurzor myši. Drží se pořadí v `onTileClick`. */
+  private intent(x: number, y: number): CursorKind {
+    const s = this.state
+    if (x < 0 || !inMap(s, x, y) || this.busy || s.over || this.hud.modalOpen) return ''
+    const i = idx(s, x, y)
+    const own = unitsAt(s, x, y).some(o => o.owner === this.me) || cityAt(s, x, y)?.owner === this.me
+    const u = this.myTurn ? this.unit : undefined
+    if (!u && this.city && this.targets.has(i)) return 'shoot'
+    if (!u) return own ? 'select' : ''
+    const path = () => !!this.pm && !!pathTo(s, this.pm, x, y)
+    if (this.roadMode) return path() ? 'road' : 'no'
+    if (this.targets.has(i)) return previewAttack(s, u, x, y)?.ranged ? 'shoot' : 'attack'
+    const here = u.x === x && u.y === y
+    if (here) return own ? 'select' : ''
+    if (u.type === 'settler' && this.sites.has(i)) return 'found'
+    if (this.jobs.has(i)) return 'work'
+    if (own) return 'select'
+    if (!path()) return 'no'
+    // Neprozkoumané pole neprozradí, že je to voda.
+    return this.player.explored[i] && !isNaval(u) && !isEmbarked(s, u) && isWater(s.tiles[i]) ? 'embark' : 'move'
   }
 
   // ------------------------------------------------------------ akce
@@ -552,6 +579,11 @@ export class App implements MapHost {
     const i = idx(s, x, y)
     // Mimo svůj tah si hráč síťové hry může jen prohlížet a vybírat.
     const u = this.myTurn ? this.unit : undefined
+    const from = this.city
+    if (!u && from && this.myTurn && !right && this.targets.has(i)) {
+      void this.run(() => { const r = this.cmd({ t: 'cityShoot', city: from.id, x, y }); if (!r.ok && r.text) this.hud.toast(r.text) })
+      return
+    }
     if (u && this.roadMode) {
       this.roadMode = false
       if (right) { this.refresh(); return }
@@ -572,16 +604,16 @@ export class App implements MapHost {
         })
         return
       }
-      // Dělníci: klik na pole se zelenou značkou = dojít tam a postavit vylepšení.
+      // Dělníci: klik na pole se značkou návrhu = dojít tam a postavit vylepšení.
       const job = this.jobs.get(i)
       if (job && !right && !shift && !(u.x === x && u.y === y)) {
         sfx('build')
         void this.run(() => { this.cmd({ t: 'move', unit: u.id, x, y, todo: job as JobId }) }).then(() => { const v = this.unit; if (v && (v.work || v.moves <= 0 || v.goto)) this.autoAdvance() })
         return
       }
-      // Levé tlačítko pošle jednotku i na vzdálené pole; na poli s vlastní jednotkou či městem místo toho vybírá.
+      // Levé tlačítko pošle jednotku i na vzdálené pole; na poli s vlastní jednotkou či městem vždy vybírá (tam posílá pravé tlačítko).
       const own = unitsAt(s, x, y).some(o => o.owner === this.me) || cityAt(s, x, y)?.owner === this.me
-      if (!(u.x === x && u.y === y) && (right || shift || this.reach.has(i) || !own)) { this.orderMove(u, x, y, shift); return }
+      if (!(u.x === x && u.y === y) && (right || shift || !own)) { this.orderMove(u, x, y, shift); return }
     }
     if (right) return
     // Výběr: postupně voják, civilista, město.
@@ -635,7 +667,7 @@ export class App implements MapHost {
   }
 
   idleUnits(): Unit[] {
-    return unitsOf(this.state, this.me).filter(u => u.moves > 0 && !u.skip && !u.sleep && !u.fortified && !u.work && !u.goto && !u.auto && !u.roadTo)
+    return unitsOf(this.state, this.me).filter(u => u.moves > 0 && !u.skip && !u.sleep && !u.fortified && !u.work && !u.goto && !u.auto && !u.roadTo && u.escort === undefined)
   }
 
   attention(): Attention {
@@ -706,6 +738,15 @@ export class App implements MapHost {
       if (this.cmd({ t: 'work', unit, job }).ok) { sfx('build'); this.hud.toast(`${job === 'road' ? 'Cesta' : IMPROVEMENTS[job].name}: hotovo za ${u.workLeft} tahy.`); this.save(); this.autoAdvance(); this.refresh() }
       return
     }
+    if (a === 'escort') {
+      // Doprovod: přednost má civilista na stejném poli, jinak ten hned vedle, který doprovod ještě nemá.
+      const near = unitsOf(s, this.me).filter(o => isCivilian(o) && hexDist(o.x, o.y, u.x, u.y) <= 1)
+        .sort((p, q) => hexDist(p.x, p.y, u.x, u.y) - hexDist(q.x, q.y, u.x, u.y) || Number(!!escortOf(s, p)) - Number(!!escortOf(s, q)))
+      const ward = near[0]
+      if (!ward) { sfx('error'); this.hud.toast('U jednotky nestojí žádná vaše civilní jednotka.'); return }
+      void this.run(() => { this.cmd({ t: 'escort', unit, ward: ward.id }) }).then(() => { this.hud.toast(`${UNITS[u.type].name} doprovází jednotku ${UNITS[ward.type].name}: půjde všude s ní.`); this.autoAdvance() })
+      return
+    }
     if (a === 'roadto') { this.roadMode = !this.roadMode; sfx('click'); if (this.roadMode) this.hud.toast('Klikněte na pole, kam má cesta vést (pravé tlačítko ruší).'); this.refresh(); return }
     if (a.startsWith('promo:')) {
       if (this.cmd({ t: 'promo', unit, id: a.slice(6) as PromoId }).ok) { sfx('quest'); this.commit() }
@@ -760,6 +801,13 @@ export class App implements MapHost {
   advise(c: City): void {
     if (!this.cmd({ t: 'advise', city: c.id }).ok) return
     sfx('build')
+    this.commit()
+  }
+
+  /** Zaměření města: obyvatelé se hned přeskupí. */
+  focusCity(c: City, focus: CityFocus | null): void {
+    if (!this.cmd({ t: 'focus', city: c.id, focus }).ok) return
+    sfx('click')
     this.commit()
   }
 
@@ -820,6 +868,7 @@ export class App implements MapHost {
   onHover(x: number, y: number): void {
     if (!this.inGame) return
     this.hud.hover(x, y)
+    this.scene.setCursor(this.intent(x, y))
     const u = this.unit
     this.hoverEta = -1
     if (!u || this.busy || x < 0 || !this.pm) { this.scene.clearPath(); return }
@@ -858,6 +907,7 @@ export class App implements MapHost {
     else if (k === 'f' && !isCivilian(u) && !isEmbarked(this.state, u)) this.unitAction('fortify')
     else if (k === 'e' && (u.type === 'worker' || u.type === 'scout' || isNaval(u))) this.unitAction('auto')
     else if (k === 'r' && u.type === 'worker') this.unitAction('roadto')
+    else if (k === 'g' && !isCivilian(u) && !isNaval(u)) this.unitAction(u.escort === undefined ? 'escort' : 'wake')
     else if (k === 'u' && !isCivilian(u)) this.unitAction('upgrade')
     else if (k === 'z') this.unitAction('sleep')
     else if (k === 'x') this.unitAction('skip')

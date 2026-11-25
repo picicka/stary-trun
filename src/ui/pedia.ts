@@ -89,7 +89,18 @@ function buildingsTab(): string {
 
 // ---------------------------------------------------------------- výzkum
 
-function techEntry(id: TechId): string {
+/** Obrázek k technologii: to hlavní, co odemyká (jednotka, stavba, nebo vylepšení pole). */
+export function techArtUrl(id: TechId, nation: NationId): string {
+  if (id === 'irrigation') return `${UI}r_wheat.png`
+  const unit = UNIT_IDS.find(u => UNITS[u].tech === id && !UNITS[u].replaces)
+  if (unit) return unitIconUrl(unit, nation)
+  const b = BUILDING_IDS.find(o => BUILDINGS[o].tech === id)
+  if (b) return `${UI}b_${b}.png`
+  const imp = (Object.keys(IMPROVEMENTS) as ImprovementId[]).find(i => IMPROVEMENTS[i].tech === id)
+  return imp ? `${UI}i_${imp}.png` : ''
+}
+
+function techEntry(id: TechId, nation: NationId): string {
   const d = TECHS[id]
   const facts: string[] = []
   facts.push(fact('Vyžaduje', d.req.length ? list(d.req.map(techLink)) : 'nic, jde zkoumat od začátku'))
@@ -102,15 +113,15 @@ function techEntry(id: TechId): string {
   if (imps.length) facts.push(fact('Vylepšení polí', list(imps)))
   const next = TECH_IDS.filter(t => TECHS[t].req.includes(id))
   if (next.length) facts.push(fact('Vede k', list(next.map(techLink))))
-  return entry('techs', id, '', d.name, stat('sci', d.cost, 'Cena ve vědě'), esc(d.unlocks), facts)
+  return entry('techs', id, `<img class="pi" src="${techArtUrl(id, nation)}" alt="">`, d.name, stat('sci', d.cost, 'Cena ve vědě'), esc(d.unlocks), facts)
 }
 
-function techsTab(): string {
+function techsTab(nation: NationId): string {
   const tiers = [...new Set(TECH_IDS.map(t => TECHS[t].tier))].sort((a, b) => a - b)
   let out = `<p class="plead">${esc(`Technologie se zkoumá, jakmile znáte všechny, které vyžaduje. Počet objevených technologií vás posouvá věky: ${ERAS.slice(1).map(e => `${e.name} při ${e.techs}`).join(', ')}. Kdo do věku vstoupí první, získá na ${GOLDEN_TURNS} tahů zlatý věk.`)}</p>`
   for (const tier of tiers) {
     const ids = TECH_IDS.filter(t => TECHS[t].tier === tier).sort((a, b) => TECHS[a].row - TECHS[b].row)
-    out += `<h4>${tier}. stupeň</h4><div class="pgrid">${ids.map(techEntry).join('')}</div>`
+    out += `<h4>${tier}. stupeň</h4><div class="pgrid">${ids.map(t => techEntry(t, nation)).join('')}</div>`
   }
   return out
 }
@@ -184,7 +195,7 @@ function rulesTab(): string {
       <li>${buildingLink('wonder')}${esc(`: dostavte ho a udržte jeho město ${WONDER_TURNS} tahů. Kdo město s chrámem dobude, přebírá chrám i odpočet.`)}</li>
       <li>${esc('Skóre: po posledním tahu vyhrává národ s nejvyšším skóre.')}</li></ul>
     <h4>Obléhání měst</h4><ul>
-      <li>${esc(`Město má ${TUNE.cityHp} životů, střílí na nepřátele do 2 polí a každý tah si ${TUNE.cityHeal} životů opraví. Dobudete ho tak, že mu životy srazíte na nulu a vstoupíte jednotkou pro boj zblízka.`)}</li>
+      <li>${esc(`Město má ${TUNE.cityHp} životů, jednou za tah střílí na nepřítele do 2 polí (cíl vyberete v otevřeném městě kliknutím, jinak střílí samo na nejslabšího) a každý tah si ${TUNE.cityHeal} životů opraví. Dobudete ho tak, že mu životy srazíte na nulu a vstoupíte jednotkou pro boj zblízka.`)}</li>
       <li>${buildingLink('walls')}: ${esc(walls.desc)} ${buildingLink('bastion')}: ${esc(bastion.desc)}</li>
       <li>${esc(`Obklíčení: stojí-li hned u města aspoň ${SIEGE_UNITS} nepřátelské vojenské jednotky, město se neopravuje.`)}</li>
       <li>${engines}${esc(`: proti městům mají ${num(SIEGE_VS_CITY)}násobný účinek, proti jednotkám jen ${num(SIEGE_VS_UNIT)}násobný. Potřebují doprovod.`)}</li>
@@ -222,7 +233,7 @@ const KEYS: [string, [string, string][]][] = [
   ]],
   ['Vybraná jednotka', [
     ['B', 'Založit město (osadníci).'], ['F', 'Opevnit se (vojenské jednotky).'], ['E', 'Automatika: dělníci vylepšují pole, zvěd a lodě zkoumají mapu.'],
-    ['R', 'Cesta do… (dělníci postaví celou trasu).'], ['U', 'Přezbrojit na novější jednotku.'], ['Z', 'Spát: jednotka přestane čekat na rozkaz.'], ['X', 'Přeskočit tah.'],
+    ['R', 'Cesta do… (dělníci postaví celou trasu).'], ['G', 'Doprovázet civilní jednotku na stejném nebo sousedním poli; znovu G doprovod zruší.'], ['U', 'Přezbrojit na novější jednotku.'], ['Z', 'Spát: jednotka přestane čekat na rozkaz.'], ['X', 'Přeskočit tah.'],
   ]],
   ['Myš', [
     ['Levé tlačítko', 'Výběr jednotky či města; s vybranou jednotkou pohyb na pole nebo útok.'],
@@ -240,6 +251,6 @@ function keysTab(): string {
 
 /** Obsah okna encyklopedie: záložky a zvolená kapitola. `nation` určuje barvy obrázků běžných jednotek. */
 export function pediaHtml(tab: PediaTab, nation: NationId): string {
-  const body = tab === 'units' ? unitsTab(nation) : tab === 'buildings' ? buildingsTab() : tab === 'techs' ? techsTab() : tab === 'nations' ? nationsTab() : tab === 'land' ? landTab() : tab === 'rules' ? rulesTab() : keysTab()
+  const body = tab === 'units' ? unitsTab(nation) : tab === 'buildings' ? buildingsTab() : tab === 'techs' ? techsTab(nation) : tab === 'nations' ? nationsTab() : tab === 'land' ? landTab() : tab === 'rules' ? rulesTab() : keysTab()
   return `<div class="pedia"><div class="ptabs">${PEDIA_TABS.map(([id, name]) => `<button class="tabbtn ${id === tab ? 'on' : ''}" data-a="pedia" data-v="${id}">${esc(name)}</button>`).join('')}</div><div class="pscroll">${body}</div></div>`
 }

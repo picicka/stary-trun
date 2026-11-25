@@ -199,9 +199,20 @@ export function assignWorkers(s: GameState, c: City): void {
   // Zabraná pole nepřítelem (stojí na nich nepřátelská jednotka) nelze obdělávat.
   const free = cand.filter(i => { const u = s.units.find(v => v.y * s.W + v.x === i && !isCivilian(v)); return !u || !atWar(s, u.owner, c.owner) })
   const needFood = c.pop <= 3 ? 3.2 : 2.6
-  const score = (i: number) => { const y = tileYield(s, i, c.owner); return y.food * needFood + y.prod * 2.3 + y.gold * 1.2 }
+  // Zaměření města dá zvolenému výnosu výraznou přednost; ostatní výnosy rozhodují mezi stejně dobrými poli.
+  const w = c.focus === 'food' ? [8, 1.2, 0.8] : c.focus === 'prod' ? [1.5, 8, 0.8] : c.focus === 'gold' ? [1.5, 1.2, 8] : [needFood, 2.3, 1.2]
+  const score = (i: number) => { const y = tileYield(s, i, c.owner); return y.food * w[0] + y.prod * w[1] + y.gold * w[2] }
   free.sort((a, b) => score(b) - score(a))
   c.worked = free.slice(0, c.pop)
+  if (!c.focus || c.focus === 'food') return
+  // Zaměření na výrobu či zlato nesmí město vyhladovět: nejhladovější pole se mění za nejúrodnější volná.
+  const food = (i: number) => tileYield(s, i, c.owner).food
+  for (let n = 0; n < c.pop && cityYields(s, c).foodNet < 0; n++) {
+    const out = [...c.worked].sort((a, b) => food(a) - food(b) || score(a) - score(b))[0]
+    const into = free.filter(i => !c.worked.includes(i)).sort((a, b) => food(b) - food(a) || score(b) - score(a))[0]
+    if (out === undefined || into === undefined || food(into) <= food(out)) break
+    c.worked[c.worked.indexOf(out)] = into
+  }
 }
 
 export function cityYields(s: GameState, c: City): CityYields {
@@ -472,6 +483,39 @@ export function reachable(s: GameState, u: Unit): number[] {
 function clearOrders(u: Unit): void { u.fortified = false; u.sleep = false; u.work = null; u.workLeft = 0 }
 /** Zruší cestu i frontu průjezdních bodů. */
 export function stopUnit(u: Unit): void { u.goto = null; u.way = []; u.todo = null; u.roadTo = null }
+
+/** Vojenská jednotka, která doprovází civilní jednotku `ward`. */
+export function escortOf(s: GameState, ward: Unit): Unit | undefined {
+  return s.units.find(o => o.escort === ward.id && o.owner === ward.owner)
+}
+/** Civilní jednotka, kterou `u` doprovází; zaniklou nebo zajatou vazbu rovnou zruší. */
+export function wardOf(s: GameState, u: Unit): Unit | undefined {
+  if (u.escort === undefined) return undefined
+  const w = s.units.find(o => o.id === u.escort && o.owner === u.owner)
+  if (!w) delete u.escort
+  return w
+}
+/** Proč jednotka nemůže civilistu doprovázet, nebo null. */
+export function escortBlock(s: GameState, u: Unit, ward: Unit | undefined): string | null {
+  if (isCivilian(u) || isNaval(u)) return 'Doprovázet může jen pozemní vojenská jednotka.'
+  if (!ward || ward.owner !== u.owner || !isCivilian(ward)) return 'Doprovázet lze jen vlastní civilní jednotku.'
+  if (hexDist(u.x, u.y, ward.x, ward.y) > 1) return 'Jednotka musí stát u té, kterou má doprovázet.'
+  return null
+}
+/** Doprovod dojde za svým chráněncem, kam až mu pohyb stačí. */
+export function follow(s: GameState, u: Unit): void {
+  const w = wardOf(s, u)
+  if (!w) return
+  u.goto = null; u.way = []
+  if (u.x === w.x && u.y === w.y) return
+  moveUnit(s, u, w.x, w.y)
+  // Co nedošel letos, dožene příště podle toho, kde chráněnec zrovna bude.
+  u.goto = null
+}
+/** Všechny doprovody hráče doženou své chráněnce. */
+export function followAll(s: GameState, pid: number): void {
+  for (const u of unitsOf(s, pid)) if (u.escort !== undefined) follow(s, u)
+}
 
 /** Kolikátý tah od teď jednotka dorazí na konec cesty (0 = ještě v tomto tahu). */
 export function pathTurns(s: GameState, u: Unit, path: [number, number][]): number {
@@ -987,17 +1031,22 @@ function processCity(s: GameState, c: City): void {
   }
   // Opravy a střelba z hradeb.
   if (!besieged(s, c)) c.hp = Math.min(cityMaxHp(c), c.hp + TUNE.cityHeal)
-  cityShoot(s, c)
+  // Kdo si cíl nevybral sám, za toho město vystřelí na konci tahu.
+  if (!c.fired) cityShoot(s, c)
+  delete c.fired
 }
 
-function cityShoot(s: GameState, c: City): void {
-  let target: Unit | null = null
-  for (const u of s.units) {
-    if (isCivilian(u) || !atWar(s, c.owner, u.owner)) continue
-    if (hexDist(c.x, c.y, u.x, u.y) > 2) continue
-    if (!target || u.hp < target.hp) target = u
-  }
-  if (!target) return
+/** Nepřátelské vojenské jednotky v dostřelu hradeb (2 pole). */
+export function cityTargets(s: GameState, c: City): Unit[] {
+  return s.units.filter(u => !isCivilian(u) && atWar(s, c.owner, u.owner) && hexDist(c.x, c.y, u.x, u.y) <= 2)
+}
+
+/** Výstřel z hradeb: na zvolený cíl, jinak na nejslabší jednotku v dostřelu. Vrací true, pokud město vystřelilo. */
+export function cityShoot(s: GameState, c: City, pick?: Unit): boolean {
+  const all = cityTargets(s, c)
+  let target: Unit | null = pick && all.includes(pick) ? pick : null
+  if (!target) for (const u of all) if (!target || u.hp < target.hp) target = u
+  if (!target) return false
   const a = cityStrength(s, c) * 0.62
   const d = unitStrength(s, target, { defending: true }) * ramCover(s, target, c)
   // Ani obléhací stroj nepadne jedinou salvou z hradeb.
@@ -1009,6 +1058,7 @@ function cityShoot(s: GameState, c: City): void {
     note(s, c.owner, `${c.name} zničilo nepřátelskou jednotku (${UNITS[target.type].name}).`, 'good', target.x, target.y)
     killUnit(s, target)
   }
+  return true
 }
 
 // ---------------------------------------------------------------- dělníci
@@ -1537,12 +1587,13 @@ export function beginTurn(s: GameState, pid: number): void {
     for (const u of unitsOf(s, pid)) {
       // Spící jednotku probudí nepřítel na dohled.
       if (u.sleep && enemyNear(s, u, 2)) u.sleep = false
-      if (!u.goto) continue
+      if (!u.goto || u.escort !== undefined) continue
       // Nepřítel na dohled cestu přeruší, ať hráč rozhodne sám.
       if (enemyNear(s, u, 2)) { stopUnit(u); continue }
       moveUnit(s, u, u.goto[0], u.goto[1])
     }
     for (const u of unitsOf(s, pid)) if (u.roadTo && !u.work) { if (enemyNear(s, u, 2)) stopUnit(u); else roadStep(s, u) }
+    followAll(s, pid)
   }
 }
 
