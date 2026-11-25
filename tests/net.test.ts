@@ -35,12 +35,22 @@ class Seat implements NetGame {
   lobby: Lobby | null = null
   closed = ''
   ev = { lobby: (l: Lobby) => { this.lobby = l }, status: (t: string) => { this.log.push(t) }, closed: (w: string) => { this.closed = w } }
-  async apply(pid: number, cmd: Command, hashed: boolean) { exec(this.s!, pid, cmd); const h = hashed ? this.hash() : ''; await tick(1); return h }
+  replays = 0
+  async apply(pid: number, cmd: Command, hashed: boolean, at?: () => void) { await tick(this.lag); exec(this.s!, pid, cmd); at?.(); const h = hashed ? this.hash() : ''; await tick(1); return h }
+  /** Zdržení před provedením cizího příkazu (jako když hostiteli dobíhá animace). */
+  lag = 0
+  async replay(base: string, confirmed: { pid: number; cmd: Command }[], pending: Command[], seat: number) {
+    const s = deserialize(base)!
+    for (const c of confirmed) exec(s, c.pid, c.cmd)
+    for (const c of pending) exec(s, seat, c)
+    this.s = s; this.replays++
+  }
   hash() { return stateHash(this.s!) }
   snapshot() { return serialize(this.s!) }
   load(json: string, seat: number) { this.s = deserialize(json); this.seat = seat; this.loads++ }
   /** Místní hráč zadá příkaz. */
   cmd(c: Command) {
+    this.net.predict()
     const r = exec(this.s!, this.seat, c)
     this.net.local(this.seat, c, c.t === 'endTurn' ? this.hash() : undefined)
     return r
@@ -62,8 +72,8 @@ function room(max = 3) {
     return { g, cs }
   }
   const all: Seat[] = [host]
-  const start = async () => {
-    host.s = createGame(hs.lobby().members[0].nation, 'normal', 'valley', 77, 0, hs.lobby().members.slice(1).map(m => m.nation), { nations: 4 })
+  const start = async (simul = false) => {
+    host.s = createGame(hs.lobby().members[0].nation, 'normal', 'valley', 77, 0, hs.lobby().members.slice(1).map(m => m.nation), { nations: 4, simul })
     hs.start()
     await until(() => all.every(g => g.s), 'všichni mají stav')
   }
@@ -91,25 +101,26 @@ test('kód místnosti', () => {
 test('místnost: připojení, výběr národa, plná hra, jiná verze', async () => {
   const r = room(2)
   const a = r.join('Anna')
-  await a.cs.open(); await tick()
-  assert.equal(r.hs.lobby().members.length, 2)
+  await a.cs.open()
+  await until(() => r.hs.lobby().members.length === 2 && a.g.lobby?.members.length === 2, 'Anna v místnosti')
   assert.equal(a.g.lobby!.you, 1)
   assert.notEqual(a.g.lobby!.members[1].nation, a.g.lobby!.members[0].nation)
-  // Obsazený národ vybrat nejde, volný ano.
-  a.cs.pick(r.hs.lobby().members[0].nation); await tick()
+  // Obsazený národ vybrat nejde, volný ano (zprávy jdou po jednom spojení v pořadí, druhá volba tedy přijde po první).
+  a.cs.pick(r.hs.lobby().members[0].nation)
+  a.cs.pick('lume')
+  await until(() => r.hs.lobby().members[1].nation === 'lume' && a.g.lobby!.members[1].nation === 'lume', 'volba národa')
   assert.notEqual(r.hs.lobby().members[1].nation, r.hs.lobby().members[0].nation)
-  a.cs.pick('lume'); await tick()
-  assert.equal(r.hs.lobby().members[1].nation, 'lume')
-  assert.equal(a.g.lobby!.members[1].nation, 'lume')
   const b = r.join('Bob')
-  await b.cs.open(); await tick()
+  await b.cs.open()
+  await until(() => b.g.closed !== '', 'odmítnutí plné hry')
   assert.match(b.g.closed, /plná/)
   const c = r.join('Cyril', 'c', '2')
-  await c.cs.open(); await tick()
+  await c.cs.open()
+  await until(() => c.g.closed !== '', 'odmítnutí jiné verze')
   assert.match(c.g.closed, /verzi/)
   // Odchod z místnosti uvolní místo.
-  a.cs.close(); await tick(350)
-  assert.equal(r.hs.lobby().members.length, 1)
+  a.cs.close()
+  await until(() => r.hs.lobby().members.length === 1, 'uvolnění místa')
 })
 
 test('tři hráči po síti hrají stejnou hru', async () => {
@@ -192,4 +203,47 @@ test('hostitel obnoví uloženou hru a hráči se vrátí na svá místa', async
   assert.equal(g.hash(), host.hash())
   assert.equal(hs.online(1), false)
   assert.equal(hs.online(2), true)
+})
+
+test('souběžné tahy po síti: hráči táhnou zároveň a stav se shodne i při souběhu', async () => {
+  const r = room()
+  const a = await r.joinIn('Anna'), b = await r.joinIn('Bob')
+  await r.start(true)
+  const seats = [r.host, a.g, b.g]
+  const scout = (g: Seat) => g.s!.units.find(u => u.owner === g.seat && u.type === 'scout')!
+  const settler = (g: Seat) => g.s!.units.find(u => u.owner === g.seat && u.type === 'settler')!
+  // Všichni tři zadají příkaz v téže chvíli, dřív než komukoli dorazí cizí.
+  for (const g of seats) assert.ok(g.cmd({ t: 'found', unit: settler(g).id }).ok, `hráč ${g.seat} založil město`)
+  await until(() => r.same() && r.hs.idle, 'shoda po souběžném založení měst')
+  assert.equal(r.host.s!.cities.length, 3)
+  // Pár kol s pohybem zvědů (odhalování mapy, ruiny, barbaři) a konci tahů v různém pořadí.
+  for (let round = 0; round < 6; round++) {
+    for (const g of seats) {
+      const u = scout(g)
+      if (u) for (const [dx, dy] of [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1]]) if (g.cmd({ t: 'move', unit: u.id, x: u.x + dx, y: u.y + dy }).ok) break
+    }
+    const order = round % 2 ? [2, 0, 1] : [1, 2, 0]
+    for (const i of order) assert.ok(seats[i].cmd({ t: 'endTurn' }).ok, `kolo ${round}: hráč ${i} ukončil tah`)
+    await until(() => r.hs.idle && r.same() && r.host.s!.turn === round + 2, `shoda po kole ${round}`)
+  }
+  assert.equal(r.host.loads + a.g.loads + b.g.loads, 2, 'nikdo nepotřeboval poslat celý stav znovu')
+  assert.ok(a.g.replays + b.g.replays > 0, 'souběh nastal a přepočet proběhl')
+})
+
+test('souběžné tahy po síti: hostitel táhne, zatímco cizí příkaz čeká na provedení', async () => {
+  const r = room(2)
+  const a = await r.joinIn('Anna')
+  await r.start(true)
+  r.host.lag = 30
+  const sa = a.g.s!.units.find(u => u.owner === 1 && u.type === 'settler')!
+  const sh = r.host.s!.units.find(u => u.owner === 0 && u.type === 'settler')!
+  assert.ok(a.g.cmd({ t: 'found', unit: sa.id }).ok)
+  await tick(10)
+  // Annin příkaz už u hostitele leží, ale ještě není proveden; hostitel mezitím táhne sám.
+  assert.ok(r.host.cmd({ t: 'found', unit: sh.id }).ok)
+  assert.ok(r.host.cmd({ t: 'endTurn' }).ok)
+  await until(() => r.hs.idle && r.same(), 'shoda')
+  assert.ok(a.g.cmd({ t: 'endTurn' }).ok)
+  await until(() => r.hs.idle && r.same() && r.host.s!.turn === 2, 'nové kolo')
+  assert.equal(a.g.loads, 1, 'bez opravy celým stavem')
 })

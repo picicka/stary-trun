@@ -29,6 +29,8 @@ await host.fill('#netname', 'Jakub')
 await host.screenshot({ path: `${dir}/1-net.png` })
 await host.click('[data-a="n-host"]')
 await host.click('[data-a="m-nations"][data-v="4"]')
+// Tenhle průchod ověřuje střídání tahů; souběžné tahy má scripts/simul.mjs.
+await host.click('[data-a="m-simul"][data-v="0"]')
 await host.screenshot({ path: `${dir}/2-setup.png` })
 await host.click('[data-a="n-open"]')
 await host.waitForSelector('.roomcode', { timeout: 20000 })

@@ -9,7 +9,7 @@ import {
   isNaval, traditionReady, tileJobs, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
   type PathMap,
 } from './game/rules.ts'
-import { clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
+import { actors, canAct, clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
 import { cleanCode, ClientSession, HostSession, roomCode, type Lobby, type NetEvents, type NetGame, type SavedSeat, type Session } from './net/session.ts'
 import { localTransport, NetError, peerTransport, type Transport } from './net/transport.ts'
 import type { BuildItem, City, GameState, JobId, Unit } from './game/types.ts'
@@ -109,7 +109,7 @@ export class App implements MapHost {
   /** Hraje víc lidí u jednoho počítače? */
   get hotseat(): boolean { return !this.net && this.state.players.filter(p => p.human).length > 1 }
   /** Je místní hráč na tahu? */
-  get myTurn(): boolean { return this.state.cur === this.me }
+  get myTurn(): boolean { return canAct(this.state, this.me) }
   get player() { return this.state.players[this.me] }
 
   /** Provede příkaz místního hráče – jediná cesta, kterou rozhraní mění stav hry. */
@@ -119,6 +119,8 @@ export class App implements MapHost {
       if (!this.myTurn) return { ok: false, text: 'Nejste na tahu.' }
       if (!net.ready) return { ok: false, text: 'Spojení je přerušeno, hra čeká na jeho obnovení.' }
     }
+    // Táhne-li zároveň někdo další, může hostitel jeho příkaz zařadit dřív: uschováme stav pro přepočet.
+    if (net && actors(this.state).length > 1) net.predict()
     const r = exec(this.state, this.me, c)
     net?.local(this.me, c, c.t === 'endTurn' ? stateHash(this.state) : undefined)
     return r
@@ -149,8 +151,10 @@ export class App implements MapHost {
 
   private netGame(): NetGame {
     return {
-      apply: (pid, cmd, hashed) => this.remote(pid, cmd, hashed),
+      apply: (pid, cmd, hashed, at) => this.remote(pid, cmd, hashed, at),
       snapshot: () => serialize(this.state),
+      hash: () => stateHash(this.state),
+      replay: (base, confirmed, pending, seat) => this.replay(base, confirmed, pending, seat),
       load: (json, seat, first) => this.netLoad(json, seat, first),
     }
   }
@@ -243,7 +247,7 @@ export class App implements MapHost {
   }
 
   /** Stav hry od hostitele: začátek hry, návrat do ní, nebo oprava po rozejití. */
-  private netLoad(json: string, seat: number, first: boolean): void {
+  private netLoad(json: string, seat: number, first: boolean, quiet = false): void {
     const s = deserialize(json)
     if (!s || !this.net) return
     const again = this.inGame && !first
@@ -255,7 +259,7 @@ export class App implements MapHost {
       if (first) this.hud.showBriefing()
       else {
         if (view) this.scene.cameras.main.setScroll(view[0], view[1])
-        this.hud.toast(again ? 'Hra se srovnala se stavem u hostitele.' : 'Jste zpět ve hře.')
+        if (!quiet) this.hud.toast(again ? 'Hra se srovnala se stavem u hostitele.' : 'Jste zpět ve hře.')
         if (this.myTurn) { this.showPopups(); this.hud.checkOffers() }
       }
     })
@@ -267,6 +271,7 @@ export class App implements MapHost {
     if (!this.inGame) return ''
     const s = this.state
     const wasMine = this.myTurn
+    const turn = s.turn
     this.busy = true
     let h = ''
     try {
@@ -274,8 +279,9 @@ export class App implements MapHost {
       if (hashed) h = stateHash(s)
       after?.()
       const ev = drainEvents()
-      // Panel na pozadí neanimuje (prohlížeč mu zastaví čas), jen srovná jednotky.
-      if (document.hidden) this.scene.syncUnits()
+      // Panel na pozadí neanimuje (prohlížeč mu zastaví čas), jen srovná jednotky. Stejně tak cizí tah
+      // při souběžných tazích: místní hráč právě táhne sám a animace by mu brala ovládání.
+      if (document.hidden || (wasMine && s.turn === turn)) { this.scene.ensureUnitViews(); this.scene.syncUnits() }
       else { this.scene.ensureUnitViews(); await this.scene.play(ev, cmd.t === 'endTurn') }
     } finally {
       this.busy = false
@@ -288,6 +294,31 @@ export class App implements MapHost {
     if (s.over) this.gameOver()
     else if (!wasMine && this.myTurn) this.turnStarts()
     return h
+  }
+
+  /**
+   * Souběh při souběžných tazích: hostitel zařadil cizí příkaz před naše nepotvrzené. Nový příkaz provedeme
+   * i tady a ověříme, že na pořadí nezáleželo; pokud ano, platí stav přepočítaný v hostitelově pořadí.
+   */
+  private async replay(base: string, confirmed: { pid: number; cmd: Command }[], pending: Command[], seat: number): Promise<void> {
+    for (let k = 0; this.busy && k < 400; k++) await new Promise(r => window.setTimeout(r, 25))
+    if (!this.inGame || !confirmed.length) return
+    const live = this.state
+    const wasMine = this.myTurn
+    const last = confirmed[confirmed.length - 1]
+    exec(live, last.pid, last.cmd)
+    const s = deserialize(base)
+    if (!s) return
+    for (const c of confirmed) exec(s, c.pid, c.cmd)
+    for (const c of pending) exec(s, seat, c)
+    drainEvents()
+    if (stateHash(s) !== stateHash(live)) { this.netLoad(serialize(s), seat, false, true); return }
+    if (this.selUnit >= 0 && !this.unit) this.selUnit = -1
+    if (this.selCity >= 0 && this.city?.owner !== this.me) this.selCity = -1
+    this.scene.ensureUnitViews(); this.scene.syncUnits()
+    this.refresh()
+    if (live.over) this.gameOver()
+    else if (!wasMine && this.myTurn) this.turnStarts()
   }
 
   /** V síťové hře přišel místní hráč na řadu. */
@@ -303,13 +334,19 @@ export class App implements MapHost {
   /** Hostitel může ukončit tah hráče, kterému vypadlo spojení. */
   get canForceEnd(): boolean {
     const net = this.net
-    return !!net && net.role === 'host' && net.started && !this.myTurn && !this.state.over && !net.online(this.state.cur) && net.idle
+    return !!net && net.role === 'host' && net.started && !this.myTurn && !this.state.over && this.offlineActor >= 0 && net.idle
+  }
+
+  /** Hráč, který je na tahu a nemá spojení (-1 = nikdo takový). */
+  get offlineActor(): number {
+    const net = this.net
+    return net ? actors(this.state).find(a => !net.online(a)) ?? -1 : -1
   }
 
   forceEnd(): void {
     const net = this.net
     if (!this.canForceEnd || !net || net.role !== 'host' || this.busy) return
-    const pid = this.state.cur
+    const pid = this.offlineActor
     const cmd: Command = { t: 'endTurn' }
     void this.remote(pid, cmd, false, () => net.local(pid, cmd, stateHash(this.state)))
   }
@@ -621,7 +658,7 @@ export class App implements MapHost {
     if (this.busy || this.state.over || this.hud.modalOpen) return
     if (!this.myTurn) {
       if (this.canForceEnd) {
-        const p = this.state.players[this.state.cur]
+        const p = this.state.players[this.offlineActor]
         this.hud.confirm('Ukončit tah za hráče?', `${this.seatName(p.id) || 'Hráč'} nemá spojení. Národ ${NATIONS[p.nation].name} tento tah nic dalšího neudělá a hra půjde dál; vrátit se do ní dá kdykoli stejným kódem.`, 'Ukončit tah', () => this.forceEnd())
       }
       return

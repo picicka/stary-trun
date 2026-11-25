@@ -148,6 +148,14 @@ export interface GameState {
   /** Lidský hráč, který je právě na tahu. */
   cur: number
   maxTurns: number
+  /**
+   * Souběžné tahy (síťová hra): hráči, kteří se ještě nepotkali, táhnou zároveň; kteří se znají, střídají se mezi sebou.
+   * `groups[pid]` = skupina hráče v tomto kole (nejnižší id ve skupině), `done` = kdo už kolo ukončil, `begun` = komu kolo začalo.
+   */
+  simul?: boolean
+  groups?: number[]
+  done?: number[]
+  begun?: number[]
   difficulty: Difficulty
   W: number
   H: number

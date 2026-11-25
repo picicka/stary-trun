@@ -8,7 +8,7 @@ import {
   adoptTradition, atWar, attack, buy, canFoundCity, canWork, cityAt, cityById, declareWar, dequeue, enqueue, foundCity, killUnit, makePeace, moveUnit, note, pathMap, pathTo,
   planResearch, previewAttack, promote, promoteUnit, roadStep, startWork, stopUnit, unitById, unitsOf, updateVisibility, upgradeBlock, upgradeUnit,
 } from './rules.ts'
-import { endTurn } from './state.ts'
+import { canAct, endTurn, settle } from './state.ts'
 import { barbId, type BuildItem, type GameState, type JobId } from './types.ts'
 
 export type Command =
@@ -58,10 +58,17 @@ export const tipKey = (pid: number, id: string): string => (pid ? `${pid}:${id}`
 
 /** Provede příkaz hráče `pid`. Příkaz mimo pořadí, s cizí jednotkou či městem nebo proti pravidlům odmítne a stav nezmění. */
 export function exec(s: GameState, pid: number, c: Command): Result {
+  const r = run(s, pid, c)
+  // Souběžné tahy: po příkazu mohl někdo přijít na řadu (nebo vypadnout ze hry).
+  if (s.simul && r.ok) settle(s)
+  return r
+}
+
+function run(s: GameState, pid: number, c: Command): Result {
   if (s.over) return no('Hra skončila.')
   const me = s.players[pid]
   if (!me || !me.human || !me.alive) return no('Tento hráč nehraje.')
-  if (pid !== s.cur) return no('Nejste na tahu.')
+  if (!canAct(s, pid)) return no('Nejste na tahu.')
 
   if ('unit' in c) {
     const u = unitById(s, c.unit)
@@ -144,7 +151,7 @@ export function exec(s: GameState, pid: number, c: Command): Result {
     case 'tradition': return adoptTradition(s, me, c.id) ? OK : no()
     case 'research': return planResearch(me, c.tech, !!c.append) ? OK : no()
     case 'tip': { const k = tipKey(pid, c.id); if (!s.tutorial.includes(k)) s.tutorial.push(k); return OK }
-    case 'endTurn': endTurn(s); return OK
+    case 'endTurn': endTurn(s, pid); return OK
     case 'war': case 'peace': case 'diplo': {
       const they = s.players[c.vs]
       if (!they || c.vs === pid || c.vs === barbId(s) || !they.alive) return no()

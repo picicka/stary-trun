@@ -3,7 +3,7 @@ import { MAX_NATIONS, NATIONS, PLAYABLE, SCENARIOS, type Difficulty, type Nation
 import { aiTurn, autoUnits, barbTurn } from './ai.ts'
 import { generateScenario, ISLANDS_SEEDS, tierOf, VALLEY_SEEDS, type MapOptions } from './mapgen.ts'
 import { rand, type RngHolder } from './rng.ts'
-import { eraOf, beginTurn, checkVictory, endPlayerTurn, idx, makeUnit, neighbors, noteAll, unitsAt, updateVisibility } from './rules.ts'
+import { eraOf, beginTurn, checkVictory, endPlayerTurn, idx, makeUnit, neighbors, note, noteAll, unitsAt, updateVisibility } from './rules.ts'
 import { TERRAIN } from './data.ts'
 import { barbId, type GameState, type Player } from './types.ts'
 
@@ -41,6 +41,8 @@ export interface GameOptions {
   map?: Omit<MapOptions, 'players'>
   /** Délka hry v tazích. */
   maxTurns?: number
+  /** Souběžné tahy hráčů, kteří se ještě nepotkali (síťová hra). */
+  simul?: boolean
 }
 
 /** Národy soupeřů řízených počítačem: vylosují se ze zbylých, střídavě výbojný a stavitel, dokud je z čeho brát. */
@@ -111,6 +113,7 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
   }
   // V souostroví umějí plout všichni od začátku.
   if (scenario === 'islands') for (const p of players) if (p.id !== BARB && !p.techs.includes('sailing')) p.techs.push('sailing')
+  if (opts.simul && humans.length > 1) { s.simul = true; s.done = []; s.groups = turnGroups(s); s.begun = players.filter(p => p.human).map(p => p.id) }
   for (const p of players) updateVisibility(s, p.id)
   noteAll(s, `Vítejte: ${SCENARIOS[scenario].name}. Založte první město – vyberte osadníky a zvolte „Založit město“.`, 'info')
   return s
@@ -135,12 +138,79 @@ export function aiRound(s: GameState): void {
   checkVictory(s)
 }
 
+// ---------------------------------------------------------------- souběžné tahy
+
+/** Skupiny hráčů, kteří se navzájem znají (i přes prostředníka): `groups[pid]` = nejnižší id ve skupině, u počítače -1. */
+export function turnGroups(s: GameState): number[] {
+  const g = s.players.map(p => (p.human && p.alive ? p.id : -1))
+  const find = (a: number): number => (g[a] === a ? a : (g[a] = find(g[a])))
+  for (const a of s.players) for (const b of s.players) {
+    if (a.id >= b.id || g[a.id] < 0 || g[b.id] < 0 || !a.met.includes(b.id)) continue
+    const ra = find(a.id), rb = find(b.id)
+    if (ra !== rb) g[Math.max(ra, rb)] = Math.min(ra, rb)
+  }
+  return g.map((v, i) => (v < 0 ? -1 : find(i)))
+}
+
+/** Smí hráč právě teď táhnout? Bez souběžných tahů jen ten, kdo je na řadě; s nimi každý, na koho ve skupině nikdo nečeká. */
+export function canAct(s: GameState, pid: number): boolean {
+  const p = s.players[pid]
+  if (s.over || !p || !p.human || !p.alive) return false
+  if (!s.simul) return pid === s.cur
+  const done = s.done ?? [], g = s.groups ?? []
+  if (done.includes(pid)) return false
+  return !s.players.some(q => q.id < pid && q.human && q.alive && g[q.id] === g[pid] && !done.includes(q.id))
+}
+
+/** Hráči, kteří právě teď smějí táhnout. */
+export function actors(s: GameState): number[] {
+  return s.players.filter(p => canAct(s, p.id)).map(p => p.id)
+}
+
 /**
- * Ukončí tah hráče, který je na řadě (`s.cur`). Je-li ve hře další lidský hráč, přijde na řadu on;
+ * Souběžné tahy: zahájí tah těm, kdo přišli na řadu, a když už nemá kdo táhnout, odehraje soupeře a začne nové kolo.
+ * Volá se po každém příkazu (hráč mohl vypadnout ze hry, nebo ukončit tah).
+ */
+export function settle(s: GameState): void {
+  if (!s.simul) return
+  s.done ??= []; s.begun ??= []; s.groups ??= turnGroups(s)
+  for (let k = 0; k < 2 && !s.over; k++) {
+    const act = actors(s)
+    if (act.length) {
+      for (const a of act) if (!s.begun.includes(a)) { s.begun.push(a); beginTurn(s, a); autoUnits(s, a) }
+      s.cur = act[0]
+      break
+    }
+    aiRound(s)
+    if (s.over) break
+    if (s.turn === s.maxTurns - 10) noteAll(s, 'Zbývá posledních 10 tahů. Po nich rozhodne skóre.', 'info')
+    s.done = []; s.begun = []
+    const old = s.groups
+    s.groups = turnGroups(s)
+    // Kdo se nově potkal, dozví se, že se od teď v tazích střídá.
+    for (const p of s.players) {
+      if (s.groups[p.id] < 0) continue
+      const fresh = s.players.filter(q => q.id !== p.id && s.groups![q.id] === s.groups![p.id] && old[q.id] !== old[p.id])
+      if (fresh.length) note(s, p.id, `Znáte se s národem ${fresh.map(q => NATIONS[q.nation].name).join(', ')}: od tohoto tahu táhnete po řadě, ne zároveň.`, 'info')
+    }
+  }
+  for (const p of s.players) if (p.human) updateVisibility(s, p.id)
+}
+
+/**
+ * Ukončí tah hráče (bez udání toho, kdo je na řadě). Je-li ve hře další lidský hráč, přijde na řadu on;
  * po posledním odehrají soupeři a barbaři a začne nový tah.
  */
-export function endTurn(s: GameState): void {
+export function endTurn(s: GameState, pid = s.cur): void {
   if (s.over) return
+  if (s.simul) {
+    if (!canAct(s, pid)) return
+    endPlayerTurn(s, pid)
+    checkVictory(s)
+    ;(s.done ??= []).push(pid)
+    settle(s)
+    return
+  }
   endPlayerTurn(s, s.cur)
   checkVictory(s)
   const alive = () => s.players.filter(p => p.human && p.alive).map(p => p.id)

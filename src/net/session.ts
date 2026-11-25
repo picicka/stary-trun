@@ -1,12 +1,16 @@
 // Síťová hra bez serveru: jeden hráč hru hostí, ostatní se k němu připojí napřímo.
-// Všichni drží celý stav hry a provádějí stejné příkazy ve stejném pořadí; hostitel je přeposílá,
-// hlídá pořadí a při neshodě pošle hráči svůj stav. Vrstva nezná prohlížeč ani způsob spojení.
+// Všichni drží celý stav hry a provádějí stejné příkazy ve stejném pořadí. Pořadí určuje hostitel:
+// příkaz očísluje ve chvíli, kdy ho sám provede, a rozešle všem (i odesílateli jako potvrzení).
+// Hráč své příkazy provádí hned; táhne-li zároveň někdo další a hostitel jeho příkaz zařadil dřív,
+// hráč si stav přepočítá v hostitelově pořadí. Při neshodě pošle hostitel svůj stav.
+// Vrstva nezná prohlížeč ani způsob spojení.
 import type { Command } from '../game/commands.ts'
 import { PLAYABLE, type NationId } from '../game/data.ts'
 
 export type Msg =
   | { t: 'hello'; name: string; token: string; v: string }
   | { t: 'pick'; nation: NationId }
+  /** Od hráče bez čísla (`n` = 0); od hostitele s pořadím `n` a hráčem `pid`. */
   | { t: 'cmd'; n: number; pid?: number; cmd: Command }
   | { t: 'hash'; n: number; h: string }
   | { t: 'resync' }
@@ -41,8 +45,15 @@ export interface NetGame {
    * Provede příkaz jiného hráče (včetně animace). S `hashed` vrátí otisk stavu hned po provedení –
    * než animace doběhne, může už místní hráč táhnout sám.
    */
-  apply(pid: number, cmd: Command, hashed: boolean): Promise<string>
+  apply(pid: number, cmd: Command, hashed: boolean, at?: () => void): Promise<string>
   snapshot(): string
+  /** Otisk současného stavu. */
+  hash(): string
+  /**
+   * Souběh: mezi vlastní nepotvrzené příkazy `pending` zařadil hostitel cizí příkaz. Stav se přepočítá ze
+   * snímku `base` v hostitelově pořadí (`confirmed`, poslední je ten nový) a pak se znovu provedou vlastní.
+   */
+  replay(base: string, confirmed: { pid: number; cmd: Command }[], pending: Command[], seat: number): Promise<void>
   /** Nahradí stav hry stavem od hostitele; `first` = hra právě začala. */
   load(json: string, seat: number, first: boolean): void
 }
@@ -67,9 +78,9 @@ export class HostSession {
   readonly code: string
   started = false
   private peers: Peer[]
-  /** Počet přijatých a počet už provedených příkazů. */
-  private acc = 0
-  private applied = 0
+  /** Pořadí posledního provedeného příkazu a počet přijatých, které na provedení čekají. */
+  private seq = 0
+  private queued = 0
   private chain: Promise<void> = Promise.resolve()
   private end: HostEnd
   private max: number
@@ -88,7 +99,7 @@ export class HostSession {
 
   get ready(): boolean { return this.started }
   /** Nečeká na provedení žádný cizí příkaz. */
-  get idle(): boolean { return this.acc === this.applied }
+  get idle(): boolean { return this.queued === 0 }
   online(seat: number): boolean { return seat === 0 || !!this.peers[seat]?.link }
   seats(): SavedSeat[] { return this.peers.map(p => ({ token: p.token, name: p.name, nation: p.nation })) }
 
@@ -143,18 +154,15 @@ export class HostSession {
     else if (m.t === 'resync') { if (this.started) this.sync(p, false) }
     else if (m.t === 'cmd') {
       if (!this.started || !p.ready) return
-      // Příkaz mimo pořadí: hráč se rozešel s hostitelem, dostane jeho stav.
-      if (m.n !== this.acc + 1) { this.sync(p, false); return }
-      this.acc += 1
-      const n = this.acc
-      this.relay({ t: 'cmd', n, pid: seat, cmd: m.cmd }, seat)
+      this.queued += 1
       this.chain = this.chain.then(async () => {
         const turn = m.cmd.t === 'endTurn'
-        const h = await this.game.apply(seat, m.cmd, turn)
-        this.applied += 1
+        let n = 0
+        // Pořadí dostane příkaz až ve chvíli provedení – mezitím mohl hostitel táhnout sám.
+        const h = await this.game.apply(seat, m.cmd, turn, () => { n = ++this.seq; this.relay({ t: 'cmd', n, pid: seat, cmd: m.cmd }, -1) })
         // Na konci tahu si všichni porovnají otisk stavu s hostitelovým.
-        if (turn) this.relay({ t: 'hash', n, h }, 0)
-      }).catch(e => console.error(e))
+        if (turn && n) this.relay({ t: 'hash', n, h }, 0)
+      }).catch(e => console.error(e)).then(() => { this.queued -= 1 })
     }
   }
 
@@ -178,8 +186,8 @@ export class HostSession {
     p.pending = []
     this.chain = this.chain.then(() => {
       if (!p.link || p.ready) return
-      p.link.send({ t: 'start', state: this.game.snapshot(), seat: this.peers.indexOf(p), n: this.applied, first })
-      for (const m of p.pending) if ((m.t === 'cmd' || m.t === 'hash') && m.n > this.applied) p.link.send(m)
+      p.link.send({ t: 'start', state: this.game.snapshot(), seat: this.peers.indexOf(p), n: this.seq, first })
+      for (const m of p.pending) if ((m.t === 'cmd' || m.t === 'hash') && m.n > this.seq) p.link.send(m)
       p.pending = []
       p.ready = true
     }).catch(e => console.error(e))
@@ -198,18 +206,20 @@ export class HostSession {
   /** Hra začíná: stav už je v hostitelově hře, ostatní ho dostanou. */
   start(): void {
     this.started = true
-    this.acc = this.applied = 0
+    this.seq = 0
     this.announce()
     for (const p of this.peers.slice(1)) this.sync(p, true)
   }
 
   /** Příkaz provedený u hostitele (jeho vlastní, nebo ukončení tahu za odpojeného hráče). */
   local(pid: number, cmd: Command, h?: string): void {
-    this.acc += 1
-    this.applied += 1
-    this.relay({ t: 'cmd', n: this.acc, pid, cmd }, 0)
-    if (h) this.relay({ t: 'hash', n: this.acc, h }, 0)
+    this.seq += 1
+    this.relay({ t: 'cmd', n: this.seq, pid, cmd }, 0)
+    if (h) this.relay({ t: 'hash', n: this.seq, h }, 0)
   }
+
+  /** Hostitel nic nepředpovídá: jeho stav je ten platný. */
+  predict(): void {}
 
   close(): void {
     for (const p of this.peers) if (p.link) { p.link.onClose = () => {}; p.link.send({ t: 'bye' }) }
@@ -226,6 +236,11 @@ export class ClientSession {
   ready = false
   view: Lobby | null = null
   private n = 0
+  /** Vlastní příkazy, které hostitel ještě nepotvrdil. */
+  private pend: Command[] = []
+  /** Snímek stavu před prvním nepotvrzeným příkazem a příkazy, které hostitel od té doby potvrdil (pro přepočet při souběhu). */
+  private base: string | null = null
+  private log: { pid: number; cmd: Command }[] = []
   /** Vlastní otisky stavu po koncích tahů (podle pořadí příkazu), dokud nepřijde hostitelův. */
   private hashes = new Map<number, string>()
   private chain: Promise<void> = Promise.resolve()
@@ -265,7 +280,7 @@ export class ClientSession {
     else if (m.t === 'start') {
       this.chain = this.chain.then(() => {
         this.seat = m.seat; this.n = m.n; this.started = true; this.ready = true
-        this.hashes.clear()
+        this.hashes.clear(); this.pend = []; this.base = null; this.log = []
         this.game.load(m.state, m.seat, m.first)
       }).catch(e => console.error(e))
     } else if (m.t === 'cmd') {
@@ -274,6 +289,20 @@ export class ClientSession {
         if (m.n !== this.n + 1) { this.resync(); return }
         this.n = m.n
         const turn = m.cmd.t === 'endTurn'
+        if (m.pid === this.seat && this.pend.length) {
+          // Potvrzení vlastního příkazu: je proveden, jen dostal pořadí.
+          const c = this.pend.shift()!
+          if (this.base) this.log.push({ pid: this.seat, cmd: c })
+          if (!this.pend.length) { this.base = null; this.log = []; if (turn) this.hashes.set(m.n, this.game.hash()) }
+          return
+        }
+        if (this.pend.length) {
+          // Souběh: cizí příkaz přišel na řadu před vlastními nepotvrzenými.
+          if (!this.base) { this.resync(); return }
+          this.log.push({ pid: m.pid!, cmd: m.cmd })
+          await this.game.replay(this.base, this.log, this.pend, this.seat)
+          return
+        }
         const h = await this.game.apply(m.pid!, m.cmd, turn)
         if (turn) this.hashes.set(m.n, h)
       }).catch(e => console.error(e))
@@ -291,12 +320,19 @@ export class ClientSession {
     this.link?.send({ t: 'resync' })
   }
 
-  /** Příkaz provedený místním hráčem. */
-  local(_pid: number, cmd: Command, h?: string): void {
+  /**
+   * Volá se těsně před provedením vlastního příkazu, pokud zároveň smí táhnout i někdo jiný:
+   * uschová stav, ze kterého se dá při souběhu přepočítat hostitelovo pořadí.
+   */
+  predict(): void {
+    if (this.ready && !this.pend.length) { this.base = this.game.snapshot(); this.log = [] }
+  }
+
+  /** Příkaz provedený místním hráčem: hostitel ho zařadí a potvrdí. */
+  local(_pid: number, cmd: Command): void {
     if (!this.link || !this.ready) return
-    this.n += 1
-    if (h) this.hashes.set(this.n, h)
-    this.link.send({ t: 'cmd', n: this.n, cmd })
+    this.pend.push(cmd)
+    this.link.send({ t: 'cmd', n: 0, cmd })
   }
 
   pick(nation: NationId): void { this.link?.send({ t: 'pick', nation }) }

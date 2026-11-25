@@ -14,7 +14,7 @@ import {
   isCivilian, isEmbarked, isNaval, isWater, itemCost, itemName, maxMoves, militaryPower, sameItem, playerIncome, previewAttack, resourceVisible, score, tileYield, unitBlockReason, unitStrength,
   unitsAt, unitsOf, UNITS_PER_SOURCE, resourceReport, unitsNeeding, traditionAdvice, techPath, foundBlock, isCoastal, traditionReady, pendingPromos, tileJobs, upgradeBlock, upgradeCost, upgradeTarget, xpLevel,
 } from '../game/rules.ts'
-import { hasSave, START_TECH } from '../game/state.ts'
+import { actors, canAct, hasSave, START_TECH } from '../game/state.ts'
 import { cleanCode } from '../net/session.ts'
 import { tipKey } from '../game/commands.ts'
 import { barbId, type BuildItem, type City, type Note, type Unit } from '../game/types.ts'
@@ -86,6 +86,8 @@ export class Hud {
   /** Národů ve hře celkem (lidé + soupeři vedení počítačem). */
   private pickNations = 3
   private pickTurns = 160
+  /** Síťová hra: hráči, kteří se ještě nepotkali, táhnou zároveň. */
+  private pickSimul = true
   private pickLand: Landform = 'continent'
   private pickSize: -1 | 0 | 1 = 0
   private pickBarb: 0 | 1 | 2 | 3 = 2
@@ -246,9 +248,9 @@ export class Hud {
         const n = this.pickNations
         void app.hostGame({
           difficulty: this.pickDiff, scenario: this.pickScenario, max: n,
-          opts: { nations: n, maxTurns: this.pickTurns, map: { barbarians: this.pickBarb, ...(random ? { landform: this.pickLand, size: this.pickSize } : {}) } },
+          opts: { nations: n, maxTurns: this.pickTurns, simul: this.pickSimul, map: { barbarians: this.pickBarb, ...(random ? { landform: this.pickLand, size: this.pickSize } : {}) } },
           seed: random && this.pickSeed ? Number(this.pickSeed) : undefined,
-          info: `${SCENARIOS[this.pickScenario].name} · ${n} ${n < 5 ? 'národy' : 'národů'} · obtížnost ${DIFFICULTY[this.pickDiff].name.toLowerCase()} · ${this.pickTurns} tahů`,
+          info: `${SCENARIOS[this.pickScenario].name} · ${n} ${n < 5 ? 'národy' : 'národů'} · obtížnost ${DIFFICULTY[this.pickDiff].name.toLowerCase()} · ${this.pickTurns} tahů · ${this.pickSimul ? 'souběžné tahy do setkání' : 'tahy po řadě'}`,
         })
         break
       }
@@ -262,6 +264,7 @@ export class Hud {
       case 'm-humans': this.pickHumans = Number(arg); sfx('click'); this.showSetup(); break
       case 'm-nations': this.pickNations = Number(arg); this.pickHumans = Math.min(this.pickHumans, this.pickNations); sfx('click'); this.showSetup(); break
       case 'm-turns': this.pickTurns = Number(arg); sfx('click'); this.showSetup(); break
+      case 'm-simul': this.pickSimul = arg === '1'; sfx('click'); this.showSetup(); break
       case 'm-land': this.pickLand = arg as Landform; sfx('click'); this.showSetup(); break
       case 'm-size': this.pickSize = Number(arg) as -1 | 0 | 1; sfx('click'); this.showSetup(); break
       case 'm-barb': this.pickBarb = Number(arg) as 0 | 1 | 2 | 3; sfx('click'); this.showSetup(); break
@@ -432,6 +435,8 @@ export class Hud {
         <span>Délka hry:</span>${seg('m-turns', this.pickTurns, [[80, 'Krátká 80'], [120, 'Střední 120'], [160, 'Plná 160']])}
         <span>Barbaři:</span>${seg('m-barb', this.pickBarb, [[0, 'Žádní'], [1, 'Málo'], [2, 'Běžně'], [3, 'Hodně']])}</div>
       <div class="setupinfo">${esc(`${DIFFICULTY[this.pickDiff].desc} Hra trvá nejvýš ${this.pickTurns} tahů, pak rozhodne skóre.${this.pickTurns < 160 ? ' Na Sluneční chrám a na vítězství dobytím je kratší hra obvykle příliš krátká.' : ''}`)}</div>
+      ${this.netMode ? `<div class="setuprow"><span>Tahy:</span>${seg('m-simul', this.pickSimul ? '1' : '0', [['1', 'Souběžné do setkání'], ['0', 'Po řadě']])}</div>
+      <div class="setupinfo">${esc(this.pickSimul ? 'Hráči, kteří se ještě nepotkali, táhnou zároveň – nikdo nečeká. Kdo se potká, od dalšího tahu se s tím druhým střídá.' : 'Hráči táhnou jeden po druhém od začátku hry.')}</div>` : ''}
       <div class="setuprow"><button class="btn big" data-a="m-back">Zpět</button>${this.netMode ? '<button class="btn big" data-a="n-open">Otevřít místnost</button>' : '<button class="btn big" data-a="m-next">Dál: výběr národa</button>'}</div>` : `
       <h2>${multi ? `${who}. hráč: vyberte svůj národ` : 'Vyberte svůj národ'}</h2>
       <div class="lead">${esc(`${sd.name}, ${players} ${players < 5 ? 'národy' : 'národů'}, obtížnost ${DIFFICULTY[this.pickDiff].name.toLowerCase()}. Každý národ má jednu výjimečnou vlastnost a jednu unikátní jednotku.`)}</div>
@@ -728,8 +733,8 @@ export class Hud {
     let text = ''
     if (!net.ready) text = 'Spojení s hostitelem je přerušeno, obnovuji…'
     else if (!s.over && !this.app.myTurn) {
-      const p = s.players[s.cur], who = this.app.seatName(p.id)
-      text = `Na tahu: ${NATIONS[p.nation].name}${who ? ` (${who})` : ''}${net.online(p.id) ? '' : ' – bez spojení'}`
+      const names = actors(s).map(id => { const p = s.players[id], who = this.app.seatName(id); return `${NATIONS[p.nation].name}${who ? ` (${who})` : ''}${net.online(id) ? '' : ' – bez spojení'}` })
+      text = `${canAct(s, this.my) ? '' : s.simul && (s.done ?? []).includes(this.my) ? 'Tah jste ukončili. ' : ''}${names.length > 1 ? 'Na tahu jsou' : 'Na tahu'}: ${names.join(', ')}`
     }
     if (text) this.waiting.textContent = typo(text)
     if (text || !this.app.busy) this.waiting.classList.toggle('hidden', !text)
@@ -739,7 +744,7 @@ export class Hud {
     if (this.app.net && !this.app.myTurn) {
       const force = this.app.canForceEnd
       this.endBtn.classList.toggle('attn', false)
-      this.endBtn.innerHTML = force ? `Ukončit tah za hráče<small>${esc('hráč na tahu nemá spojení')}</small>` : `Čekáte na tah<small>${esc('mapu si zatím můžete prohlížet')}</small>`
+      this.endBtn.innerHTML = force ? `Ukončit tah za hráče<small>${esc('hráč na tahu nemá spojení')}</small>` : `${this.s.simul && (this.s.done ?? []).includes(this.my) ? 'Čekáte na ostatní' : 'Čekáte na tah'}<small>${esc('mapu si zatím můžete prohlížet')}</small>`
       this.endBtn.disabled = !force || this.app.busy
       return
     }
