@@ -1,6 +1,6 @@
 // Pravidla hry: výnosy, města, pohyb, boj, průběh tahu. Bez závislosti na Phaseru.
 import {
-  ERAS, GOLDEN_TURNS, TRADITIONS, TRADITION_IDS, traditionCost, type TraditionId, SCENARIOS, BUILDINGS, BUILDING_IDS, DIFFICULTY, IMPROVEMENTS, NATIONS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS, TERRAIN, UNITS, UNIT_IDS, XP_LEVELS, unitFor,
+  ERAS, GOLDEN_TURNS, TUNE, TRADITIONS, TRADITION_IDS, traditionCost, type TraditionId, SCENARIOS, BUILDINGS, BUILDING_IDS, DIFFICULTY, IMPROVEMENTS, NATIONS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS, TERRAIN, UNITS, UNIT_IDS, XP_LEVELS, unitFor,
   type BuildingId, type ImprovementId, type PromoId, type ResourceId, type TechId, type UnitId, type Yields,
   PERSONAS, type PersonaId,
 } from './data.ts'
@@ -706,7 +706,7 @@ export function adoptTradition(_s: GameState, p: Player, id: TraditionId): boole
 
 // ---------------------------------------------------------------- města
 
-export function cityMaxHp(c: City): number { return 200 + (c.buildings.includes('walls') ? 60 : 0) + (c.buildings.includes('bastion') ? 40 : 0) }
+export function cityMaxHp(c: City): number { return TUNE.cityHp + (c.buildings.includes('walls') ? 60 : 0) + (c.buildings.includes('bastion') ? 40 : 0) }
 
 export function cityStrength(s: GameState, c: City): number {
   let v = 7 + c.pop * 0.9 + s.players[c.owner].techs.length * 0.15
@@ -927,8 +927,8 @@ function completeBuild(s: GameState, c: City): boolean {
     emit({ e: 'spawn', unit: u.id, x: u.x, y: u.y })
     note(s, c.owner, `${c.name}: dokončena jednotka ${UNITS[it.id].name}.`, 'info', c.x, c.y)
     c.prod -= UNITS[it.id].cost
-    // Hráči pokračuje fronta; soupeřům se vojenské jednotky staví dál.
-    if (civ || s.players[c.owner].human || c.queue.length) c.build = nextQueued(s, c)
+    // Pokračuje fronta; počítač si bez fronty vybere znovu (jinak by levnou jednotku stavěl pořád dokola).
+    c.build = nextQueued(s, c)
   } else {
     c.buildings.push(it.id)
     c.prod -= itemCost(it, s.players[c.owner])
@@ -986,7 +986,7 @@ function processCity(s: GameState, c: City): void {
     p.gold += Math.floor(y.prod / 2)
   }
   // Opravy a střelba z hradeb.
-  if (!besieged(s, c)) c.hp = Math.min(cityMaxHp(c), c.hp + 10)
+  if (!besieged(s, c)) c.hp = Math.min(cityMaxHp(c), c.hp + TUNE.cityHeal)
   cityShoot(s, c)
 }
 
@@ -1336,8 +1336,8 @@ function captureCity(s: GameState, c: City, by: Unit): void {
     return
   }
   c.owner = by.owner
-  c.pop = Math.max(1, c.pop - 1)
-  c.hp = Math.floor(cityMaxHp(c) / 2)
+  if (!TUNE.softCapture) c.pop = Math.max(1, c.pop - 1)
+  c.hp = Math.floor(cityMaxHp(c) * (TUNE.softCapture ? 0.75 : 0.5))
   c.build = null; c.queue = []; c.prod = 0; c.food = 0
   c.buildings = c.buildings.filter(b => b !== 'walls' && b !== 'bastion')
   if (c.capital) {
@@ -1358,6 +1358,16 @@ function captureCity(s: GameState, c: City, by: Unit): void {
   note(s, by.owner, `Dobyli jste město ${c.name}! Kořist: ${loot} zlata.`, 'good', c.x, c.y)
   note(s, old, `Ztratili jste město ${c.name}!`, 'bad', c.x, c.y)
   noteAll(s, `${NATIONS[newP.nation].name} dobyli město ${c.name} (${NATIONS[oldP.nation].name}).`, 'war', c.x, c.y, { [old]: null, [by.owner]: null })
+  // Pád sídla: zbytek národa se vzdá dobyvateli.
+  if (TUNE.surrender && c.seat === old && old !== barbId(s)) {
+    for (const o of citiesOf(s, old)) {
+      o.owner = by.owner; o.capital = false; o.build = null; o.queue = []; o.prod = 0
+      for (const t of s.tiles) if (t.city === o.id) t.owner = by.owner
+    }
+    for (const u of unitsOf(s, old)) killUnit(s, u)
+    for (const o of s.cities) assignWorkers(s, o)
+    noteAll(s, `Sídlo ${c.name} padlo a ${NATIONS[oldP.nation].name} se vzdali. Jejich města připadla národu ${NATIONS[newP.nation].name}.`, 'war', c.x, c.y)
+  }
   updateVisibility(s, by.owner); updateVisibility(s, old)
   checkElimination(s, old)
   checkVictory(s)
@@ -1439,7 +1449,9 @@ export function wonderLeft(s: GameState): number | null {
 /** Původní sídelní města soupeřů hráče `pid`: kolik jich je a kolik jich hráč drží. */
 export function seatCount(s: GameState, pid: number): { held: number; need: number; total: number } {
   const seats = s.cities.filter(c => c.seat >= 0 && c.seat !== pid)
-  return { held: seats.filter(c => c.owner === pid).length, need: Math.floor(seats.length / 2) + 1, total: seats.length }
+  const n = seats.length
+  const need = TUNE.seatNeed === 'third' ? Math.max(1, Math.ceil(n / 3)) : TUNE.seatNeed === 'half' ? Math.max(1, Math.ceil(n / 2)) : Math.floor(n / 2) + 1
+  return { held: seats.filter(c => c.owner === pid).length, need, total: n }
 }
 
 function holdsMajority(s: GameState, pid: number): boolean {
@@ -1498,7 +1510,7 @@ export function checkVictory(s: GameState): void {
   } else if (s.conquest?.by !== holder.id) {
     s.conquest = { by: holder.id, since: s.turn }
     noteAll(s, `${nm(holder)} drží většinu sídelních měst! Udrží-li je ${CONQUEST_TURNS} tahů, zvítězí dobytím.`, 'war', undefined, undefined, { [holder.id]: `Držíte většinu sídelních měst. Udržte je ${CONQUEST_TURNS} tahů a zvítězíte dobytím.` })
-  } else if (s.turn - s.conquest.since >= CONQUEST_TURNS) { conquered(s, holder); s.over!.how = 'conquest'; return }
+  } else if (s.turn - s.conquest.since >= TUNE.conquestTurns) { conquered(s, holder); s.over!.how = 'conquest'; return }
   if (s.turn > s.maxTurns) {
     // Sláva: nejvyšší skóre; při shodě má přednost lidský hráč.
     const rank = majors.filter(p => p.alive).map(r => ({ r, v: score(s, r.id) })).sort((a, b) => b.v - a.v || Number(b.r.human) - Number(a.r.human) || a.r.id - b.r.id)

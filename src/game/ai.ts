@@ -1,5 +1,5 @@
 // Umělá inteligence soupeřů a barbarů.
-import { BUILDINGS, DIFFICULTY, NATIONS, PERSONAS, RESOURCES, TECHS, TERRAIN, UNITS, unitFor, type BuildingId, type PersonaDef, type PersonaId, type TechId, type UnitId } from './data.ts'
+import { TUNE, BUILDINGS, DIFFICULTY, NATIONS, PERSONAS, RESOURCES, TECHS, TERRAIN, UNITS, unitFor, type BuildingId, type PersonaDef, type PersonaId, type TechId, type UnitId } from './data.ts'
 import { hexDist } from './hex.ts'
 import { rand, randInt } from './rng.ts'
 import {
@@ -85,6 +85,7 @@ function aiDiplomacy(s: GameState, p: Player): void {
       const dur = warDuration(s, p)
       // Mír se neuzavírá s držitelem chrámu, při slibném obléhání, a mezi počítači ani tehdy, když obléhá druhá strana.
       if (s.mission.wonderBy === q.id || pressing(s, p, q) || (!q.human && pressing(s, q, p))) continue
+      if (TUNE.keepWar && mine >= theirs * 1.2 && dur < 45) continue
       if (dur >= 10 && (mine < theirs * k.peaceRatio || dur >= k.peaceAfter)) {
         if (q.human) {
           if (!s.offers.some(o => o.from === p.id && o.to === q.id) && s.turn % 4 === p.id % 4) s.offers.push({ from: p.id, to: q.id })
@@ -101,14 +102,14 @@ function aiDiplomacy(s: GameState, p: Player): void {
     let want = false
     // Soupeř, který staví div, je hrozbou pro každého.
     const wCity = s.cities.find(c => c.owner === q.id && c.build?.kind === 'building' && c.build.id === 'wonder')
-    const qWonder = !!wCity && wCity.prod > 150
+    const qWonder = !!wCity && wCity.prod > BUILDINGS.wonder.cost * 0.5
     // Na stavitele chrámu se chystá tažení hned, jak stavbu začne; válka přijde, až bude vojsko připravené nebo stavba pokročí.
     if (wCity && myMil >= 3 && dist <= far + 8 && s.turn >= (p.peaceUntil[q.id] ?? 0) && (!p.siege || (p.siege.pre && p.siege.city !== wCity.id))) {
       p.siege = { city: wCity.id, go: false, since: s.turn, pre: true }
       continue
     }
     if (qWonder && mine >= theirs * 0.8 && myMil >= 3 && dist <= far + 8) want = true
-    if (dist <= far && s.turn >= k.warFrom / aggro && myMil >= k.warMil && mine >= theirs * (k.warRatio / aggro)) want = rand(s) < k.warChance * aggro
+    if (dist <= far && s.turn >= k.warFrom * TUNE.warFrom / aggro && myMil >= k.warMil && mine >= theirs * (k.warRatio / aggro)) want = rand(s) < k.warChance * TUNE.warChance * aggro
     // Vypočítavý národ udeří na toho, kdo už válčí s někým jiným a nemá navrch.
     if (!want && k.dogpile > 0 && dist <= far && s.turn >= 20 / aggro && myMil >= 3 && mine >= theirs * 0.85 && q.war.some(w => w !== barbId(s) && w !== p.id && s.players[w].alive)) want = rand(s) < k.dogpile * aggro
     // Na lehké obtížnosti dostane hráč na začátku klid.
@@ -121,7 +122,7 @@ function aiDiplomacy(s: GameState, p: Player): void {
     // Válku nevyhlašuje hned: nejdřív si u hranic nachystá vojsko a stroje (aiMilitary), vyhlásí ji až s připraveným tažením.
     if (want && !p.siege) {
       let best: City | null = null, bd = Infinity
-      for (const c of s.cities) if (c.owner === q.id) for (const a of myCities) { const d = hexDist(a.x, a.y, c.x, c.y) + c.hp / 80; if (d < bd) { bd = d; best = c } }
+      for (const c of s.cities) if (c.owner === q.id) for (const a of myCities) { const d = hexDist(a.x, a.y, c.x, c.y) + c.hp / 80 - (c.seat >= 0 ? TUNE.seatFocus : 0); if (d < bd) { bd = d; best = c } }
       if (best) p.siege = { city: best.id, go: false, since: s.turn, pre: true }
       else declareWar(s, p.id, q.id)
     }
@@ -273,20 +274,30 @@ function aiRoad(s: GameState, p: Player, u: Unit, pm: PathMap, claimed: Set<numb
   return false
 }
 
+/** Obléhací stroj, který výpravě chybí (počítá i ty, které už některé město staví), nebo null. */
+function wantedEngine(s: GameState, p: Player, c: City): UnitId | null {
+  if (!(p.war.some(w => w !== barbId(s)) || p.siege?.pre)) return null
+  const mine = unitsOf(s, p.id).filter(u => !isCivilian(u) && !isNaval(u))
+  const queued = citiesOf(s, p.id).filter(o => o.id !== c.id && o.build?.kind === 'unit').map(o => UNITS[(o.build as { id: UnitId }).id])
+  const rams = mine.filter(u => UNITS[u.type].ram).length + queued.filter(d => d.ram).length
+  const siege = mine.filter(u => UNITS[u.type].siege && !UNITS[u.type].ram).length + queued.filter(d => d.siege && !d.ram).length
+  const melee = mine.filter(u => !UNITS[u.type].ranged && !UNITS[u.type].siege).length
+  const can = (id: UnitId) => { const a = unitFor(p.nation, id); return canBuildUnit(s, c, a) ? a : null }
+  if (melee >= 2 && siege < Math.max(3, Math.floor(melee / 2))) { const k = can('trebuchet') ?? can('catapult'); if (k) return k }
+  // Beranidlo: jedno na výpravu, u větší armády dvě (hradby na ně střílejí).
+  if (melee >= 3 && rams < (melee >= 7 ? 2 : 1)) return can('ram')
+  return null
+}
+
 function bestMilitary(s: GameState, p: Player, c: City, defensive: boolean): UnitId | null {
   const mine = unitsOf(s, p.id).filter(u => !isCivilian(u) && !isNaval(u))
   const ranged = mine.filter(u => UNITS[u.type].ranged && !UNITS[u.type].siege).length
-  // Počítají se i beranidla, která už některé město staví, ať jich nevznikne pět najednou.
-  const rams = mine.filter(u => UNITS[u.type].ram).length + citiesOf(s, p.id).filter(o => o.build?.kind === 'unit' && UNITS[o.build.id].ram).length
-  const siege = mine.filter(u => UNITS[u.type].siege).length - rams
-  const melee = mine.length - ranged - siege - rams
   const planning = p.war.some(w => w !== barbId(s)) || !!p.siege?.pre
   const can = (id: UnitId) => { const a = unitFor(p.nation, id); return canBuildUnit(s, c, a) ? a : null }
   const archer = can('archer')
   if (defensive && archer) return archer
-  if (planning && melee >= 2 && siege < Math.max(3, Math.floor(melee / 2))) { const k = can('trebuchet') ?? can('catapult'); if (k) return k }
-  // Beranidlo: jedno na výpravu, u větší armády dvě (hradby na ně střílejí).
-  if (planning && melee >= 3 && rams < (melee >= 7 ? 2 : 1)) { const k = can('ram'); if (k) return k }
+  const engine = wantedEngine(s, p, c)
+  if (engine) return engine
   // Na tažení je potřeba hlavně pěchota: obklíčí město a obsadí ho.
   if (archer && ranged < (mine.length + 1) * (planning ? 0.2 : 0.35)) return archer
   const opts = (['manatarms', 'knight', 'swordsman', 'horseman', 'spearman', 'warrior'] as UnitId[]).map(can).filter((x): x is UnitId => !!x)
@@ -346,7 +357,9 @@ function aiCityBuild(s: GameState, p: Player, c: City): void {
   // Kdo drží chrám, musí ho ubránit.
   const holds = s.mission.wonderBy === p.id
   if (holds && c.buildings.includes('wonder')) for (const b of ['walls', 'bastion'] as BuildingId[]) if (canBuildBuilding(s, c, b)) { setB(b); return }
-  const armyTarget = cities.length * 1.6 + k.armyBase + s.turn / k.armyPace + (war ? 3 : 0) + (holds ? 4 : 0) + (p.siege ? 3 : 0)
+  const armyTarget = cities.length * 1.6 + k.armyBase + s.turn / k.armyPace + (war ? 3 : 0) + (holds ? 4 : 0) + (p.siege ? 3 : 0) + (k.martial ? TUNE.armyPlus : 0)
+  // Stroje na chystané tažení se staví, i když je vojska jinak dost.
+  if (p.siege && setU(wantedEngine(s, p, c))) return
   if ((war || k.alwaysArm || holds) && mil < armyTarget) { if (setU(bestMilitary(s, p, c, false))) return }
   for (const b of k.build) {
     if (!canBuildBuilding(s, c, b)) continue
@@ -545,7 +558,7 @@ function aiMilitary(s: GameState, p: Player): void {
       // Kde leží města národa, se kterým se zná, ví každý (poslové, kupci) – bez toho by vojsko nemělo kam táhnout.
       if (!p.war.includes(c.owner) || c.owner === barbId(s) && !p.explored[idx(s, c.x, c.y)]) continue
       // Město se Slunečním chrámem má přednost před vším ostatním.
-      const d = hexDist(home.x, home.y, c.x, c.y) + c.hp / 80 - (c.buildings.includes('wonder') ? 100 : 0)
+      const d = hexDist(home.x, home.y, c.x, c.y) + c.hp / 80 - (c.buildings.includes('wonder') ? 100 : 0) - (c.seat >= 0 ? TUNE.seatFocus : 0)
       if (d < bd) { bd = d; target = c }
     }
   }
@@ -562,7 +575,7 @@ function aiMilitary(s: GameState, p: Player): void {
     const plan = p.siege
     stage = cities.slice().sort((a, b) => hexDist(a.x, a.y, target!.x, target!.y) - hexDist(b.x, b.y, target!.x, target!.y) || a.id - b.id)[0] ?? null
     const k = per(p)
-    const rush = target.buildings.includes('wonder') || (isWonderSite(target) && target.prod > 150)
+    const rush = target.buildings.includes('wonder') || (isWonderSite(target) && target.prod > BUILDINGS.wonder.cost * 0.5)
     const need = rush ? 2 : k.marchAt
     const full = cityMaxHp(target)
     if (!plan.go) {
@@ -576,7 +589,7 @@ function aiMilitary(s: GameState, p: Player): void {
       // Před válkou se čeká v klidu na plnou sílu; už ve válce se po čase vyráží i s menší.
       const late = !pre && waited > 10
       const engOk = !canSiege(s, p, cities) || ready.some(u => UNITS[u.type].ram) || eng >= (late ? 1 : 3)
-      const enough = melee >= (late ? 2 : 4) && engOk && power >= full * (late ? 0.8 : 1.1)
+      const enough = melee >= (late ? 2 : 4) && engOk && power >= full * (late ? 0.8 : 1.1) * TUNE.muster
       if (ready.length >= need && (enough || rush)) {
         if (pre) { declareWar(s, pid, target.owner); plan.pre = false }
         plan.go = true; plan.since = s.turn
@@ -629,7 +642,7 @@ function aiMilitary(s: GameState, p: Player): void {
     if (u.sea && !march && !onWater) u.sea = false
     if (march && target) {
       // Výsadek: když je cesta po moři výrazně kratší (nebo jediná), jednotka se nalodí.
-      if (!u.sea && !ud.siege && hasTech(p, 'sailing') && isCoastal(s, target.x, target.y)) {
+      if (!u.sea && hasTech(p, 'sailing') && isCoastal(s, target.x, target.y)) {
         const goal = (m: PathMap) => Math.min(...tilesWithin(s, target!.x, target!.y, 1).map(([x, y]) => (isWater(s.tiles[idx(s, x, y)]) ? Infinity : m.dist[idx(s, x, y)])))
         const land = goal(pathMap(s, u))
         u.sea = true

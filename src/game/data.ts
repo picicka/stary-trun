@@ -102,6 +102,31 @@ export const ERAS = [
 ]
 export const GOLDEN_TURNS = 10
 
+/** Laditelné volby pro simulace (scripts/…): výchozí hodnoty = pravidla hry. */
+export const TUNE = {
+  /** Kolik cizích sídel je třeba k dobytí: 'majority' = nadpoloviční většina, 'third' = třetina (nejméně 1), 'half' = polovina zaokrouhlená nahoru. */
+  seatNeed: 'majority' as 'majority' | 'third' | 'half',
+  conquestTurns: 5,
+  /** O kolik polí je pro počítač sídelní město lákavější cíl než obyčejné. */
+  seatFocus: 8,
+  /** Násobek tahu, od kterého povaha začíná válčit (menší = dřív), a násobek chuti válčit. */
+  warFrom: 1,
+  warChance: 1,
+  /** Jednotky navíc pro bojovné povahy. */
+  armyPlus: 0,
+  /** Kdo ve válce vede, mír nenabízí. */
+  keepWar: true,
+  /** Dobyté město neztrácí obyvatele a zůstane mu víc životů. */
+  softCapture: false,
+  /** Padne-li sídlo, zbylá města národa se po tolika tazích vzdají dobyvateli (0 = vypnuto). */
+  surrender: 0,
+  /** Životy města bez hradeb a oprava za tah. */
+  cityHp: 200,
+  cityHeal: 10,
+  /** Násobek síly, kterou počítač chce mít před tažením (1 = výchozí). */
+  muster: 1,
+}
+
 export const ROAD = { name: 'Cesta', verb: 'Postavit cestu', turns: 2, tech: 'wheel' as TechId }
 
 export type PromoId = 'drill' | 'guard' | 'medic' | 'march'
@@ -186,7 +211,7 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   harbor: { name: 'Přístav', desc: '+1 jídlo z každého obdělávaného vodního pole a +2 zlato. Jen v pobřežním městě.', cost: 54, tech: 'sailing', maint: 1 },
   bastion: { name: 'Bašty', desc: 'Dalších +25 % obrana města a +40 životů. Vyžadují hradby.', cost: 84, tech: 'engineering', maint: 1 },
   bank: { name: 'Banka', desc: '+3 zlato a +20 % zlata města.', cost: 92, tech: 'banking', maint: 0 },
-  wonder: { name: 'Sluneční chrám', desc: 'Div světa. Kdo jej dostaví první a udrží jeho město 15 tahů, vyhrává misi.', cost: 300, tech: 'astronomy', maint: 0 },
+  wonder: { name: 'Sluneční chrám', desc: 'Div světa. Kdo jej dostaví první a udrží jeho město 15 tahů, vyhrává misi.', cost: 900, tech: 'astronomy', maint: 0 },
 }
 
 export interface TechDef { name: string; tier: number; row: number; cost: number; req: TechId[]; unlocks: string }

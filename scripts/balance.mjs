@@ -97,7 +97,7 @@ if (WORKER) {
   const specs = []
   let id = 1
   for (const persona of ['nation', 'random']) for (const m of maps) for (const n of counts) for (let k = 0; k < per; k++) {
-    specs.push({ id: id++, ...m, nations: n, persona, difficulty: flag('difficulty', 'normal'), maxTurns: Number(flag('turns', 120)), barbarians: 2 })
+    specs.push({ id: id++, ...m, nations: n, persona, difficulty: flag('difficulty', 'normal'), maxTurns: Number(flag('turns', 160)), barbarians: 2 })
   }
   const jobs = Math.min(specs.length, Number(flag('jobs', Math.max(1, cpus().length - 3))))
   console.error(`${specs.length} partií, ${jobs} procesů…`)

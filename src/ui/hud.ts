@@ -85,7 +85,7 @@ export class Hud {
   private picks: NationId[] = []
   /** Národů ve hře celkem (lidé + soupeři vedení počítačem). */
   private pickNations = 3
-  private pickTurns = 120
+  private pickTurns = 160
   private pickLand: Landform = 'continent'
   private pickSize: -1 | 0 | 1 = 0
   private pickBarb: 0 | 1 | 2 | 3 = 2
@@ -429,9 +429,9 @@ export class Hud {
       <div class="setupinfo">${esc(humansInfo)}</div>
       <div class="scens">${scens}</div>${randomRows}
       <div class="setuprow"><span>Obtížnost:</span>${seg('m-diff', this.pickDiff, (Object.keys(DIFFICULTY) as Difficulty[]).map(d => [d, DIFFICULTY[d].name]))}
-        <span>Délka hry:</span>${seg('m-turns', this.pickTurns, [[80, 'Krátká 80'], [120, 'Běžná 120'], [160, 'Dlouhá 160']])}
+        <span>Délka hry:</span>${seg('m-turns', this.pickTurns, [[80, 'Krátká 80'], [120, 'Střední 120'], [160, 'Plná 160']])}
         <span>Barbaři:</span>${seg('m-barb', this.pickBarb, [[0, 'Žádní'], [1, 'Málo'], [2, 'Běžně'], [3, 'Hodně']])}</div>
-      <div class="setupinfo">${esc(`${DIFFICULTY[this.pickDiff].desc} Hra trvá nejvýš ${this.pickTurns} tahů, pak rozhodne skóre.`)}</div>
+      <div class="setupinfo">${esc(`${DIFFICULTY[this.pickDiff].desc} Hra trvá nejvýš ${this.pickTurns} tahů, pak rozhodne skóre.${this.pickTurns < 160 ? ' Na Sluneční chrám a na vítězství dobytím je kratší hra obvykle příliš krátká.' : ''}`)}</div>
       <div class="setuprow"><button class="btn big" data-a="m-back">Zpět</button>${this.netMode ? '<button class="btn big" data-a="n-open">Otevřít místnost</button>' : '<button class="btn big" data-a="m-next">Dál: výběr národa</button>'}</div>` : `
       <h2>${multi ? `${who}. hráč: vyberte svůj národ` : 'Vyberte svůj národ'}</h2>
       <div class="lead">${esc(`${sd.name}, ${players} ${players < 5 ? 'národy' : 'národů'}, obtížnost ${DIFFICULTY[this.pickDiff].name.toLowerCase()}. Každý národ má jednu výjimečnou vlastnost a jednu unikátní jednotku.`)}</div>

@@ -8,7 +8,7 @@ import { TERRAIN } from './data.ts'
 import { barbId, type GameState, type Player } from './types.ts'
 
 export const SAVE_VERSION = 3
-export const MAX_TURNS = 120
+export const MAX_TURNS = 160
 const SAVE_KEY = 'hex4x-save-v' + SAVE_VERSION
 
 export const START_TECH: Record<NationId, TechId> = { aur: 'agriculture', khar: 'mining', thal: 'agriculture', sylv: 'archery', tark: 'husbandry', zahi: 'agriculture', morv: 'mining', lume: 'agriculture', barb: 'mining' }
