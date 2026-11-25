@@ -231,6 +231,17 @@ const ICONS = {
     ..........
     ....xy....
     ....yy....`,
+  ic_book: `
+    ..........
+    .bb....bb.
+    bwwb..bwwb
+    bwWwbbwWwb
+    bwwwbbwwwb
+    bwWwbbwWwb
+    bwwwbbwwwb
+    bwWwbbwWwb
+    bbbbbbbbbb
+    ....bb....`,
   ic_sound: `
     ....u.....
     ...uu...w.

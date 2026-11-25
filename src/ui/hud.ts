@@ -21,9 +21,10 @@ import { barbId, type BuildItem, type City, type Note, type Unit } from '../game
 import { isMusicOn, isMuted, setMusic, setMuted, sfx } from '../audio.ts'
 import type { App } from '../app.ts'
 import { cityIconUrl, unitIconUrl } from '../view/nationArt.ts'
+import { pediaHtml, PEDIA_TABS, type PediaTab } from './pedia.ts'
 
 /** Složka s obrázky rozhraní včetně základní adresy webu. */
-const UI = `${import.meta.env.BASE_URL}assets/ui/`
+export const UI = `${import.meta.env.BASE_URL}assets/ui/`
 const NB = ' '
 /** Česká typografie: pevná mezera za jednopísmennými předložkami a spojkami a mezi číslem a jednotkou. */
 export function typo(s: string): string {
@@ -32,10 +33,10 @@ export function typo(s: string): string {
     .replace(/(\d)[ \t]+(?=[%\p{L}])/gu, `$1${NB}`)
     .replace(/ - /g, ' – ')
 }
-const esc = (s: string) => typo(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+export const esc = (s: string) => typo(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
 /** Atribut s bublinovou nápovědou. Tvar „Nadpis|text“, řádky odděluje \n. */
-const tip = (s: string) => ` data-tip="${typo(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"`
-const ic = (n: string, cls = '') => `<img class="ic ${cls}" src="${UI}ic_${n}.png" alt="">`
+export const tip = (s: string) => ` data-tip="${typo(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}"`
+export const ic = (n: string, cls = '') => `<img class="ic ${cls}" src="${UI}ic_${n}.png" alt="">`
 /** Body pohybu mohou být po cestách půlené. */
 const mv = (n: number) => String(Math.round(n * 2) / 2).replace('.', ',')
 /** Žárovka u doporučené volby. */
@@ -200,6 +201,7 @@ export class Hud {
       case 'mission': sfx('click'); this.showMission(); break
       case 'diplo': sfx('click'); this.showDiplo(); break
       case 'help': sfx('click'); this.showHelp(); break
+      case 'pedia': sfx('click'); this.showPedia(arg); break
       case 'close': sfx('click'); this.closeModal(); break
       case 'seat': this.seatTaken(); break
       case 'city-close': app.openCity(null); break
@@ -258,6 +260,9 @@ export class Hud {
       case 'n-rejoin': sfx('click'); void app.joinGame(arg); break
       case 'n-pick': sfx('select'); app.net?.pick(arg as NationId); break
       case 'n-start': sfx('found'); app.netStart(); break
+      case 'n-bot': { const n = app.net; if (n?.role === 'host') { sfx('click'); n.addBot() } break }
+      case 'n-bot-x': { const n = app.net; if (n?.role === 'host') { sfx('click'); n.removeBot(Number(arg)) } break }
+      case 'n-bot-n': { const n = app.net; if (n?.role === 'host') { sfx('select'); n.cycleBot(Number(arg)) } break }
       case 'n-leave': sfx('click'); app.leaveNet(); this.showNet(); break
       case 'n-copy': sfx('click'); void navigator.clipboard?.writeText(app.joinUrl).then(() => { el.textContent = 'Zkopírováno' }, () => { this.menu.querySelector<HTMLInputElement>('#neturl')?.select() }); break
       case 'm-next': sfx('click'); this.setupStep = 1; this.picks = []; this.showSetup(); break
@@ -307,6 +312,7 @@ export class Hud {
         <button class="btn" data-a="m-new">Nová hra</button>
         <button class="btn" data-a="m-net">Hra po síti</button>
         <button class="btn" data-a="m-help">Jak hrát</button>
+        <button class="btn" data-a="pedia" data-v="units">Encyklopedie</button>
       </div>
       <div class="credit">Tři scénáře · osm národů · až osm hráčů</div>`
   }
@@ -354,13 +360,17 @@ export class Hud {
     const rows = l.members.map((m, i) => {
       const n = NATIONS[m.nation]
       return `<div class="member" style="--c:${n.css}"><img src="${UI}em_${m.nation}.png" alt=""><b>${esc(m.name)}</b><span>${n.name}</span><small>${[m.host ? 'hostitel' : '', i === l.you ? 'vy' : ''].filter(Boolean).join(', ')}</small></div>`
+    }).join('') + l.bots.map((b, i) => {
+      const n = NATIONS[b]
+      return `<div class="member bot" style="--c:${n.css}"><img src="${UI}em_${b}.png" alt=""><b>Počítač</b><span>${n.name}</span><small>${esc(PERSONAS[n.persona].name.toLowerCase())}</small>${host ? `<button class="btn" data-a="n-bot-n" data-v="${i}"${tip('Jiný národ|Dá soupeři další volný národ.')}>Jiný národ</button><button class="btn" data-a="n-bot-x" data-v="${i}"${tip('Odebrat soupeře')}>✕</button>` : ''}</div>`
     }).join('')
-    const free = l.max - l.members.length
+    const free = l.max - l.members.length - l.bots.length
     const tiles = PLAYABLE.map(id => {
       const n = NATIONS[id]
       const by = l.members.findIndex(m => m.nation === id)
-      const taken = by >= 0 && by !== l.you
-      return `<button class="ntile panel small ${id === mine ? 'sel' : ''} ${taken ? 'taken' : ''}" style="--c:${n.css}" data-a="n-pick" data-v="${id}" ${taken ? `disabled${tip(`Tento národ si vybral hráč ${l.members[by].name}.`)}` : ''}>
+      const bot = l.bots.includes(id)
+      const taken = bot || (by >= 0 && by !== l.you)
+      return `<button class="ntile panel small ${id === mine ? 'sel' : ''} ${taken ? 'taken' : ''}" style="--c:${n.css}" data-a="n-pick" data-v="${id}" ${taken ? `disabled${tip(bot ? 'Tento národ vede počítač.' : `Tento národ si vybral hráč ${l.members[by].name}.`)}` : ''}>
         <img class="p" src="${UI}p_${id}.png" alt=""><span><img class="e" src="${UI}em_${id}.png" alt="">${n.name}</span></button>`
     }).join('')
     const n = NATIONS[mine], u = UNITS[n.unique]
@@ -376,7 +386,8 @@ export class Hud {
       <div class="lead">${esc(l.info)}</div>
       ${host ? `<div class="setuprow"><span>Pošlete spoluhráčům kód nebo odkaz:</span><input id="neturl" class="seed url" readonly value="${this.app.joinUrl}"><button class="btn" data-a="n-copy">Kopírovat odkaz</button></div>` : ''}
       <div class="members">${rows}</div>
-      <div class="setupinfo">${esc(free > 0 ? `${free === 1 ? 'Zbývá jedno volné místo' : free < 5 ? `Zbývají ${free} volná místa` : `Zbývá ${free} volných míst`}; neobsazené národy povede počítač.` : 'Všechna místa jsou obsazená lidmi.')}</div>
+      ${host && free > 0 ? `<div class="setuprow"><button class="btn" data-a="n-bot"${tip('Přidat soupeře|Obsadí jedno volné místo národem, který povede počítač. Národ pak můžete změnit.')}>Přidat soupeře vedeného počítačem</button></div>` : ''}
+      <div class="setupinfo">${esc(free > 0 ? `${free === 1 ? 'Zbývá jedno volné místo' : free < 5 ? `Zbývají ${free} volná místa` : `Zbývá ${free} volných míst`} pro další hráče. Co při spuštění zůstane volné, povede počítač s vylosovaným národem.` : l.bots.length ? 'Všechna místa jsou obsazená.' : 'Všechna místa jsou obsazená lidmi.')}</div>
       <div class="ntiles">${tiles}</div>
       ${detail}
       <div class="setupinfo">${esc(host ? (l.members.length < 2 ? 'Počkejte, až se připojí aspoň jeden spoluhráč.' : 'Až budou všichni připraveni, spusťte hru. Později už se nikdo nový nepřipojí.') : 'Vyberte si národ a počkejte, až hostitel hru spustí.')}</div>
@@ -549,6 +560,7 @@ export class Hud {
       <button class="tbtn" data-a="mission" data-tip="Cíle mise (M)">${ic('flag', 's')}<span class="lbl">Mise</span></button>
       <button class="tbtn" data-a="diplo"${tip('Diplomacie|Přehled soupeřů, vyhlášení války a nabídka míru.')}>${ic(this.me.war.length ? 'war' : 'peace', 's')}<span class="lbl">Diplomacie</span></button>
       <button class="tbtn ${this.app.hints ? 'on' : ''}" data-a="hints"${tip(`Tipy: ${this.app.hints ? 'zapnuty' : 'vypnuty'} (I)|Žárovka označuje doporučenou volbu: co stavět ve městě, co zkoumat, kterou tradici přijmout, kde založit město a které pole vylepšit. Zapnuté tipy ukazují i rady rádce. Doporučení je jen vodítko – rozhodnutí je vždy na vás.`)}>${this.app.hints ? ic('tip', 's') : `<img class="ic s" src="${UI}ic_tip.png" alt="" style="opacity:.35;filter:grayscale(1)">`}</button>
+      <button class="tbtn" data-a="pedia" data-v="units"${tip('Encyklopedie (K)|Jednotky, stavby, výzkum, národy, pole, pravidla a klávesové zkratky.')}>${ic('book', 's')}</button>
       <button class="tbtn" data-a="help" data-tip="Nápověda (H)">${ic('help', 's')}</button>
       <button class="tbtn" data-a="zoom" data-v="-1" data-tip="Oddálit (−)">−</button>
       <button class="tbtn" data-a="zoom" data-v="1" data-tip="Přiblížit (+)">+</button>
@@ -1347,7 +1359,7 @@ export class Hud {
         <li>${esc('Osadníci: zlaté značky ukazují doporučená místa pro město, kliknutím tam osadníky pošlete a po příchodu město sami založí. Po najetí myší na pole uvidíte, jak je pro město dobré.')}</li>
         <li>${esc('I: tipy rádce zapnout / vypnout. Žárovka značí doporučenou volbu – stavbu ve městě, technologii, tradici, místo pro město i pole pro dělníky.')}</li>
         <li>${esc('L: přehled měst a jednotek – postranní seznam, co se kde staví a co která jednotka dělá.')}</li>
-        <li>${esc('Enter: další rozhodnutí nebo konec tahu (Shift+Enter ukončí tah hned). N: další jednotka. T: technologie. M: mise. Esc: zrušit výběr.')}</li>
+        <li>${esc('Enter: další rozhodnutí nebo konec tahu (Shift+Enter ukončí tah hned). Tab nebo N: další jednotka, Shift + Tab předchozí. T: technologie. M: mise. K: encyklopedie se všemi zkratkami. Esc: zrušit výběr.')}</li>
         <li>${esc('Jednotky: B založit město, F opevnit, Z spát, X přeskočit tah, E automatika (dělníci vylepšují pole, zvěd a lodě zkoumají mapu).')}</li></ul>
       <h4>Města</h4><p>${esc('Obyvatelé obdělávají pole v okolí města (až 2 pole daleko) a přinášejí jídlo (růst), výrobu (stavby a jednotky) a zlato. Každý obyvatel sní 2 jídla a dává 1 vědu. Kultura (monument, chrám) rozšiřuje hranice: druhý okruh při 18, třetí při 90 bodech. Za zlato lze rozestavěnou položku dokončit ihned.')}</p>
       <p>${esc('Fronta výroby: kliknutí na položku ji zařadí na konec fronty, Shift + klik ji začne stavět hned. Ve frontě lze položky posouvat dopředu (▲) a rušit (✕).')}</p>
@@ -1359,10 +1371,19 @@ export class Hud {
       <h4>Lodě a nalodění</h4><p>${esc('Technologie Plavba dovolí pozemním jednotkám vstoupit na pobřežní vody, Navigace i na oceán. Nalodění i vylodění ukončí tah; naloděná jednotka pluje 3 pole za tah (s Navigací 4), nemůže útočit a brání se silou 4. Pobřežní město staví galéry (boj zblízka proti lodím a člunům) a triéry (střelba na 2 pole, i na břeh a města) a přístav (+1 jídlo z vodních polí, +2 zlato).')}</p>
       <h4>Suroviny</h4><p>${esc('Obilí, zvěř, ryby, kámen a zlato zvyšují výnos pole. Koně a železo jsou strategické: teprve s ohradou (koně) či dolem (železo) na vašem území jdou stavět jezdci a šermíři, a každý takový zdroj uživí jen 2 jednotky. Kdo chce víc jezdců či šermířů, potřebuje víc ložisek nebo surovinu dokoupit; přijdete-li o zdroj, hotové jednotky vám zůstanou, ale nové nepostavíte. Železo se na mapě objeví až po objevu Bronzu. Stav obou surovin ukazují ikony v horní liště, všechny suroviny na vašem území najdete v Přehledu (L). Chybějící surovinu lze koupit v Diplomacii.')}</p>
       <h4>Pole a vylepšení</h4><p>${esc('Louky dávají jídlo, pláně jídlo i výrobu, pahorkatina výrobu, les výrobu. Dělníci staví farmy (+jídlo), doly (+výroba), ohrady (koně, zvěř) a pily (les). Koně a železo je nutné vylepšit, aby šlo stavět jezdce a šermíře.')}</p>
-      <h4>Boj</h4><p>${esc('Na jednom poli může stát jedna vojenská a jedna civilní jednotka. V boji zblízka utrpí ztráty obě strany, střelci (dostřel 2) odvetu nedostanou. Pahorkatina a les dávají obránci +25 %, opevnění dalších +25 %. Kopiníci mají +50 % proti jízdě, katapulty dvojnásobný účinek proti městům. Jednotka, která se celý tah nehýbe, se léčí (nejrychleji ve městě).')}</p>
+      <h4>Boj</h4><p>${esc('Na jednom poli může stát jedna vojenská a jedna civilní jednotka. V boji zblízka utrpí ztráty obě strany, střelci (dostřel 2) odvetu nedostanou. Pahorkatina a les dávají obránci +25 %, opevnění dalších +25 %. Kopiníci mají +50 % proti jízdě, obléhací stroje trojnásobný účinek proti městům a poloviční proti jednotkám. Jednotka, která se celý tah nehýbe, se léčí (nejrychleji ve městě).')}</p>
       <p>${esc(`Město se dobývá tak, že mu útoky srazíte hradby na nulu a vstoupíte do něj jednotkou pro boj zblízka. Města sama střílejí na nepřátele do 2 polí a každý tah si opraví 10 životů. Obléhejte proto se stroji: beranidlo samo neútočí, ale pěchotě útočící na město, u kterého stojí, přidá +50 % síly a jednotkám hned u města +50 % obrany proti odvetě i střelbě z hradeb; katapult, balista a trebuchet mají proti městům trojnásobný účinek, proti jednotkám jen poloviční. Stojí-li hned u města aspoň ${SIEGE_UNITS} vaše bojové jednotky, je v obležení a neopravuje se.`)}</p>
       <h4>Více hráčů</h4><p>${esc('Při zakládání hry zvolte, kolik národů se utká (2–8) a kolik z nich vedou lidé u tohoto počítače. Každý si vybere národ a pak táhnete jeden po druhém; mezi tahy mapu zakryje opona a počítač si předáte. Po posledním z vás táhnou soupeři vedení počítačem a barbaři. Zprávy, mlhu i rady má každý své. Mezi sebou si můžete vyhlásit válku, nabídnout mír (druhý hráč odpoví, až bude na tahu) a poslat dar; vše ostatní si domluvíte u stolu.')}</p>
-      <h4>Pokladna</h4><p>${esc('Každá vojenská jednotka nad volný limit (3 + 2 za město) stojí 1 zlato za tah, některé budovy také. Prázdná pokladna brzdí výzkum.')}</p>`, `<button class="btn" data-a="guide" data-v="0">Návod krok za krokem</button><button class="btn" data-a="close">Zavřít</button>`, '820px')
+      <h4>Pokladna</h4><p>${esc('Každá vojenská jednotka nad volný limit (3 + 2 za město) stojí 1 zlato za tah, některé budovy také. Prázdná pokladna brzdí výzkum.')}</p>`, `<button class="btn" data-a="pedia" data-v="units">Encyklopedie</button><button class="btn" data-a="guide" data-v="0">Návod krok za krokem</button><button class="btn" data-a="close">Zavřít</button>`, '820px')
+  }
+
+  /** Encyklopedie; `at` je záložka, případně „záložka:heslo“, na které se má okno otevřít. */
+  showPedia(at = 'units'): void {
+    const [t, id] = at.split(':')
+    const tab = (PEDIA_TABS.some(([k]) => k === t) ? t : 'units') as PediaTab
+    this.open('pedia', `${ic('book')}Encyklopedie`, pediaHtml(tab, this.app.inGame ? this.me.nation : 'aur'), undefined, '1180px')
+    const el = id ? this.modal.querySelector<HTMLElement>(`#pd-${tab}-${id}`) : null
+    if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('hit') }
   }
 
   /** Úvodní návod po stránkách. */

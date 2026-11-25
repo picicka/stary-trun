@@ -225,8 +225,9 @@ export class App implements MapHost {
   netStart(): void {
     const net = this.net, cfg = this.netCfg
     if (!net || net.role !== 'host' || !cfg || net.started) return
-    const nations = net.lobby().members.map(m => m.nation)
-    const s = createGame(nations[0], cfg.difficulty, cfg.scenario, cfg.seed, Math.floor(Math.random() * 8), nations.slice(1), cfg.opts)
+    const lobby = net.lobby()
+    const nations = lobby.members.map(m => m.nation)
+    const s = createGame(nations[0], cfg.difficulty, cfg.scenario, cfg.seed, Math.floor(Math.random() * 8), nations.slice(1), { ...cfg.opts, rivals: lobby.bots })
     this.begin(s, () => this.hud.showBriefing())
     saveGame(s)
     store.set(NET_KEY, { code: net.code, seats: net.seats() })
@@ -834,17 +835,20 @@ export class App implements MapHost {
   onCameraMove(): void { if (this.inGame) this.hud.cameraMoved() }
 
   private onKey(e: KeyboardEvent): void {
-    if (!this.inGame || e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    // V menu jde klávesou jen zavřít otevřené okno (návod, encyklopedie).
+    if (!this.inGame) { if (e.key === 'Escape' && this.hud.modalOpen) this.hud.closeModal(); return }
     if (this.hud.modalOpen) { if (e.key === 'Escape') this.hud.closeModal(); return }
     const k = e.key.toLowerCase()
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.mainAction(e.shiftKey); return }
     if (e.key === 'Escape') { if (this.roadMode) this.roadMode = false; else { this.selUnit = -1; this.selCity = -1 } this.refresh(); return }
-    if (k === 'n' || e.key === 'Tab') { e.preventDefault(); const a = this.idleUnits(); if (a.length) { const cur = a.findIndex(u => u.id === this.selUnit); this.select(a[(cur + 1) % a.length], true) } return }
+    if (k === 'n' || e.key === 'Tab') { e.preventDefault(); const a = this.idleUnits(); if (a.length) { const cur = a.findIndex(u => u.id === this.selUnit); const to = e.shiftKey ? (cur < 0 ? a.length - 1 : cur + a.length - 1) : cur + 1; this.select(a[to % a.length], true) } return }
     if (k === 't') { this.hud.showTech(); return }
     if (k === 'c') { this.hud.showTraditions(); return }
     if (k === 'l') { this.hud.toggleOverview(); return }
     if (k === 'i') { this.toggleHints(); return }
     if (k === 'm') { this.hud.showMission(); return }
+    if (k === 'k') { this.hud.showPedia(); return }
     if (k === 'h' || e.key === '?') { this.hud.showHelp(); return }
     if (e.key === '+' || e.key === '=') { this.scene.zoomBy(1); return }
     if (e.key === '-') { this.scene.zoomBy(-1); return }

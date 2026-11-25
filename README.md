@@ -8,11 +8,11 @@ Hexová tahová 4X strategie v pixel artu, která běží v prohlížeči. Origi
 - Osm národů, každý s vlastností a unikátní jednotkou; ve hře 2–8 národů, které vedou lidé nebo počítač, a barbaři včetně pirátů.
 - Soupeři vedení počítačem mají šest povah (dobyvatel, stavitel, osadník, učenec, vypočítavý, obránce); každý národ má svou.
 - Hra až pro 8 hráčů u jednoho počítače: táhne se po řadě, mezi tahy mapu zakryje opona; volná místa vede počítač.
-- Hra po síti bez herního serveru: jeden hráč otevře místnost, ostatní se připojí kódem nebo odkazem a prohlížeče se spojí napřímo (WebRTC). Hráč, kterému vypadne spojení, se vrátí na své místo; hostitel může pokračovat i v uložené hře. Hráči, kteří se ve hře ještě nepotkali, táhnou zároveň; kdo se potká, od dalšího tahu se s tím druhým střídá (dá se vypnout).
+- Hra po síti bez herního serveru: jeden hráč otevře místnost, ostatní se připojí kódem nebo odkazem a prohlížeče se spojí napřímo (WebRTC). Hráč, kterému vypadne spojení, se vrátí na své místo; hostitel může pokračovat i v uložené hře. Hráči, kteří se ve hře ještě nepotkali, táhnou zároveň; kdo se potká, od dalšího tahu se s tím druhým střídá (dá se vypnout). Hostitel může na volná místa přidat soupeře vedené počítačem a vybrat jim národ.
 - Města s frontou výroby, dělníci, cesty a řeky, 28 technologií, lodě a nalodění, povyšování jednotek.
 - Diplomacie: válka a mír, obchod se surovinami, spojenectví.
 - Tři cesty k vítězství: dobytí (většina cizích sídel držená 5 tahů), div světa (Sluneční chrám dostavěný a udržený 15 tahů), nebo nejvyšší skóre po posledním tahu.
-- Česky, s návodem, bublinovou nápovědou, automatickým ukládáním, zvuky a hudbou.
+- Česky, s návodem, encyklopedií (jednotky, stavby, výzkum, národy, pole, pravidla, klávesy), bublinovou nápovědou, automatickým ukládáním, zvuky a hudbou.
 
 ## Spuštění
 

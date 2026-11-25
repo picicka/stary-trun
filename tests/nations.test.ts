@@ -171,3 +171,11 @@ test('osm národů: dva lidé a šest soupeřů odehrají hru a záznam příkaz
   for (const [pid, c] of log) { exec(b, pid, c); drainEvents() }
   assert.equal(serialize(b), serialize(s))
 })
+
+test('předem vybraní soupeři: hra je obsadí a zbytek dolosuje', () => {
+  const s = createGame('aur', 'normal', 'valley', 5, 0, ['khar'], { nations: 5, rivals: ['lume', 'khar', 'lume', 'morv'] })
+  const ai = s.players.filter(p => !p.human && p.id !== barbId(s)).map(p => p.nation)
+  assert.equal(ai.length, 3)
+  assert.deepEqual(ai.slice(0, 2), ['lume', 'morv'], 'národ hráče a opakování se vynechají')
+  assert.equal(new Set(s.players.map(p => p.nation)).size, s.players.length)
+})

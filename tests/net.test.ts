@@ -247,3 +247,31 @@ test('souběžné tahy po síti: hostitel táhne, zatímco cizí příkaz čeká
   await until(() => r.hs.idle && r.same() && r.host.s!.turn === 2, 'nové kolo')
   assert.equal(a.g.loads, 1, 'bez opravy celým stavem')
 })
+
+test('místnost: hostitel přidá soupeře vedené počítačem, ti zaberou místo i národ', async () => {
+  const r = room(3)
+  const a = await r.joinIn('Anna')
+  r.hs.addBot()
+  await until(() => a.g.lobby?.bots.length === 1, 'soupeř je vidět i u hráče')
+  const bot = r.hs.lobby().bots[0]
+  assert.ok(!r.hs.lobby().members.some(m => m.nation === bot), 'soupeř má volný národ')
+  // Národ soupeře si hráč vzít nemůže; hostitel soupeři národ změní a pak to jde.
+  const mine = a.g.lobby!.members[1].nation
+  a.cs.pick(bot)
+  await tick(40)
+  assert.equal(r.hs.lobby().members[1].nation, mine, 'národ soupeře vzít nejde')
+  r.hs.cycleBot(0)
+  await until(() => a.g.lobby!.bots[0] !== bot, 'změna národa soupeře')
+  a.cs.pick(bot)
+  await until(() => r.hs.lobby().members[1].nation === bot, 'uvolněný národ už vzít jde')
+  assert.ok(![bot, r.hs.lobby().members[0].nation].includes(r.hs.lobby().bots[0]))
+  // Místnost pro tři je plná: dva lidé a jeden počítač.
+  r.hs.addBot()
+  assert.equal(r.hs.lobby().bots.length, 1)
+  const b = r.join('Bob')
+  await b.cs.open()
+  await until(() => b.g.closed !== '', 'odmítnutí plné hry')
+  assert.match(b.g.closed, /plná/)
+  r.hs.removeBot(0)
+  assert.equal(r.hs.lobby().bots.length, 0)
+})

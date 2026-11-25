@@ -37,7 +37,7 @@ export interface HostEnd {
 export interface Member { name: string; nation: NationId; online: boolean; host: boolean }
 
 /** Místnost, jak ji vidí jeden hráč (`you` = jeho pořadí, zároveň číslo hráče ve hře). */
-export interface Lobby { code: string; info: string; max: number; members: Member[]; you: number; started: boolean }
+export interface Lobby { code: string; info: string; max: number; members: Member[]; /** Národy soupeřů vedených počítačem, které přidal hostitel; každý zabírá jedno místo. */ bots: NationId[]; you: number; started: boolean }
 
 /** Co síťová vrstva potřebuje od hry. */
 export interface NetGame {
@@ -78,6 +78,7 @@ export class HostSession {
   readonly code: string
   started = false
   private peers: Peer[]
+  private bots: NationId[] = []
   /** Pořadí posledního provedeného příkazu a počet přijatých, které na provedení čekají. */
   private seq = 0
   private queued = 0
@@ -104,7 +105,7 @@ export class HostSession {
   seats(): SavedSeat[] { return this.peers.map(p => ({ token: p.token, name: p.name, nation: p.nation })) }
 
   lobby(you = 0): Lobby {
-    return { code: this.code, info: this.info, max: this.max, started: this.started, you, members: this.peers.map((p, i) => ({ name: p.name, nation: p.nation, online: this.online(i), host: i === 0 })) }
+    return { code: this.code, info: this.info, max: this.max, started: this.started, you, bots: this.bots.slice(), members: this.peers.map((p, i) => ({ name: p.name, nation: p.nation, online: this.online(i), host: i === 0 })) }
   }
 
   private announce(): void {
@@ -116,8 +117,40 @@ export class HostSession {
   setInfo(info: string, max: number): void { this.info = info; this.max = max; this.announce() }
 
   pick(nation: NationId, seat = 0): void {
-    if (this.started || this.peers.some((p, i) => i !== seat && p.nation === nation)) return
+    if (this.started || this.bots.includes(nation) || this.peers.some((p, i) => i !== seat && p.nation === nation)) return
     this.peers[seat].nation = nation
+    this.announce()
+  }
+
+  /** První národ, který nemá žádný hráč ani počítač (hledá se od `from`). */
+  private freeNation(from = 0): NationId | undefined {
+    for (let k = 0; k < PLAYABLE.length; k++) {
+      const n = PLAYABLE[(from + k) % PLAYABLE.length]
+      if (!this.bots.includes(n) && !this.peers.some(p => p.nation === n)) return n
+    }
+    return undefined
+  }
+
+  /** Hostitel přidá soupeře vedeného počítačem na volné místo. */
+  addBot(): void {
+    const n = this.freeNation()
+    if (this.started || !n || this.peers.length + this.bots.length >= this.max) return
+    this.bots.push(n)
+    this.announce()
+  }
+
+  removeBot(i: number): void {
+    if (this.started || i < 0 || i >= this.bots.length) return
+    this.bots.splice(i, 1)
+    this.announce()
+  }
+
+  /** Dá soupeři další volný národ v pořadí. */
+  cycleBot(i: number): void {
+    if (this.started || i < 0 || i >= this.bots.length) return
+    const n = this.freeNation(PLAYABLE.indexOf(this.bots[i]) + 1)
+    if (!n) return
+    this.bots[i] = n
     this.announce()
   }
 
@@ -133,8 +166,8 @@ export class HostSession {
       let i = this.peers.findIndex((p, k) => k > 0 && p.token === m.token)
       if (i < 0) {
         if (this.started) { this.deny(link, 'Tato hra už běží a nové hráče nepřijímá.'); return }
-        if (this.peers.length >= this.max) { this.deny(link, 'Hra je plná.'); return }
-        const free = PLAYABLE.find(n => !this.peers.some(p => p.nation === n))!
+        if (this.peers.length + this.bots.length >= this.max) { this.deny(link, 'Hra je plná.'); return }
+        const free = this.freeNation()!
         i = this.peers.push({ token: m.token, name: m.name.slice(0, 20) || 'Hráč', nation: free, link: null, ready: false, pending: [] }) - 1
       }
       const p = this.peers[i]

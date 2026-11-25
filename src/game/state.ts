@@ -43,6 +43,8 @@ export interface GameOptions {
   maxTurns?: number
   /** Souběžné tahy hráčů, kteří se ještě nepotkali (síťová hra). */
   simul?: boolean
+  /** Národy soupeřů vedených počítačem vybrané předem; zbylá místa se dolosují. */
+  rivals?: NationId[]
 }
 
 /** Národy soupeřů řízených počítačem: vylosují se ze zbylých, střídavě výbojný a stavitel, dokud je z čeho brát. */
@@ -78,7 +80,10 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
   const slots = total + 1
   const players = humans.map((n, i) => makePlayer(i, n, true, 'human', slots))
   let rivals: NationId[]
-  if (custom) rivals = drawRivals(humans, total - humans.length, seed)
+  if (custom) {
+    const fixed = [...new Set(opts.rivals ?? [])].filter(n => PLAYABLE.includes(n) && !humans.includes(n)).slice(0, total - humans.length)
+    rivals = [...fixed, ...drawRivals([...humans, ...fixed], total - humans.length - fixed.length, seed)]
+  }
   else if (humans.length === 1) rivals = pickRivals(nation)
   else {
     // Třetí u stolu: výbojný soused, pokud je takový národ volný.
