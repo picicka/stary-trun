@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createGame } from '../src/game/state.ts'
 import type { GameOver } from '../src/game/types.ts'
 import { BUILDINGS, BUILDING_IDS, ERAS, PERSONAS, PERSONA_IDS, TECHS, TECH_IDS, UNITS, UNIT_IDS, type TechId } from '../src/game/data.ts'
-import { SIEGE_VS_CITY, SIEGE_VS_UNIT, unitStrength, RAM_BONUS, SIEGE_UNITS, besieged, previewAttack, idx, WONDER_TURNS, checkVictory, wonderLeft, canBuildBuilding, citiesOf, cityMaxHp, cityStrength, cityYields, foundCity, makeUnit, techPath, unitsOf, upgradeTarget } from '../src/game/rules.ts'
+import { SIEGE_VS_CITY, SIEGE_VS_UNIT, unitStrength, RAM_BONUS, SIEGE_UNITS, besieged, previewAttack, idx, WONDER_TURNS, checkVictory, wonderLeft, canBuildBuilding, citiesOf, cityMaxHp, cityStrength, cityYields, foundCity, makeUnit, techPath, unitsOf, upgradeTarget, availableTechs, grantTech, techCost } from '../src/game/rules.ts'
 
 const game = () => {
   const s = createGame('aur', 'normal', 'valley', 7)
@@ -11,13 +11,15 @@ const game = () => {
   return { s, p: s.players[0], c: citiesOf(s, 0)[0] }
 }
 
-test('strom technologií: šest stupňů, platné předpoklady, žádné dvě karty na stejném místě', () => {
-  assert.equal(TECH_IDS.length, 28)
-  assert.equal(Math.max(...TECH_IDS.map(t => TECHS[t].tier)), 6)
+test('strom technologií: sedm stupňů a opakovatelná technologie, platné předpoklady, žádné dvě karty na stejném místě', () => {
+  assert.equal(TECH_IDS.filter(t => !TECHS[t].repeat).length, 36)
+  assert.equal(Math.max(...TECH_IDS.filter(t => !TECHS[t].repeat).map(t => TECHS[t].tier)), 7)
   const spots = new Set<string>()
   for (const id of TECH_IDS) {
     const t = TECHS[id]
-    for (const r of t.req) assert.ok(TECHS[r].tier <= t.tier && TECHS[r].cost <= t.cost, `${id}: předpoklad ${r} nesmí být z vyššího stupně`)
+    for (const r of t.req) assert.ok(TECHS[r].tier < t.tier && TECHS[r].cost <= t.cost, `${id}: předpoklad ${r} musí být z nižšího stupně`)
+    // Stupně nejdou přeskakovat: aspoň jeden předpoklad je ze stupně těsně pod.
+    if (t.tier > 1) assert.ok(t.req.some(r => TECHS[r].tier === t.tier - 1), `${id}: chybí předpoklad ze stupně ${t.tier - 1}`)
     assert.ok(!spots.has(`${t.tier}/${t.row}`), `${id}: místo ${t.tier}/${t.row} je obsazené`)
     spots.add(`${t.tier}/${t.row}`)
     assert.ok(t.row >= 0 && t.row <= 6)
@@ -27,20 +29,35 @@ test('strom technologií: šest stupňů, platné předpoklady, žádné dvě ka
   assert.ok(ERAS[ERAS.length - 1].techs <= TECH_IDS.length)
 })
 
-test('každá technologie šestého a pátého stupně něco odemyká', () => {
-  for (const id of TECH_IDS.filter(t => TECHS[t].tier >= 5)) {
+test('každá technologie od čtvrtého stupně výš něco odemyká', () => {
+  for (const id of TECH_IDS.filter(t => TECHS[t].tier >= 5 && !TECHS[t].repeat)) {
     const gives = UNIT_IDS.some(u => UNITS[u].tech === id) || BUILDING_IDS.some(b => BUILDINGS[b].tech === id)
     assert.ok(gives, `${id} nic neodemyká`)
   }
 })
 
-test('k astronomii se nedá dojít bez stavitelství a inženýrství', () => {
+test('ke Slunečnímu kalendáři vede učenecká a stavitelská větev, ne celý strom', () => {
   const { p } = game()
   p.techs = []
-  const path = techPath(p, 'astronomy')
-  for (const t of ['masonry', 'construction', 'math', 'engineering', 'philosophy'] as TechId[]) assert.ok(path.includes(t), `cesta vede přes ${t}`)
+  const path = techPath(p, 'calendar')
+  for (const t of ['masonry', 'construction', 'math', 'engineering', 'philosophy', 'education', 'astronomy', 'architecture'] as TechId[]) assert.ok(path.includes(t), `cesta vede přes ${t}`)
+  for (const t of ['steel', 'chivalry', 'siegecraft', 'banking', 'navigation', 'iron'] as TechId[]) assert.ok(!path.includes(t), `cesta nevede přes ${t}`)
   const cost = path.reduce((a, t) => a + TECHS[t].cost, 0)
-  assert.ok(cost > 1000, `cesta k chrámu stojí ${cost} bodů`)
+  assert.ok(cost > 2000 && cost < 3200, `cesta k chrámu stojí ${cost} bodů`)
+  assert.equal(BUILDINGS.wonder.tech, 'calendar')
+})
+
+test('Správa říše: jde zkoumat opakovaně, zdražuje a přidává zlato každému městu', () => {
+  const { s, p, c } = game()
+  p.techs = TECH_IDS.filter(t => !TECHS[t].repeat)
+  assert.deepEqual(availableTechs(p), ['empire'])
+  const gold = cityYields(s, c).gold, cost = techCost(p, 'empire')
+  grantTech(s, p, 'empire')
+  assert.equal(p.empire, 1)
+  assert.ok(!p.techs.includes('empire'))
+  assert.deepEqual(availableTechs(p), ['empire'])
+  assert.equal(cityYields(s, c).gold, gold + 1)
+  assert.ok(techCost(p, 'empire') > cost)
 })
 
 test('povahy počítače mají v plánu výzkumu každou technologii právě jednou', () => {

@@ -17,7 +17,7 @@ export interface MapHost {
   onCameraMove(): void
 }
 
-interface UnitView { c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
+interface UnitView { extra?: Phaser.GameObjects.Image[]; c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
 
 const A = 'atlas'
 const D_FOG = 100000
@@ -304,7 +304,7 @@ export class MapScene extends Phaser.Scene {
       roads = 64
       for (let dir = 0; dir < 6; dir++) { const [nx, ny] = neighborXY(x, y, dir); if (inMap(s, nx, ny) && hasRoad(s, idx(s, nx, ny)) && (t.road || s.tiles[idx(s, nx, ny)].road)) roads |= 1 << dir }
     }
-    const sig = `${roads}|${t.forest ? 1 : 0}|${t.imp ?? ''}|${t.special ?? ''}|${res}|${city ? `${size}:${city.owner}` : ''}|${wonder ? 1 : 0}`
+    const sig = `${roads}|${t.roadRuin ? 'x' : ''}|${t.forest ? 1 : 0}|${t.imp ?? ''}${t.ruin ? 'x' : ''}|${t.special ?? ''}|${res}|${city ? `${size}:${city.owner}` : ''}|${wonder ? 1 : 0}`
     if (sig === this.tileSig[i]) return
     this.tileSig[i] = sig
     for (const o of this.tileDyn[i]) o.destroy()
@@ -314,16 +314,20 @@ export class MapScene extends Phaser.Scene {
     const tall = (frame: string, dd = 3) => { const img = this.add.image(px, py - 16, A, frame).setOrigin(0, 0).setDepth(d + dd); objs.push(img); return img }
     const sway = (frame: string, dd = 3) => this.swaying.set(i, { img: tall(frame, dd), frame, on: false })
     if (roads) {
-      if (t.road) objs.push(this.add.image(px, py, A, 'road_c').setOrigin(0, 0).setDepth(d + 1.4))
+      // Vypleněná cesta zůstává vidět, jen vybledlá.
+      if (t.road) objs.push(this.add.image(px, py, A, 'road_c').setOrigin(0, 0).setDepth(d + 1.4).setAlpha(t.roadRuin ? 0.4 : 1))
       for (let dir = 0; dir < 6; dir++) if (roads & (1 << dir)) objs.push(this.add.image(px, py, A, `road_${dir}`).setOrigin(0, 0).setDepth(d + 1.5))
     }
     if (city) {
       tall(`city_${size}_${s.players[city.owner].nation}`, 4)
     } else {
-      if (t.imp === 'farm') tall('i_farm', 2)
+      // Vypleněné vylepšení je ztmavlé a kouří se z něj.
+      const ruined = (img: Phaser.GameObjects.Image) => { if (t.ruin) img.setTint(0x6a5a55) }
+      if (t.imp === 'farm') ruined(tall('i_farm', 2))
       if (t.forest) sway(`f_forest_${1 + ((x * 3 + y * 5 + t.variant) % 2)}`)
       if (res) objs.push(this.add.image(px, py, A, `r_${res}`).setOrigin(0, 0).setDepth(d + 4))
-      if (t.imp && t.imp !== 'farm') tall(`i_${t.imp}`, 4)
+      if (t.imp && t.imp !== 'farm') ruined(tall(`i_${t.imp}`, 4))
+      if (t.imp && t.ruin) tall('i_ruin', 4.5)
       if (t.special === 'ruins') tall('f_ruins', 4)
       if (t.special === 'camp') sway('f_camp', 4)
       if (wonder) tall('f_wonder', 5)
@@ -518,7 +522,7 @@ export class MapScene extends Phaser.Scene {
     v.work = undefined; v.tool = undefined; v.job = job ?? undefined
     v.spr.setY(0)
     if (!job) return
-    const kind = job === 'mine' ? 'pick' : job === 'farm' ? 'hoe' : job === 'pasture' ? 'hammer' : job === 'lumber' ? 'saw' : 'shovel'
+    const kind = job === 'mine' ? 'pick' : job === 'farm' ? 'hoe' : job === 'pasture' || job === 'village' || job === 'repair' || job === 'fishery' ? 'hammer' : job === 'lumber' || job === 'clear' ? 'saw' : 'shovel'
     const tool = this.add.image(0, 0, A, `tool_${kind}`)
     v.c.addAt(tool, 2)
     v.tool = tool
@@ -616,6 +620,12 @@ export class MapScene extends Phaser.Scene {
     }
     const spent = u.owner === this.host.me && u.moves <= 0
     v.spr.setTint(spent ? 0xa9adbd : 0xffffff)
+    // Šik a voj: za jednotkou stojí další postavy.
+    const more = (u.size ?? 1) - 1
+    const extra = (v.extra ??= [])
+    while (extra.length < more) { const im = this.add.image(0, 0, A, this.frameOf(u)); v.c.addAt(im, 1); extra.push(im) }
+    while (extra.length > more) extra.pop()!.destroy()
+    extra.forEach((im, k) => im.setFrame(this.frameOf(u)).setPosition(k === 0 ? -6 : 6, -3).setFlipX(v.spr.flipX).setTint(spent ? 0x8f93a3 : 0xd8dbe6))
     v.spr.setAlpha(u.owner === this.host.me && (u.sleep || u.fortified) ? 0.88 : 1)
     this.animateWork(v, u.work && v.c.visible ? u.work : null)
   }
@@ -701,6 +711,19 @@ export class MapScene extends Phaser.Scene {
     }
   }
 
+  /** Růst hranic otevřeného města: pole na výběr (fialově) a to, které přijde příště (výrazný rám). */
+  showBorder(options: number[], next: number): void {
+    for (const i of options) {
+      const [, y, px, py] = this.tilePos(i)
+      this.marks.push(this.add.image(px, py, A, 'hex_move').setOrigin(0, 0).setTint(0xb872ea).setAlpha(0.6).setDepth(y * 10 + 5))
+      this.marks.push(this.add.image(px, py, A, 'hex_worked').setOrigin(0, 0).setTint(0xb872ea).setAlpha(0.9).setDepth(D_FOG - 13))
+    }
+    if (next >= 0) {
+      const [, , px, py] = this.tilePos(next)
+      this.marks.push(this.add.image(px, py, A, 'hex_worked').setOrigin(0, 0).setTint(0xd9a3ff).setDepth(D_FOG - 12))
+    }
+  }
+
   /** Zvýrazní pole, která město obdělává. */
   showWorked(tiles: number[], owned: number[]): void {
     this.clearMarks()
@@ -764,7 +787,8 @@ export class MapScene extends Phaser.Scene {
     for (const { i, job } of jobs) {
       const [, y, px, py] = this.tilePos(i)
       this.marks.push(this.add.image(px, py, A, 'hex_move').setOrigin(0, 0).setTint(0xe8ecf5).setAlpha(0.7).setDepth(y * 10 + 5))
-      this.ghost(`i_${job}`, px + 16, py + 12, 0.5)
+      const imp = this.host.state.tiles[i].imp
+      this.ghost(job === 'repair' ? (imp ? `i_${imp}` : 'road_c') : `i_${job}`, px + 16, py + 12, 0.5)
     }
   }
 

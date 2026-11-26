@@ -6,7 +6,7 @@ import type { PromoId, ScenarioId, TraditionId } from './game/data.ts'
 import { hexDist } from './game/hex.ts'
 import {
   atWar, availableTechs, canFoundCity, cityAt, cityById, citiesOf, cityWorkable, drainEvents, idx, isCivilian, isEmbarked,
-  cityTargets, escortOf, inMap, isNaval, isWater, traditionReady, tileJobs, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
+  cityTargets, escortOf, inMap, isNaval, isWater, traditionReady, borderOptions, borderTarget, mergeTargets, splitBlock, unitSize, tileJobs, jobInfo, recommendJob, pillageBlock, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
   type PathMap,
 } from './game/rules.ts'
 import { actors, canAct, clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
@@ -63,6 +63,8 @@ export class App implements MapHost {
   roadMode = false
   /** Pole, kde mohou vybraní dělníci stavět vylepšení (index → práce). */
   jobs = new Map<number, string>()
+  /** Pole, která může otevřené město zabrat (jen v ručním režimu růstu hranic). */
+  borderPick = new Set<number>()
   /** Doporučená místa pro město pro vybrané osadníky (index pole → hodnocení). */
   sites = new Map<number, number>()
   /** Za kolik tahů dorazí vybraná jednotka do cíle své cesty, nebo -1. */
@@ -460,8 +462,12 @@ export class App implements MapHost {
       // Cíle pro střelbu z hradeb: město střílí jednou za tah, cíl lze vybrat kliknutím.
       if (this.myTurn && !c.fired) for (const t of cityTargets(this.state, c)) if (this.player.visible[idx(this.state, t.x, t.y)]) this.targets.add(idx(this.state, t.x, t.y))
       this.scene.showTargets([...this.targets])
+      // Hranice: kam může město růst a které pole přijde příště.
+      this.borderPick = c.border === 'manual' ? new Set(borderOptions(this.state, c)) : new Set()
+      this.scene.showBorder([...this.borderPick], borderTarget(this.state, c))
       return
     }
+    this.borderPick = new Set()
     if (!u || u.owner !== this.me) { this.selUnit = -1; this.scene.showSelection(null, [], []); return }
     const s = this.state
     for (const i of reachable(s, u)) if (s.players[this.me].explored[i]) this.reach.add(i)
@@ -476,7 +482,9 @@ export class App implements MapHost {
       let best = -1, bv = -Infinity
       for (let i = 0; i < s.tiles.length; i++) {
         if (s.tiles[i].owner !== this.me || !s.players[this.me].explored[i]) continue
-        const j = tileJobs(s, i, this.me).find(o => o.ok && o.job !== 'road')
+        // Rádce navrhuje na každém poli to, co by tam postavila automatika.
+        const rj = recommendJob(s, i, this.me)
+        const j = rj ? tileJobs(s, i, this.me).find(o => o.ok && o.job === rj) : undefined
         if (!j || this.pm.dist[i] === Infinity) continue
         this.jobs.set(i, j.job)
         // Nejvíc se vyplatí surovina a pole, které město už obdělává; blízkost rozhoduje při shodě.
@@ -582,6 +590,10 @@ export class App implements MapHost {
     const from = this.city
     if (!u && from && this.myTurn && !right && this.targets.has(i)) {
       void this.run(() => { const r = this.cmd({ t: 'cityShoot', city: from.id, x, y }); if (!r.ok && r.text) this.hud.toast(r.text) })
+      return
+    }
+    if (!u && from && this.myTurn && !right && this.borderPick.has(i)) {
+      void this.run(() => { const r = this.cmd({ t: 'border', city: from.id, tile: i }); if (!r.ok && r.text) this.hud.toast(r.text); else sfx('click') })
       return
     }
     if (u && this.roadMode) {
@@ -734,8 +746,27 @@ export class App implements MapHost {
       return
     }
     if (a.startsWith('imp:')) {
-      const job = a.slice(4) as ImprovementId | 'road'
-      if (this.cmd({ t: 'work', unit, job }).ok) { sfx('build'); this.hud.toast(`${job === 'road' ? 'Cesta' : IMPROVEMENTS[job].name}: hotovo za ${u.workLeft} tahy.`); this.save(); this.autoAdvance(); this.refresh() }
+      const job = a.slice(4) as JobId
+      if (this.cmd({ t: 'work', unit, job }).ok) { sfx('build'); this.hud.toast(`${jobInfo(job).name}: hotovo za ${u.workLeft} ${u.workLeft === 1 ? 'tah' : u.workLeft < 5 ? 'tahy' : 'tahů'}.`); this.save(); this.autoAdvance(); this.refresh() }
+      return
+    }
+    if (a === 'merge') {
+      // Přednost má větší spojení, pak zdravější soused.
+      const to = mergeTargets(s, u).sort((p, q) => unitSize(q) - unitSize(p) || q.hp - p.hp)[0]
+      if (!to) { sfx('error'); this.hud.toast('Vedle nestojí stejná jednotka, se kterou by se šlo spojit.'); return }
+      void this.run(() => { const r = this.cmd({ t: 'merge', unit, into: to.id }); if (r.ok) { sfx('build'); this.selUnit = to.id } else if (r.text) this.hud.toast(r.text) })
+      return
+    }
+    if (a === 'split') {
+      const why = splitBlock(s, u)
+      if (why) { sfx('error'); this.hud.toast(why); return }
+      void this.run(() => { if (this.cmd({ t: 'split', unit }).ok) sfx('build') })
+      return
+    }
+    if (a === 'pillage') {
+      const why = pillageBlock(s, u)
+      if (why) { sfx('error'); this.hud.toast(why); return }
+      void this.run(() => { if (this.cmd({ t: 'pillage', unit }).ok) sfx('build') }).then(() => this.autoAdvance())
       return
     }
     if (a === 'escort') {
@@ -811,8 +842,16 @@ export class App implements MapHost {
     this.commit()
   }
 
-  buyNow(c: City): void {
-    void this.run(() => { sfx(this.cmd({ t: 'buy', city: c.id }).ok ? 'found' : 'error') })
+  /** Růst hranic města: přepnutí režimu a (v ručním režimu) volba dalšího pole kliknutím na mapě. */
+  borderMode(c: City, mode: 'auto' | 'manual'): void {
+    if (!this.cmd({ t: 'border', city: c.id, mode }).ok) return
+    sfx('click')
+    if (mode === 'manual') this.hud.toast('Fialově označená pole může město zabrat. Klikněte na to, které má být další.')
+    this.commit()
+  }
+
+  buyNow(c: City, item?: BuildItem): void {
+    void this.run(() => { sfx(this.cmd({ t: 'buy', city: c.id, item }).ok ? 'found' : 'error') })
   }
 
   chooseTradition(id: TraditionId): void {
@@ -909,6 +948,8 @@ export class App implements MapHost {
     else if (k === 'r' && u.type === 'worker') this.unitAction('roadto')
     else if (k === 'g' && !isCivilian(u) && !isNaval(u)) this.unitAction(u.escort === undefined ? 'escort' : 'wake')
     else if (k === 'u' && !isCivilian(u)) this.unitAction('upgrade')
+    else if (k === 'p' && !isCivilian(u)) this.unitAction('pillage')
+    else if (k === 'j' && !isCivilian(u)) this.unitAction('merge')
     else if (k === 'z') this.unitAction('sleep')
     else if (k === 'x') this.unitAction('skip')
   }

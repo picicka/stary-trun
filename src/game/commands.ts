@@ -6,7 +6,7 @@ import { adviseBuild, aiAcceptsPeace } from './ai.ts'
 import { answerAlly, askAlliance, buyResource, giveGold, sellResource } from './diplo.ts'
 import {
   adoptTradition, atWar, attack, buy, canFoundCity, canWork, cityAt, cityById, declareWar, dequeue, enqueue, foundCity, killUnit, makePeace, moveUnit, note, pathMap, pathTo,
-  planResearch, previewAttack, promote, promoteUnit, roadStep, startWork, stopUnit, unitById, unitsOf, updateVisibility, upgradeBlock, upgradeUnit,
+  borderOptions, buyItem, growBorders, mergeBlock, mergeUnits, splitBlock, splitUnit, pillage, pillageBlock, planResearch, previewAttack, promote, promoteUnit, roadStep, startWork, stopUnit, unitById, unitsOf, updateVisibility, upgradeBlock, upgradeUnit,
   assignWorkers, cityShoot, cityTargets, escortBlock, follow, followAll,
 } from './rules.ts'
 import { canAct, endTurn, settle } from './state.ts'
@@ -21,6 +21,11 @@ export type Command =
   | { t: 'attack'; unit: number; x: number; y: number; war?: boolean }
   | { t: 'found'; unit: number }
   | { t: 'work'; unit: number; job: JobId }
+  /** Spojení se sousední stejnou jednotkou v šik či voj a jejich rozdělení. */
+  | { t: 'merge'; unit: number; into: number }
+  | { t: 'split'; unit: number }
+  /** Vyplenění cizího vylepšení či cesty na poli, kde bojová jednotka stojí. */
+  | { t: 'pillage'; unit: number }
   | { t: 'roadTo'; unit: number; x: number; y: number }
   | { t: 'promo'; unit: number; id: PromoId }
   /** Přezbrojení; `all` = všechny jednotky téhož druhu, u kterých to jde. */
@@ -37,7 +42,10 @@ export type Command =
   | { t: 'cityShoot'; city: number; x: number; y: number }
   /** Zaměření města na jídlo, výrobu, nebo zlato; null = vyváženě (automatika). */
   | { t: 'focus'; city: number; focus: CityFocus | null }
-  | { t: 'buy'; city: number }
+  /** Růst hranic města: přepnutí režimu (sám / vybírá hráč) a volba dalšího pole. */
+  | { t: 'border'; city: number; mode?: 'auto' | 'manual'; tile?: number }
+  /** Koupě za zlato: bez položky to, co město právě staví, s položkou kteroukoli z nabídky. */
+  | { t: 'buy'; city: number; item?: BuildItem }
   | { t: 'tradition'; id: TraditionId }
   | { t: 'research'; tech: TechId; append?: boolean }
   | { t: 'war'; vs: number }
@@ -121,6 +129,22 @@ function run(s: GameState, pid: number, c: Command): Result {
       }
       case 'work':
         return canWork(s, u, c.job) && startWork(s, u, c.job) ? OK : no()
+      case 'merge': {
+        const to = unitById(s, c.into)
+        if (!to) return no()
+        const err = mergeBlock(s, u, to)
+        if (err) return no(err)
+        mergeUnits(s, u, to); updateVisibility(s, pid)
+        return OK
+      }
+      case 'split': {
+        const err = splitBlock(s, u)
+        return err ? no(err) : splitUnit(s, u) ? OK : no()
+      }
+      case 'pillage': {
+        const err = pillageBlock(s, u)
+        return err ? no(err) : pillage(s, u) ? OK : no()
+      }
       case 'roadTo':
         if (u.type !== 'worker') return no()
         if (!pathTo(s, pathMap(s, u, undefined, me), c.x, c.y)) return no('Tam dělníci cestu nedovedou.')
@@ -164,6 +188,16 @@ function run(s: GameState, pid: number, c: Command): Result {
       case 'unqueue': if (c.i >= city.queue.length) return no(); dequeue(s, city, c.i); return OK
       case 'promote': if (c.i < 0 || c.i >= city.queue.length) return no(); promote(s, city, c.i); return OK
       case 'advise': adviseBuild(s, city); return OK
+      case 'border':
+        if (c.mode === 'manual') city.border = 'manual'
+        else if (c.mode === 'auto') { delete city.border; delete city.nextTile }
+        if (c.tile !== undefined) {
+          if (!borderOptions(s, city).includes(c.tile)) return no('Toto pole město zabrat nemůže.')
+          city.nextTile = c.tile
+        }
+        // Je-li kultury dost, pole připadne městu hned.
+        growBorders(s, city); assignWorkers(s, city)
+        return OK
       case 'cityShoot': {
         if (city.fired) return no('Město už v tomto tahu střílelo.')
         const target = cityTargets(s, city).find(u => u.x === c.x && u.y === c.y && me.visible[c.y * s.W + c.x])
@@ -177,7 +211,7 @@ function run(s: GameState, pid: number, c: Command): Result {
         if (c.focus) city.focus = c.focus; else delete city.focus
         assignWorkers(s, city)
         return OK
-      case 'buy': return buy(s, city) ? OK : no()
+      case 'buy': return (c.item ? buyItem(s, city, c.item) : buy(s, city)) ? OK : no()
     }
   }
 

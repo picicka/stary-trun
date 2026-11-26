@@ -252,7 +252,11 @@ export function deserialize(json: string): GameState | null {
     const s = JSON.parse(json) as GameState
     if (!s || s.version !== SAVE_VERSION || !Array.isArray(s.tiles) || s.tiles.length !== s.W * s.H) return null
     // Doplnění polí, která starší uložené hry neznají.
-    for (const c of s.cities) c.queue ??= []
+    for (const c of s.cities) {
+      c.queue ??= []
+      // Starší hry rozšiřovaly hranice po okruzích: počet zabraných polí se dopočítá a nastřádaná kultura začíná od nuly.
+      if (c.grown === undefined) { c.grown = Math.max(0, s.tiles.filter(t => t.city === c.id).length - 7); c.culture = 0 }
+    }
     for (const u of s.units) { u.way ??= []; u.auto ??= false; u.todo ??= null; u.roadTo ??= null; u.xp ??= 0; u.promos ??= []; u.sea ??= false }
     // Pole vztahů mají jedno místo na každého hráče; starší hry je měly jako jedno číslo vůči hráči 0.
     const each = (v: unknown): number[] => { const a = Array.isArray(v) ? v.slice() : [Number(v) || 0]; while (a.length < s.players.length) a.push(0); return a }

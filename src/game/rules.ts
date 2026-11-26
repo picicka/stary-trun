@@ -1,6 +1,6 @@
 // Pravidla hry: výnosy, města, pohyb, boj, průběh tahu. Bez závislosti na Phaseru.
 import {
-  ERAS, GOLDEN_TURNS, TUNE, TRADITIONS, TRADITION_IDS, traditionCost, type TraditionId, SCENARIOS, BUILDINGS, BUILDING_IDS, DIFFICULTY, IMPROVEMENTS, NATIONS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS, TERRAIN, UNITS, UNIT_IDS, XP_LEVELS, unitFor,
+  ERAS, GOLDEN_TURNS, REPEAT_STEP, TUNE, TRADITIONS, TRADITION_IDS, BRANCHES, BRANCH_IDS, branchOf, type BranchId, traditionCost, type TraditionId, SCENARIOS, BUILDINGS, BUILDING_IDS, DIFFICULTY, IMPROVEMENTS, CLEAR, REPAIR, REPLACE_TURNS, PILLAGE_GOLD, LINK_TECH, NATIONS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS, TERRAIN, UNITS, UNIT_IDS, XP_LEVELS, unitFor,
   type BuildingId, type ImprovementId, type PromoId, type ResourceId, type TechId, type UnitId, type Yields,
   PERSONAS, type PersonaId,
 } from './data.ts'
@@ -121,7 +121,7 @@ export function ownSources(s: GameState, pid: number, r: ResourceId): number {
   for (let i = 0; i < s.tiles.length; i++) {
     const t = s.tiles[i]
     if (t.owner !== pid || t.res !== r) continue
-    if (t.imp === RESOURCES[r].improvement || s.cities.some(c => c.y * s.W + c.x === i)) n++
+    if ((t.imp === RESOURCES[r].improvement && !t.ruin) || s.cities.some(c => c.y * s.W + c.x === i)) n++
   }
   return n
 }
@@ -143,7 +143,7 @@ export function resourceCap(s: GameState, pid: number, r: ResourceId): number {
 /** Kolik kapacity už je zabrané: existující jednotky a rozestavěné v ostatních městech (město `exceptCity` se nepočítá). */
 export function resourceUsed(s: GameState, pid: number, r: ResourceId, exceptCity = -1): number {
   let n = 0
-  for (const u of s.units) if (u.owner === pid && UNITS[u.type].needs === r) n++
+  for (const u of s.units) if (u.owner === pid && UNITS[u.type].needs === r) n += unitSize(u)
   for (const c of s.cities) if (c.owner === pid && c.id !== exceptCity && c.build?.kind === 'unit' && UNITS[c.build.id].needs === r) n++
   return n
 }
@@ -165,10 +165,15 @@ export function tileYield(s: GameState, i: number, pid: number): Yields {
   let food = td.food, prod = td.prod, gold = td.gold
   if (t.forest) { food = Math.min(food, 1); prod += 1; if (nation === 'sylv') prod += 1 }
   if (t.res && resourceVisible(p, t.res)) { const r = RESOURCES[t.res]; food += r.food; prod += r.prod; gold += r.gold; if (t.res === 'stone' && nation === 'morv') prod += 1 }
-  if (t.imp) {
+  if (t.imp && !t.ruin) {
     const im = IMPROVEMENTS[t.imp]
     food += im.food; prod += im.prod; gold += im.gold
-    if (t.imp === 'farm') { if (nation === 'aur') food += 1; if (hasTech(p, 'irrigation')) food += 1 }
+    // Zavlažování pomáhá jen farmám u řeky; pile řeka plaví dřevo; ves vynáší víc ve městě spojeném s hlavním.
+    if (t.imp === 'farm') { if (nation === 'aur') food += 1; if (hasTech(p, 'irrigation') && t.river) food += 1 }
+    if (t.imp === 'lumber' && t.river) prod += 1
+    if (t.imp === 'village' && hasTech(p, LINK_TECH) && cityById(s, t.city)?.linked) gold += 1
+    if (t.imp === 'village' && p.traditions.includes('merchants')) gold += 1
+    if (t.imp === 'fishery' && p.traditions.includes('fishers')) food += 1
     if (t.imp === 'mine' && nation === 'khar') prod += 1
     if (t.imp === 'pasture' && nation === 'tark') food += 1
   }
@@ -178,11 +183,16 @@ export function tileYield(s: GameState, i: number, pid: number): Yields {
   return { food, prod, gold }
 }
 
+/** Observatoř je silnější ve městě na pahorkatině nebo hned u hor. */
+export function observatorySite(s: GameState, c: City): boolean {
+  return s.tiles[idx(s, c.x, c.y)].t === 'hills' || neighbors(s, c.x, c.y).some(n => s.tiles[idx(s, n[0], n[1])].t === 'mountain')
+}
+
 export interface CityYields { food: number; prod: number; gold: number; sci: number; culture: number; foodNet: number }
 
 export function cityWorkable(s: GameState, c: City): number[] {
   const out: number[] = []
-  for (const [x, y] of tilesWithin(s, c.x, c.y, 2)) {
+  for (const [x, y] of tilesWithin(s, c.x, c.y, BORDER_MAX)) {
     if (x === c.x && y === c.y) continue
     const i = idx(s, x, y)
     const t = s.tiles[i]
@@ -232,11 +242,18 @@ export function cityYields(s: GameState, c: City): CityYields {
   if (tr('stores')) food += 1
   if (tr('trade')) gold += 2
   if (tr('scribes')) sci += has('library') ? 2 : 1
+  if (tr('stargazers')) sci += has('observatory') ? 3 : 1
+  if (tr('fishers') && has('harbor')) gold += 1
   if (s.turn < p.goldenUntil) { prod += 1; gold += 1 }
   if (has('harbor')) gold += 2
   if (has('granary')) food += 2
   if (has('workshop')) prod += 2
+  if (has('guildhall')) prod += 2 + Math.floor(c.pop / 4)
+  if (has('caravanserai') && c.linked) gold += 3
+  gold += p.empire ?? 0
   if (has('library')) sci += 2 + Math.floor(c.pop / 2)
+  if (has('university')) sci += 4 + Math.floor(c.pop / 3)
+  if (has('observatory')) sci += 3 + (observatorySite(s, c) ? 3 : 0)
   if (p.nation === 'lume') sci += (has('library') ? 2 : 0) + (has('temple') ? 2 : 0)
   if (has('temple')) gold += 1
   if (has('academy')) sci = Math.round((sci + 3) * 1.25)
@@ -253,18 +270,102 @@ export function cityYields(s: GameState, c: City): CityYields {
 /** Odkud město bere kulturu (pro výpočet i pro nápovědu). */
 export function cultureSources(c: City, p?: Player, turn = 0): [string, number][] {
   const out: [string, number][] = [['Město', 1]]
+  // Velké město dává víc kultury než několik malých.
+  if (c.pop >= 4) out.push(['Obyvatelé', Math.floor(c.pop / 4)])
   if (p?.traditions.includes('feasts')) out.push(['Slavnosti', 2])
   if (p && turn < p.goldenUntil) out.push(['Zlatý věk', 1])
   if (c.capital) out.push(['Hlavní město', 1])
   if (c.buildings.includes('monument')) out.push(['Monument', 2])
   if (c.buildings.includes('temple')) out.push(['Chrám', 3])
+  if (c.buildings.includes('amphitheater')) out.push(['Amfiteátr', 4])
   if (p?.nation === 'lume') { const n = Number(c.buildings.includes('library')) + Number(c.buildings.includes('temple')); if (n) out.push(['Světlo poznání', n]) }
   if (c.buildings.includes('wonder')) out.push(['Sluneční chrám', 4])
   return out
 }
 
 /** Kolik nastřádané kultury je třeba na 2. a 3. okruh hranic. */
-export const BORDER_AT = [18, 90]
+/** Nejdál od města, kam jeho hranice dosáhnou. */
+export const BORDER_MAX = 3
+/** Cena dalšího pole v kultuře: základ a příplatek za každé pole, které už město zabralo. */
+export const BORDER_BASE = 8
+export const BORDER_STEP = 2
+/** Nejmenší vzdálenost dvou měst. */
+export const CITY_GAP = 5
+/** Strop obyvatel: bez akvaduktu, s akvaduktem bez kanalizace. */
+export const POP_CAP = [6, 12]
+
+/** Kolik obyvatel město nejvýš uživí se svými stavbami. */
+export function popCap(c: City): number {
+  return !c.buildings.includes('aqueduct') ? POP_CAP[0] : !c.buildings.includes('sewer') ? POP_CAP[1] : Infinity
+}
+
+/** Kolik kultury stojí další pole města. */
+export function borderCost(s: GameState, c: City): number {
+  const base = BORDER_BASE + BORDER_STEP * (c.grown ?? 0)
+  return s.players[c.owner].traditions.includes('chroniclers') ? Math.ceil(base * 0.75) : base
+}
+
+/** Pole, která může město zabrat: volná, do tří polí od města a sousedící s jeho územím. */
+export function borderOptions(s: GameState, c: City): number[] {
+  const out: number[] = []
+  for (const [x, y] of tilesWithin(s, c.x, c.y, BORDER_MAX)) {
+    const i = idx(s, x, y)
+    if (s.tiles[i].owner !== -1) continue
+    if (neighbors(s, x, y).some(n => s.tiles[idx(s, n[0], n[1])].city === c.id)) out.push(i)
+  }
+  return out
+}
+
+/** Jak moc město o pole stojí: suroviny napřed, pak řeka a výnos, bližší dřív, hory nakonec. */
+export function borderValue(s: GameState, c: City, i: number): number {
+  const t = s.tiles[i], p = s.players[c.owner]
+  const y = tileYield(s, i, c.owner)
+  let v = y.food * 1.4 + y.prod + y.gold * 0.6
+  if (t.res && resourceVisible(p, t.res)) v += RESOURCES[t.res].strategic ? 40 : 20
+  if (t.river) v += 1.5
+  if (t.t === 'mountain') v -= 30
+  if (t.t === 'ocean') v -= 4
+  return v - hexDist(c.x, c.y, i % s.W, (i / s.W) | 0) * 3
+}
+
+/** Které pole město zabere příště: hráčova volba, jinak nejcennější. −1 = není co, nebo se čeká na hráče. */
+export function borderTarget(s: GameState, c: City): number {
+  const opts = borderOptions(s, c)
+  if (c.nextTile !== undefined && opts.includes(c.nextTile)) return c.nextTile
+  if (c.border === 'manual' && s.players[c.owner].human) return -1
+  let best = -1, bv = -Infinity
+  for (const i of opts) { const v = borderValue(s, c, i); if (v > bv) { bv = v; best = i } }
+  return best
+}
+
+/** Připojí pole k městu. */
+function claimTile(s: GameState, c: City, i: number): void {
+  const t = s.tiles[i]
+  t.owner = c.owner; t.city = c.id
+  c.radius = Math.max(c.radius, hexDist(c.x, c.y, i % s.W, (i / s.W) | 0))
+  if (s.players[c.owner].human && t.res && RESOURCES[t.res].strategic && resourceVisible(s.players[c.owner], t.res)) {
+    const need = unitsNeeding(s, c.owner, t.res)
+    note(s, c.owner, `${c.name} zabralo pole se surovinou ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Pošlete tam dělníky postavit ${RESOURCES[t.res].improvement === 'mine' ? 'důl' : 'ohradu'} – pak půjde stavět: ${need.join(', ')}.` : ''}`, 'good', i % s.W, (i / s.W) | 0)
+  }
+}
+
+/** Růst hranic: za nastřádanou kulturu město zabírá pole po jednom. */
+export function growBorders(s: GameState, c: City): void {
+  for (let guard = 0; guard < 4; guard++) {
+    const cost = borderCost(s, c)
+    if (c.culture < cost) return
+    const i = borderTarget(s, c)
+    if (i < 0) {
+      if (c.border === 'manual' && s.players[c.owner].human && borderOptions(s, c).length) noteOnce(s, c.owner, `${c.name} má dost kultury na další pole. Otevřete město a vyberte, které zabrat.`, 'info', c.x, c.y)
+      return
+    }
+    c.culture -= cost
+    c.grown = (c.grown ?? 0) + 1
+    delete c.nextTile
+    claimTile(s, c, i)
+    updateVisibility(s, c.owner)
+  }
+}
 
 export function growthNeed(s: GameState, c: City): number {
   const base = Math.floor(11 + 6 * (c.pop - 1) + Math.pow(c.pop - 1, 1.5))
@@ -281,7 +382,7 @@ export function playerIncome(s: GameState, pid: number): Income {
     gold += y.gold; sci += y.sci
     for (const b of c.buildings) maint += BUILDINGS[b].maint
   }
-  const mil = unitsOf(s, pid).filter(u => !isCivilian(u)).length
+  const mil = headcount(unitsOf(s, pid).filter(u => !isCivilian(u)))
   const upkeep = Math.max(0, mil - freeUnits(s, pid))
   let trade = 0
   for (const d of s.deals) { if (d.seller === pid) trade += d.gpt; if (d.buyer === pid) trade -= d.gpt }
@@ -357,7 +458,13 @@ function meet(s: GameState, a: number, b: number): void {
 // ---------------------------------------------------------------- pohyb
 
 export function hasRoad(s: GameState, i: number): boolean {
-  return !!s.tiles[i].road || s.cities.some(c => c.y * s.W + c.x === i)
+  return (!!s.tiles[i].road && !s.tiles[i].roadRuin) || s.cities.some(c => c.y * s.W + c.x === i)
+}
+
+/** Stojí mezi dvěma poli s cestou most? Umí ho národ se Stavitelstvím, kterému aspoň jedno z polí patří. */
+export function bridged(s: GameState, from: number, to: number): boolean {
+  for (const i of [from, to]) { const o = s.tiles[i].owner; if (o >= 0 && o !== barbId(s) && hasTech(s.players[o], ROAD.bridgeTech)) return true }
+  return false
 }
 
 /** Teče mezi dvěma sousedními poli řeka? */
@@ -374,9 +481,9 @@ export function moveCost(s: GameState, u: Unit, from: number, to: number): numbe
   const d = UNITS[u.type]
   const t = s.tiles[to]
   if (isWater(t)) return 1
-  const road = hasRoad(s, from) && hasRoad(s, to)
-  if (road) return 0.5
   const ford = riverBetween(s, from, to) ? 1 : 0
+  // Po cestě půl bodu; přes řeku jen po mostě, jinak se brodí jako bez cesty.
+  if (hasRoad(s, from) && hasRoad(s, to) && (!ford || bridged(s, from, to))) return 0.5
   if (d.ignoreTerrain) return 1 + ford
   const nation = s.players[u.owner].nation
   let c = TERRAIN[t.t].move
@@ -645,6 +752,9 @@ function arrive(s: GameState, u: Unit): void {
 
 // ---------------------------------------------------------------- technologie
 
+/** Cena technologie pro hráče: opakovatelná s každým dokončením zdraží. */
+export function techCost(p: Player, t: TechId): number { return TECHS[t].cost + (TECHS[t].repeat ? REPEAT_STEP * (p.empire ?? 0) : 0) }
+
 export function availableTechs(p: Player): TechId[] {
   return TECH_IDS.filter(t => !p.techs.includes(t) && TECHS[t].req.every(r => p.techs.includes(r)))
 }
@@ -657,6 +767,14 @@ function cheapestTech(p: Player): TechId | null {
 
 export function grantTech(s: GameState, p: Player, t: TechId): void {
   if (p.techs.includes(t)) return
+  if (TECHS[t].repeat) {
+    // Opakovatelná technologie se mezi objevené nepočítá; jen zvedá úroveň a zůstává v nabídce.
+    p.empire = (p.empire ?? 0) + 1
+    if (p.research === t) { p.research = null; p.progress = 0 }
+    nextResearch(p)
+    if (p.human) emit({ e: 'sound', id: 'tech' })
+    return
+  }
   p.techs.push(t)
   if (p.research === t) { p.research = null; p.progress = 0 }
   p.techQueue = p.techQueue.filter(q => q !== t)
@@ -734,17 +852,35 @@ export function traditionReady(p: Player): boolean {
   return p.traditions.length < TRADITION_IDS.length && p.culture >= traditionCost(p.traditions.length)
 }
 
+/** Tradice, které jsou právě na řadě: v každé větvi ta nejvyšší dosud nepřijatá. */
+export function openTraditions(p: Player): TraditionId[] {
+  return BRANCH_IDS.map(b => branchOf(b).find(t => !p.traditions.includes(t))).filter((t): t is TraditionId => !!t)
+}
+
+/** Má národ celou větev? */
+export const branchDone = (p: Player, b: BranchId): boolean => branchOf(b).every(t => p.traditions.includes(t))
+
 /** Která tradice se národu právě hodí nejvíc (volba soupeřů i tip pro hráče): ve válce a výbojným bojové, jinak hospodářské. */
 export function traditionAdvice(p: Player): TraditionId | null {
   const martial = (PERSONAS[p.personality as PersonaId]?.martial ?? false) || (p.human && p.war.length > 0)
-  const pref: TraditionId[] = martial ? ['craft', 'warrior', 'stores', 'trade', 'militia', 'builders', 'scribes', 'feasts', 'settlers', 'sea'] : ['stores', 'craft', 'scribes', 'feasts', 'trade', 'settlers', 'builders', 'militia', 'sea', 'warrior']
-  return pref.find(x => !p.traditions.includes(x)) ?? null
+  const pref: TraditionId[] = martial
+    ? ['militia', 'warrior', 'stores', 'settlers', 'raiders', 'builders', 'craft', 'campaign', 'trade', 'scribes', 'merchants', 'feasts', 'chroniclers', 'sea', 'stargazers', 'fishers']
+    : ['stores', 'settlers', 'scribes', 'builders', 'craft', 'feasts', 'trade', 'chroniclers', 'merchants', 'stargazers', 'militia', 'sea', 'fishers', 'warrior', 'raiders', 'campaign']
+  // Přijmout jde jen tradice, která je ve své větvi na řadě.
+  const open = openTraditions(p)
+  return pref.find(x => open.includes(x)) ?? null
 }
 
-export function adoptTradition(_s: GameState, p: Player, id: TraditionId): boolean {
-  if (!traditionReady(p) || p.traditions.includes(id)) return false
+export function adoptTradition(s: GameState, p: Player, id: TraditionId): boolean {
+  if (!traditionReady(p) || !openTraditions(p).includes(id)) return false
   p.culture -= traditionCost(p.traditions.length)
   p.traditions.push(id)
+  // Dokončená větev spustí zlatý věk (běžící se prodlouží).
+  const b = TRADITIONS[id].branch
+  if (branchDone(p, b)) {
+    p.goldenUntil = Math.max(p.goldenUntil, s.turn) + GOLDEN_TURNS
+    note(s, p.id, `Větev ${BRANCHES[b].name} je úplná! Začíná zlatý věk na ${GOLDEN_TURNS} tahů.`, 'good')
+  }
   return true
 }
 
@@ -774,7 +910,7 @@ export function foundBlock(s: GameState, pid: number, x: number, y: number): str
   if (!TERRAIN[t.t].passable) return 'Zde město stát nemůže.'
   if (t.owner !== -1 && t.owner !== pid) return 'Toto území patří jinému národu.'
   if (t.special) return 'Zde město stát nemůže.'
-  for (const c of s.cities) if (hexDist(c.x, c.y, x, y) < 4) return 'Příliš blízko jiného města (nejméně 3 pole mezi městy).'
+  for (const c of s.cities) if (hexDist(c.x, c.y, x, y) < CITY_GAP) return `Příliš blízko jiného města (nejméně ${CITY_GAP - 1} pole mezi městy).`
   return null
 }
 
@@ -786,7 +922,7 @@ export function foundCity(s: GameState, u: Unit): City | null {
   p.cityNames++
   const first = !s.cities.some(c => c.founder === u.owner)
   const c: City = {
-    id: s.nextId++, owner: u.owner, founder: u.owner, name, x: u.x, y: u.y, pop: p.traditions.includes('settlers') ? 2 : 1, food: 0, prod: 0, culture: 0, radius: 1,
+    id: s.nextId++, owner: u.owner, founder: u.owner, name, x: u.x, y: u.y, pop: p.traditions.includes('settlers') ? 2 : 1, food: 0, prod: 0, culture: 0, radius: 1, grown: 0,
     build: null, queue: [], buildings: [], hp: 200, capital: first, seat: first ? u.owner : -1, worked: [],
   }
   const t = s.tiles[idx(s, u.x, u.y)]
@@ -836,8 +972,9 @@ export function canBuildBuilding(s: GameState, c: City, id: BuildingId): boolean
   const p = s.players[c.owner]
   if (c.buildings.includes(id)) return false
   if (d.tech && !hasTech(p, d.tech)) return false
-  if (id === 'harbor' && !isCoastal(s, c.x, c.y)) return false
+  if ((id === 'harbor' || id === 'shipyard') && !isCoastal(s, c.x, c.y)) return false
   if (id === 'bastion' && !c.buildings.includes('walls')) return false
+  if (id === 'sewer' && !c.buildings.includes('aqueduct')) return false
   if (id === 'wonder') {
     if (s.mission.wonderBy >= 0) return false
     const isW = (it: BuildItem | null) => it?.kind === 'building' && it.id === 'wonder'
@@ -930,6 +1067,44 @@ export function buy(s: GameState, c: City): boolean {
   return true
 }
 
+/** Cena okamžité koupě libovolné položky: rozestavěné se odečte hotová výroba, ostatní se platí celé. */
+export function buyItemCost(s: GameState, c: City, it: BuildItem): number {
+  if (sameItem(c.build, it)) return buyCost(s, c)
+  const m = s.players[c.owner].nation === 'thal' ? 0.7 : 1
+  return Math.ceil(itemCost(it, s.players[c.owner]) * 2.6 * m)
+}
+
+/** Proč položku nejde hned koupit, nebo null. */
+export function buyItemBlock(s: GameState, c: City, it: BuildItem): string | null {
+  if (it.kind === 'building' && it.id === 'wonder') return 'Sluneční chrám koupit nelze.'
+  if (!stillValid(s, c, it)) return 'Tuto položku teď město stavět nemůže.'
+  if (it.kind === 'unit') {
+    if (it.id === 'settler' && c.pop < 2) return 'Město musí mít alespoň 2 obyvatele.'
+    if (!spawnSpot(s, c, !!UNITS[it.id].civilian, !!UNITS[it.id].naval)) return 'Jednotku není kam postavit: ve městě i okolo už stojí jiné.'
+  }
+  const cost = buyItemCost(s, c, it)
+  if (cost <= 0) return 'Položka je už zaplacená výrobou.'
+  if (s.players[c.owner].gold < cost) return `Chybí zlato: stojí ${cost}, máte ${s.players[c.owner].gold}.`
+  return null
+}
+
+/** Koupí položku hned, i když se nestaví. Rozestavěná výroba a fronta zůstanou, jak byly. */
+export function buyItem(s: GameState, c: City, it: BuildItem): boolean {
+  if (buyItemBlock(s, c, it)) return false
+  if (sameItem(c.build, it)) return buy(s, c)
+  const cost = buyItemCost(s, c, it)
+  const keep = { build: c.build, prod: c.prod, queue: c.queue.slice() }
+  c.build = it
+  c.prod = itemCost(it, s.players[c.owner])
+  const ok = completeBuild(s, c)
+  c.build = keep.build; c.prod = keep.prod; c.queue = keep.queue
+  if (!ok) return false
+  s.players[c.owner].gold -= cost
+  // Koupená budova už ve frontě čekat nemusí.
+  if (it.kind === 'building') c.queue = c.queue.filter(q => !sameItem(q, it))
+  return true
+}
+
 /** Najde pole pro novou jednotku: město, jinak nejbližší volné okolí. */
 function spawnSpot(s: GameState, c: City, civ: boolean, naval = false): [number, number] | null {
   const free = (x: number, y: number) => {
@@ -968,6 +1143,7 @@ function completeBuild(s: GameState, c: City): boolean {
     // Thalasské lodě vyplouvají se zkušenou posádkou.
     if (UNITS[it.id].naval && s.players[c.owner].nation === 'thal') gainXp(s, u, 10)
     if (!civ && s.players[c.owner].traditions.includes('warrior')) u.xp += 5
+    if (!civ && c.buildings.includes('armory')) u.xp += 10
     emit({ e: 'spawn', unit: u.id, x: u.x, y: u.y })
     note(s, c.owner, `${c.name}: dokončena jednotka ${UNITS[it.id].name}.`, 'info', c.x, c.y)
     c.prod -= UNITS[it.id].cost
@@ -1004,7 +1180,11 @@ function processCity(s: GameState, c: City): void {
   // Jídlo a růst.
   c.food += y.foodNet
   const need = growthNeed(s, c)
-  if (c.food >= need) {
+  if (c.food >= need && c.pop >= popCap(c)) {
+    // Město narazilo na strop: zásoby zůstanou plné a čeká se na akvadukt či kanalizaci.
+    c.food = need
+    if (p.human) noteOnce(s, c.owner, `${c.name} dál neporoste: s ${c.pop} obyvateli potřebuje ${c.buildings.includes('aqueduct') ? 'kanalizaci' : 'akvadukt'}.`, 'info', c.x, c.y)
+  } else if (c.food >= need) {
     c.pop += 1
     c.food = c.buildings.includes('aqueduct') ? Math.floor(need * 0.4) : 0
     assignWorkers(s, c)
@@ -1015,15 +1195,16 @@ function processCity(s: GameState, c: City): void {
   }
   // Kultura a hranice.
   c.culture += y.culture
-  const wantRadius = c.culture >= BORDER_AT[1] ? 3 : c.culture >= BORDER_AT[0] ? 2 : 1
-  if (wantRadius > c.radius) { c.radius = wantRadius; claimTiles(s, c); note(s, c.owner, `${c.name}: hranice města se rozšířily.`, 'info', c.x, c.y) }
+  growBorders(s, c)
   // Výroba.
   if (c.build) {
     // Položka mohla mezitím přestat být dostupná (div dokončil někdo jiný).
     if (!stillValid(s, c, c.build)) c.build = nextQueued(s, c)
   }
   if (c.build) {
-    c.prod += y.prod
+    // Loděnice staví lodě o polovinu rychleji.
+    const ship = c.build.kind === 'unit' && UNITS[c.build.id].naval && c.buildings.includes('shipyard')
+    c.prod += ship ? Math.round(y.prod * 1.5) : y.prod
     if (c.prod >= itemCost(c.build, p)) completeBuild(s, c)
   } else {
     // Bez zadání se výroba mění na zlato.
@@ -1063,58 +1244,229 @@ export function cityShoot(s: GameState, c: City, pick?: Unit): boolean {
 
 // ---------------------------------------------------------------- dělníci
 
+/** Funguje vylepšení na poli (stojí a není vypleněné)? */
+export const impWorks = (t: Tile): boolean => !!t.imp && !t.ruin
+
 export function validImprovements(s: GameState, u: Unit): ImprovementId[] {
-  if (u.type !== 'worker' || isEmbarked(s, u)) return []
+  if (u.type !== 'worker') return []
   const t = s.tiles[idx(s, u.x, u.y)]
   if (t.owner !== u.owner || cityAt(s, u.x, u.y) || t.special) return []
   return improvementsFor(s, t, s.players[u.owner])
 }
 
-/** Vylepšení, které se na pole hodí podle terénu a suroviny (bez ohledu na technologie). */
-export function impCandidate(t: Tile, p: Player): ImprovementId | null {
-  if (!TERRAIN[t.t].passable) return null
+/** Vylepšení, která se na pole hodí podle terénu a suroviny (bez ohledu na technologie). První je to hlavní. */
+export function impOptions(t: Tile, p: Player): ImprovementId[] {
   const res = t.res && resourceVisible(p, t.res) ? t.res : null
-  if (res === 'horses' || res === 'deer') return 'pasture'
-  if (t.forest) return 'lumber'
-  if (res === 'iron' || res === 'gold' || res === 'stone' || t.t === 'hills') return 'mine'
-  if (t.t === 'grass' || t.t === 'plains' || (t.t === 'desert' && res === 'wheat')) return 'farm'
-  return null
-}
-
-export function improvementsFor(_s: GameState, t: Tile, p: Player): ImprovementId[] {
-  const c = impCandidate(t, p)
-  return c && hasTech(p, IMPROVEMENTS[c].tech) && t.imp !== c ? [c] : []
-}
-
-export interface TileJob { job: JobId; name: string; effect: string; turns: number; ok: boolean; why: string }
-
-/** Co mohou dělníci hráče `pid` na poli postavit a proč případně ne (pro nápovědu a rozkazy na dálku). */
-export function tileJobs(s: GameState, i: number, pid: number): TileJob[] {
-  const t = s.tiles[i], p = s.players[pid]
-  const out: TileJob[] = []
-  if (!TERRAIN[t.t].passable || t.special || s.cities.some(c => c.y * s.W + c.x === i)) return out
-  const c = impCandidate(t, p)
-  if (c) {
-    const d = IMPROVEMENTS[c]
-    const eff = [d.food ? `+${d.food + (c === 'farm' && p.nation === 'aur' ? 1 : 0)} jídlo` : '', d.prod ? `+${d.prod + (c === 'mine' && p.nation === 'khar' ? 1 : 0)} výroba` : '', t.res && RESOURCES[t.res].strategic && RESOURCES[t.res].improvement === c ? `zpřístupní ${RESOURCES[t.res].name.toLowerCase()}` : ''].filter(Boolean).join(', ')
-    const why = t.imp === c ? 'už stojí' : t.owner !== pid ? 'pole není ve vašem území' : !hasTech(p, d.tech) ? `chybí technologie ${TECHS[d.tech].name}` : ''
-    out.push({ job: c, name: d.name, effect: eff + (t.imp && t.imp !== c ? ` (nahradí: ${IMPROVEMENTS[t.imp].name.toLowerCase()})` : ''), turns: d.turns, ok: !why, why })
-  }
-  const whyR = t.road ? 'už stojí' : t.owner !== pid && t.owner !== -1 ? 'cizí území' : !hasTech(p, ROAD.tech) ? `chybí technologie ${TECHS[ROAD.tech].name}` : ''
-  out.push({ job: 'road', name: ROAD.name, effect: 'pohyb po cestě stojí půl bodu, cesta překlene řeku', turns: ROAD.turns, ok: !whyR, why: whyR })
+  if (!TERRAIN[t.t].land) return t.t === 'coast' && res === 'fish' ? ['fishery'] : []
+  if (!TERRAIN[t.t].passable) return []
+  const out: ImprovementId[] = []
+  const add = (i: ImprovementId | null) => { if (i && !out.includes(i)) out.push(i) }
+  if (res) add(RESOURCES[res].improvement)
+  if (t.forest) add('lumber')
+  else if (t.t === 'hills') add('mine')
+  else if (t.t === 'grass' || t.t === 'plains') { add('farm'); add('village') }
+  else if (t.t === 'desert' && (t.river || res === 'wheat')) add('farm')
   return out
 }
 
+/** Hlavní vylepšení pole podle terénu a suroviny (bez ohledu na technologie). */
+export function impCandidate(t: Tile, p: Player): ImprovementId | null { return impOptions(t, p)[0] ?? null }
+
+/** Vylepšení, která hráč na poli umí postavit a která tam ještě nestojí. */
+export function improvementsFor(_s: GameState, t: Tile, p: Player): ImprovementId[] {
+  return impOptions(t, p).filter(c => hasTech(p, IMPROVEMENTS[c].tech) && t.imp !== c)
+}
+
+/** Název a rozkaz práce dělníků. */
+export function jobInfo(job: JobId): { name: string; verb: string } {
+  return job === 'road' ? ROAD : job === 'clear' ? CLEAR : job === 'repair' ? REPAIR : IMPROVEMENTS[job]
+}
+
+/** Kolik tahů trvá cesta na daném poli. */
+export function roadTurns(t: Tile): number { return t.forest || t.t === 'hills' ? ROAD.rough : ROAD.turns }
+
+/** O kolik vylepšení změní výnos pole (včetně řeky, národa a spojení města). */
+function impGain(s: GameState, i: number, pid: number, c: ImprovementId): Yields {
+  const t = s.tiles[i]
+  const keep = { imp: t.imp, ruin: t.ruin }
+  t.imp = null; delete t.ruin
+  const a = tileYield(s, i, pid)
+  t.imp = c
+  const b = tileYield(s, i, pid)
+  t.imp = keep.imp; if (keep.ruin) t.ruin = true
+  return { food: b.food - a.food, prod: b.prod - a.prod, gold: b.gold - a.gold }
+}
+
+const gainText = (y: Yields): string => [y.food ? `${y.food > 0 ? '+' : '−'}${Math.abs(y.food)} jídlo` : '', y.prod ? `${y.prod > 0 ? '+' : '−'}${Math.abs(y.prod)} výroba` : '', y.gold ? `${y.gold > 0 ? '+' : '−'}${Math.abs(y.gold)} zlato` : ''].filter(Boolean).join(', ')
+
+export interface TileJob { job: JobId; name: string; effect: string; turns: number; ok: boolean; why: string }
+
+/** Co mohou dělníci hráče `pid` na poli dělat a proč případně ne (pro nápovědu a rozkazy na dálku). */
+export function tileJobs(s: GameState, i: number, pid: number): TileJob[] {
+  const t = s.tiles[i], p = s.players[pid]
+  const out: TileJob[] = []
+  const land = TERRAIN[t.t].land
+  if ((land && !TERRAIN[t.t].passable) || t.special || s.cities.some(c => c.y * s.W + c.x === i)) return out
+  const mine = t.owner !== pid ? 'pole není ve vašem území' : ''
+  const left = (job: JobId, full: number) => t.job === job && t.jobLeft ? t.jobLeft : full
+  if (t.imp && t.ruin) {
+    out.push({ job: 'repair', name: `${REPAIR.name}: ${IMPROVEMENTS[t.imp].name.toLowerCase()}`, effect: 'vypleněné vylepšení zase začne fungovat', turns: left('repair', Math.ceil(IMPROVEMENTS[t.imp].turns / 2)), ok: !mine, why: mine })
+  } else if (t.road && t.roadRuin) {
+    const whyR = t.owner !== pid && t.owner !== -1 ? 'cizí území' : ''
+    out.push({ job: 'repair', name: `${REPAIR.name}: cesta`, effect: 'vypleněná cesta zase zrychlí pohyb a spojí města', turns: left('repair', Math.ceil(roadTurns(t) / 2)), ok: !whyR, why: whyR })
+  }
+  for (const c of impOptions(t, p)) {
+    const d = IMPROVEMENTS[c]
+    const strat = t.res && resourceVisible(p, t.res) && RESOURCES[t.res].strategic
+    const eff = [gainText(impGain(s, i, pid, c)), strat && RESOURCES[t.res!].improvement === c ? `zpřístupní ${RESOURCES[t.res!].name.toLowerCase()}` : '',
+      strat && RESOURCES[t.res!].improvement !== c ? `${RESOURCES[t.res!].name.toLowerCase()} zůstane nevyužité` : ''].filter(Boolean).join(', ')
+    const why = t.imp === c ? (t.ruin ? 'je vypleněné, opravte ho' : 'už stojí') : mine || (!hasTech(p, d.tech) ? `chybí technologie ${TECHS[d.tech].name}` : '')
+    const replace = !!t.imp && t.imp !== c
+    out.push({ job: c, name: d.name, effect: eff + (replace ? ` (nahradí: ${IMPROVEMENTS[t.imp!].name.toLowerCase()}, o ${REPLACE_TURNS} tahy déle)` : ''), turns: left(c, d.turns + (replace ? REPLACE_TURNS : 0)), ok: !why, why })
+  }
+  if (!land) return out
+  if (t.forest) {
+    const why = mine || (!hasTech(p, CLEAR.tech) ? `chybí technologie ${TECHS[CLEAR.tech].name}` : '')
+    const c = cityById(s, t.city)
+    out.push({ job: 'clear', name: CLEAR.name, effect: `jednorázově +${CLEAR.prod} výroby${c ? ` pro město ${c.name}` : ''}, les zmizí${t.imp === 'lumber' ? ' i s pilou' : ''}`, turns: left('clear', CLEAR.turns), ok: !why, why })
+  }
+  if (!(t.road && t.roadRuin)) {
+    const whyR = t.road ? 'už stojí' : t.owner !== pid && t.owner !== -1 ? 'cizí území' : !hasTech(p, ROAD.tech) ? `chybí technologie ${TECHS[ROAD.tech].name}` : ''
+    out.push({ job: 'road', name: ROAD.name, effect: `pohyb po cestě stojí půl bodu; řeku překlene most až se Stavitelstvím`, turns: left('road', roadTurns(t)), ok: !whyR, why: whyR })
+  }
+  return out
+}
+
+/** Co se na poli vyplatí udělat: rada pro hráče, rozkaz Automaticky i volba počítače. Null = nic. */
+export function recommendJob(s: GameState, i: number, pid: number): JobId | null {
+  const t = s.tiles[i], p = s.players[pid]
+  if (t.owner !== pid || t.special || s.cities.some(c => c.y * s.W + c.x === i)) return null
+  if ((t.imp && t.ruin) || (t.road && t.roadRuin)) return 'repair'
+  if (t.imp) return null
+  const opts = improvementsFor(s, t, p)
+  const res = t.res && resourceVisible(p, t.res) ? t.res : null
+  const main = res ? RESOURCES[res].improvement : null
+  // Surovina má přednost; bez technologie na ni pole čeká, ať se nezastaví něčím jiným.
+  if (main) return opts.includes(main) ? main : null
+  const c = cityById(s, t.city)
+  if (t.forest) {
+    if (opts.includes('lumber')) return 'lumber'
+    // Bez Dřevařství se mýtí jen tam, kde je lesa nadbytek a není u řeky (tam jednou bude pila silnější).
+    if (!hasTech(p, CLEAR.tech) || p.nation === 'sylv' || t.river || !c) return null
+    return s.tiles.filter(o => o.city === c.id && o.forest).length > 4 ? 'clear' : null
+  }
+  if (!opts.length) return null
+  if (opts.length === 1) return opts[0]
+  // Farma, nebo ves: podle zaměření města, jinak podle toho, jestli město roste.
+  if (c?.focus === 'gold') return 'village'
+  if (c?.focus === 'food' || !c) return 'farm'
+  if (t.river && hasTech(p, 'irrigation')) return 'farm'
+  if (cityYields(s, c).foodNet < 2 + c.pop / 4) return 'farm'
+  let farms = 0, villages = 0
+  for (const o of s.tiles) if (o.city === c.id) { if (o.imp === 'farm') farms++; else if (o.imp === 'village') villages++ }
+  return villages * 2 < farms ? 'village' : 'farm'
+}
+
 export function canWork(s: GameState, u: Unit, job: JobId): boolean {
-  if (u.type !== 'worker' || isEmbarked(s, u)) return false
+  if (u.type !== 'worker') return false
   return tileJobs(s, idx(s, u.x, u.y), u.owner).some(j => j.job === job && j.ok)
 }
 
 export function startWork(s: GameState, u: Unit, job: JobId): boolean {
-  if (!canWork(s, u, job)) return false
+  const j = tileJobs(s, idx(s, u.x, u.y), u.owner).find(o => o.job === job && o.ok)
+  if (u.type !== 'worker' || !j) return false
+  const t = s.tiles[idx(s, u.x, u.y)]
   stopUnit(u)
-  u.work = job; u.workLeft = Math.max(1, (job === 'road' ? ROAD.turns : IMPROVEMENTS[job].turns) - (s.players[u.owner].traditions.includes('builders') ? 1 : 0)); u.moves = 0; u.fortified = false; u.sleep = false
+  // Rozpracovaná práce na poli pokračuje; nová se zkrátí o tah se Stavitelským bratrstvem.
+  const resume = t.job === job && !!t.jobLeft
+  u.work = job; u.workLeft = resume ? t.jobLeft! : Math.max(1, j.turns - (s.players[u.owner].traditions.includes('builders') ? 1 : 0)); u.moves = 0; u.fortified = false; u.sleep = false
+  t.job = job; t.jobLeft = u.workLeft
   return true
+}
+
+/** Dokončí práci dělníků na poli. */
+function finishWork(s: GameState, u: Unit, job: JobId): void {
+  const t = s.tiles[idx(s, u.x, u.y)], pid = u.owner, p = s.players[pid]
+  const c = cityById(s, t.city)
+  if (job === 'road') { t.road = true; delete t.roadRuin }
+  else if (job === 'repair') { if (t.imp && t.ruin) delete t.ruin; else delete t.roadRuin }
+  else if (job === 'clear') {
+    t.forest = false
+    if (t.imp === 'lumber') { t.imp = null; delete t.ruin }
+    const to = c ?? citiesOf(s, pid).sort((a, b) => hexDist(a.x, a.y, u.x, u.y) - hexDist(b.x, b.y, u.x, u.y))[0]
+    if (to) { to.prod += CLEAR.prod; note(s, pid, `Les vymýcen: ${to.name} dostává ${CLEAR.prod} výroby.`, 'info', u.x, u.y) }
+  } else { t.imp = job; delete t.ruin }
+  delete t.job; delete t.jobLeft
+  if (p.human && impWorks(t) && t.res && RESOURCES[t.res].strategic && RESOURCES[t.res].improvement === t.imp && (job === t.imp || job === 'repair') && t.owner === pid) {
+    const need = unitsNeeding(s, pid, t.res)
+    note(s, pid, `Máte přístup k surovině ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Můžete stavět: ${need.join(', ')}.` : 'Vaše vojsko ji nepotřebuje, ale můžete ji prodávat v Diplomacii.'}`, 'good', u.x, u.y)
+  }
+  updateLinks(s)
+  if (c) assignWorkers(s, c)
+}
+
+// ---------------------------------------------------------------- plenění a spojení měst
+
+/** Proč jednotka nemůže plenit pole, na kterém stojí, nebo null. */
+export function pillageBlock(s: GameState, u: Unit): string | null {
+  if (isCivilian(u) || UNITS[u.type].ram) return 'Plenit umějí jen bojové jednotky.'
+  const t = s.tiles[idx(s, u.x, u.y)]
+  if (cityAt(s, u.x, u.y)) return 'Ve městě se neplení.'
+  if (t.owner < 0 || t.owner === u.owner || !atWar(s, u.owner, t.owner)) return 'Plenit lze jen na území národa, se kterým válčíte.'
+  if (!impWorks(t) && !(t.road && !t.roadRuin)) return 'Není tu co plenit.'
+  if (u.moves <= 0) return 'Jednotka už v tomto tahu nemá pohyb.'
+  return null
+}
+
+/** Vyplení pole: nejdřív vylepšení, podruhé cestu. Stojí zbytek tahu a přinese zlato. */
+export function pillage(s: GameState, u: Unit): boolean {
+  if (pillageBlock(s, u)) return false
+  const t = s.tiles[idx(s, u.x, u.y)], owner = t.owner
+  const what = impWorks(t) ? IMPROVEMENTS[t.imp!].name.toLowerCase() : 'cesta'
+  if (impWorks(t)) t.ruin = true; else t.roadRuin = true
+  delete t.job; delete t.jobLeft
+  u.moves = 0; u.fortified = false; u.sleep = false
+  const raid = u.owner !== barbId(s) && s.players[u.owner].traditions.includes('raiders')
+  const loot = PILLAGE_GOLD * (raid ? 2 : 1)
+  if (u.owner !== barbId(s)) s.players[u.owner].gold += loot
+  if (raid) u.hp = Math.min(100, u.hp + 15)
+  const who = u.owner === barbId(s) ? 'Barbaři' : NATIONS[s.players[u.owner].nation].name
+  note(s, owner, `${who} vyplenili pole: ${what} nefunguje, dokud ji dělníci neopraví.`, 'bad', u.x, u.y)
+  note(s, u.owner, `Vypleněno: ${what}. Kořist ${loot} zlata.`, 'good', u.x, u.y)
+  updateLinks(s)
+  const c = cityById(s, t.city)
+  if (c) assignWorkers(s, c)
+  return true
+}
+
+/** Přepočítá, která města jsou spojená s hlavním městem svého národa: po cestách, nebo přístavem na přístav. */
+export function updateLinks(s: GameState): void {
+  const road = new Uint8Array(s.tiles.length)
+  for (let i = 0; i < s.tiles.length; i++) if (s.tiles[i].road && !s.tiles[i].roadRuin) road[i] = 1
+  for (const c of s.cities) road[idx(s, c.x, c.y)] = 1
+  for (const p of s.players) {
+    const cs = citiesOf(s, p.id)
+    for (const c of cs) delete c.linked
+    const cap = cs.find(c => c.capital) ?? cs[0]
+    if (!cap || p.id === barbId(s)) continue
+    const seen = new Uint8Array(s.tiles.length)
+    const spread = (from: City) => {
+      const stack = [idx(s, from.x, from.y)]
+      seen[stack[0]] = 1
+      while (stack.length) {
+        const i = stack.pop()!
+        for (const [nx, ny] of neighbors(s, i % s.W, (i / s.W) | 0)) { const n = idx(s, nx, ny); if (road[n] && !seen[n]) { seen[n] = 1; stack.push(n) } }
+      }
+    }
+    spread(cap)
+    for (let again = true; again;) {
+      again = false
+      const linked = cs.filter(c => seen[idx(s, c.x, c.y)])
+      // Přístavy jsou spojené po moři, jakmile je přístav i v některém už spojeném městě.
+      if (linked.some(c => c.buildings.includes('harbor'))) for (const c of cs) if (!seen[idx(s, c.x, c.y)] && c.buildings.includes('harbor')) { spread(c); again = true }
+    }
+    for (const c of cs) if (seen[idx(s, c.x, c.y)]) c.linked = true
+  }
 }
 
 /** Stavba cesty na dálku: dělníci postaví cestu na poli, kde stojí, a pak popojdou na další pole trasy. */
@@ -1174,6 +1526,8 @@ export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): numb
   let base = ctx.ranged && d.ranged ? d.ranged : d.str
   let m = 1
   if (u.vet) m += 0.15
+  // Šik a voj: víc síly na jednom poli.
+  const formation = FORMATION[unitSize(u)] ?? 1
   const t = s.tiles[idx(s, u.x, u.y)]
   const nation = s.players[u.owner].nation
   if (ctx.defending) {
@@ -1182,6 +1536,8 @@ export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): numb
     if (u.fortified) m += 0.25
     // Chrámová stráž brání domov.
     if (u.type === 'templar' && t.owner === u.owner) m += 0.25
+    // Spojení hoplíté jsou pověstná odolná falanga.
+    if (u.type === 'hoplite' && unitSize(u) > 1) m += HOPLITE_FORMATION
   }
   if (nation === 'khar' && t.t === 'hills') m += 0.15
   if (u.promos.includes(ctx.defending ? 'guard' : 'drill')) m += ctx.defending ? 0.2 : 0.15
@@ -1195,7 +1551,7 @@ export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): numb
   if (ctx.vsCity && d.mounted && !ctx.ranged) m *= 0.75
   if (ctx.vsCity && ctx.ram && !ctx.ranged) m *= RAM_BONUS
   if (base <= 0) base = 1
-  return base * m * (0.5 + 0.5 * u.hp / 100)
+  return base * m * formation * (0.5 + 0.5 * u.hp / 100)
 }
 
 function damageExpected(a: number, d: number): number {
@@ -1344,7 +1700,8 @@ export function upgradeTarget(s: GameState, u: Unit): UnitId | null {
 export function upgradeCost(s: GameState, u: Unit): number {
   const t = upgradeTarget(s, u)
   if (!t) return 0
-  return Math.ceil((Math.max(0, UNITS[t].cost - UNITS[u.type].cost) * 2 + 10) * (s.players[u.owner].nation === 'thal' ? 0.7 : 1))
+  // Šik a voj se přezbrojují celé, cena roste s počtem jednotek.
+  return Math.ceil((Math.max(0, UNITS[t].cost - UNITS[u.type].cost) * 2 + 10) * (s.players[u.owner].nation === 'thal' ? 0.7 : 1)) * unitSize(u)
 }
 
 /** Proč přezbrojit nejde, nebo null. */
@@ -1396,8 +1753,8 @@ function captureCity(s: GameState, c: City, by: Unit): void {
     if (next) next.capital = true
   }
   if (!citiesOf(s, by.owner).some(o => o.capital)) c.capital = true
+  // Dobyvatel získá jen pole, která město už mělo; další si musí zabrat kulturou.
   for (const t of s.tiles) if (t.city === c.id) t.owner = by.owner
-  claimTiles(s, c)
   for (const o of s.cities) assignWorkers(s, o)
   const was: [number, number] = [by.x, by.y]
   by.x = c.x; by.y = c.y
@@ -1469,15 +1826,104 @@ export function makePeace(s: GameState, a: number, b: number): void {
 
 export function militaryPower(s: GameState, pid: number): number {
   let v = 0
-  for (const u of s.units) if (u.owner === pid && !isCivilian(u)) { const d = UNITS[u.type]; v += Math.max(d.str, d.ranged ?? 0) * (0.4 + 0.6 * u.hp / 100) }
+  for (const u of s.units) if (u.owner === pid && !isCivilian(u)) { const d = UNITS[u.type]; v += Math.max(d.str, d.ranged ?? 0) * (FORMATION[unitSize(u)] ?? 1) * (0.4 + 0.6 * u.hp / 100) }
   return v
+}
+
+// ---------------------------------------------------------------- šik a voj
+
+/** Kolik jednotek je ve spojení: 1 = samostatná, 2 = šik, 3 = voj. */
+export const unitSize = (u: Unit): number => u.size ?? 1
+/** Násobek síly šiku a voje. */
+export const FORMATION = [1, 1, 1.5, 1.9]
+/** O kolik líp se brání šik či voj hoplítů. */
+export const HOPLITE_FORMATION = 0.25
+export const formationName = (n: number): string => n === 3 ? 'Voj' : n === 2 ? 'Šik' : ''
+/** Počet jednotek včetně těch spojených (pro žold, suroviny a velikost vojska). */
+export const headcount = (units: Unit[]): number => units.reduce((a, u) => a + unitSize(u), 0)
+
+function mergeable(u: Unit): boolean {
+  const d = UNITS[u.type]
+  return !d.civilian && !d.siege && !d.ram && !d.naval && u.type !== 'scout'
+}
+
+/** Proč se jednotka `u` nemůže připojit k jednotce `to`, nebo null. */
+export function mergeBlock(s: GameState, u: Unit, to: Unit): string | null {
+  if (u === to || u.owner !== to.owner) return 'Spojit lze jen dvě vlastní jednotky.'
+  if (!mergeable(u) || !mergeable(to)) return 'Spojovat se smí jen pěchota, jízda a střelci.'
+  if (u.type !== to.type) return 'Spojit lze jen jednotky stejného druhu.'
+  if (hexDist(u.x, u.y, to.x, to.y) !== 1) return 'Jednotky musí stát vedle sebe.'
+  if (isEmbarked(s, u) || isEmbarked(s, to)) return 'Na vodě se spojit nelze.'
+  const n = unitSize(u) + unitSize(to)
+  if (n > 3) return 'Ve voji mohou být nejvýš tři jednotky.'
+  const need: TechId = n === 3 ? 'armory' : 'tactics'
+  if (!hasTech(s.players[u.owner], need)) return `${formationName(n)} vyžaduje technologii ${TECHS[need].name}.`
+  if (u.moves <= 0) return 'Jednotka už v tomto tahu nemá pohyb.'
+  return null
+}
+
+/** Jednotky, ke kterým se `u` může hned připojit. */
+export function mergeTargets(s: GameState, u: Unit): Unit[] {
+  if (!mergeable(u)) return []
+  return s.units.filter(o => o.owner === u.owner && o !== u && o.type === u.type && hexDist(o.x, o.y, u.x, u.y) === 1 && !mergeBlock(s, u, o))
+}
+
+/** Jednotka `u` vejde do jednotky `to`: vznikne šik nebo voj na poli `to`. Životy se zprůměrují, zkušenosti se berou od zkušenější. */
+export function mergeUnits(s: GameState, u: Unit, to: Unit): boolean {
+  if (mergeBlock(s, u, to)) return false
+  const a = unitSize(u), b = unitSize(to)
+  to.hp = Math.max(1, Math.round((u.hp * a + to.hp * b) / (a + b)))
+  if (u.xp > to.xp) { to.xp = u.xp; to.promos = u.promos.slice(); to.vet = u.vet }
+  to.size = a + b
+  to.moves = 0; to.fortified = false; to.sleep = false
+  clearOrders(to); stopUnit(to)
+  for (const o of s.units) if (o.escort === u.id) delete o.escort
+  const i = s.units.indexOf(u)
+  if (i >= 0) s.units.splice(i, 1)
+  return true
+}
+
+/** Volná sousední pole, kam se mohou jednotky při rozdělení rozestoupit. */
+function splitSpots(s: GameState, u: Unit): [number, number][] {
+  return neighbors(s, u.x, u.y).filter(([x, y]) => {
+    const t = s.tiles[idx(s, x, y)]
+    if (!TERRAIN[t.t].passable || (t.owner !== u.owner && t.owner !== -1)) return false
+    const c = cityAt(s, x, y)
+    if (c && c.owner !== u.owner) return false
+    return !unitsAt(s, x, y).some(o => o.owner !== u.owner || !isCivilian(o))
+  })
+}
+
+/** Proč šik či voj nejde rozdělit, nebo null. */
+export function splitBlock(s: GameState, u: Unit): string | null {
+  if (unitSize(u) < 2) return 'Jednotka není spojená.'
+  if (s.tiles[idx(s, u.x, u.y)].owner !== u.owner) return 'Rozdělit lze jen na vlastním území.'
+  if (isEmbarked(s, u)) return 'Na vodě se rozdělit nelze.'
+  if (splitSpots(s, u).length < unitSize(u) - 1) return 'Vedle není dost volných polí.'
+  return null
+}
+
+/** Rozdělí šik či voj: jednotky se rozestoupí na sousední pole, každá se stejnými životy a zkušenostmi. */
+export function splitUnit(s: GameState, u: Unit): boolean {
+  if (splitBlock(s, u)) return false
+  const spots = splitSpots(s, u).slice(0, unitSize(u) - 1)
+  delete u.size
+  clearOrders(u); stopUnit(u)
+  u.moves = 0
+  for (const [x, y] of spots) {
+    const n = makeUnit(s, u.owner, u.type, x, y, u.vet)
+    n.hp = u.hp; n.xp = u.xp; n.promos = u.promos.slice(); n.moves = 0
+    emit({ e: 'spawn', unit: n.id, x, y })
+  }
+  updateVisibility(s, u.owner)
+  return true
 }
 
 // ---------------------------------------------------------------- skóre a vítězství
 
 export function score(s: GameState, pid: number): number {
   const p = s.players[pid]
-  let v = p.techs.length * 6 + p.traditions.length * 5 + p.era * 8
+  let v = p.techs.length * 6 + (p.empire ?? 0) * 3 + p.traditions.length * 5 + p.era * 8
   for (const c of citiesOf(s, pid)) v += 12 + c.pop * 4 + c.buildings.length * 3 + (c.buildings.includes('wonder') ? 60 : 0)
   for (const t of s.tiles) if (t.owner === pid) v += 0.5
   const m = s.mission
@@ -1582,6 +2028,7 @@ export function unitMaxMoves(u: Unit): number { return UNITS[u.type].move }
 /** Začátek tahu hráče: obnova pohybu, pokračování v cestě. */
 export function beginTurn(s: GameState, pid: number): void {
   for (const u of unitsOf(s, pid)) { u.moves = maxMoves(s, u); u.attacked = false; u.skip = false }
+  updateLinks(s)
   updateVisibility(s, pid)
   if (s.players[pid].human) {
     for (const u of unitsOf(s, pid)) {
@@ -1610,21 +2057,13 @@ export function endPlayerTurn(s: GameState, pid: number): void {
     if (rested && u.hp < 100) {
       const t = s.tiles[idx(s, u.x, u.y)]
       const inCity = !!cityAt(s, u.x, u.y)
-      u.hp = Math.min(100, u.hp + (inCity ? 25 : t.owner === pid ? 15 : 10) + (u.promos.includes('medic') ? 10 : 0))
+      u.hp = Math.min(100, u.hp + (inCity ? 25 : t.owner === pid ? 15 : 10) + (u.promos.includes('medic') ? 10 : 0) + (t.owner !== pid && p.traditions.includes('campaign') ? 10 : 0))
     }
     if (u.work) {
       const t = s.tiles[idx(s, u.x, u.y)]
       u.workLeft -= 1
-      if (u.workLeft <= 0) {
-        if (u.work === 'road') t.road = true; else t.imp = u.work
-        if (p.human && t.res && RESOURCES[t.res].strategic && RESOURCES[t.res].improvement === u.work && t.owner === pid) {
-          const need = unitsNeeding(s, pid, t.res)
-          note(s, pid, `Máte přístup k surovině ${RESOURCES[t.res].name.toLowerCase()}. ${need.length ? `Můžete stavět: ${need.join(', ')}.` : 'Vaše vojsko ji nepotřebuje, ale můžete ji prodávat v Diplomacii.'}`, 'good', u.x, u.y)
-        }
-        u.work = null
-        const c = cityById(s, t.city)
-        if (c) assignWorkers(s, c)
-      }
+      if (t.job === u.work) t.jobLeft = u.workLeft
+      if (u.workLeft <= 0) { const job = u.work; u.work = null; finishWork(s, u, job) }
     }
   }
   if (pid === barbId(s)) return
@@ -1657,7 +2096,7 @@ export function endPlayerTurn(s: GameState, pid: number): void {
   }
   if (p.research) {
     p.progress += sci
-    const cost = TECHS[p.research].cost
+    const cost = techCost(p, p.research)
     if (p.progress >= cost) {
       const t = p.research
       const over = p.progress - cost

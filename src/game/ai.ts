@@ -4,12 +4,12 @@ import { hexDist } from './hex.ts'
 import { rand, randInt } from './rng.ts'
 import {
   assignWorkers, atWar, attack, availableTechs, buy, buyCost, canBuildBuilding, canBuildUnit, canFoundCity, cityAt, citiesOf, cityMaxHp, cityStrength, cityYields, unitStrength, SIEGE_UNITS,
-  declareWar, foundCity, idx, improvementsFor, isCivilian, isCoastal, isNaval, isWater, stopUnit, itemCost, makePeace, makeUnit, militaryAt, militaryPower, moveUnit, neighbors,
+  declareWar, foundCity, idx, headcount, mergeTargets, mergeUnits, unitSize, BORDER_MAX, CITY_GAP, popCap, pillage, pillageBlock, recommendJob, isCivilian, isCoastal, isNaval, isWater, stopUnit, itemCost, makePeace, makeUnit, militaryAt, militaryPower, moveUnit, neighbors,
   note, pathMap, pathTo, playerIncome, previewAttack, startWork, tileYield, tilesWithin, unitsAt, unitsOf, updateVisibility, emit,
   canWork, followAll, hasRoad, hasTech, isEmbarked, resourceCap, resourceVisible, unitsNeeding, upgradeBlock, upgradeCost, upgradeUnit,
   type PathMap,
 } from './rules.ts'
-import { barbId, type BuildItem, type City, type GameState, type Player, type Unit } from './types.ts'
+import { barbId, type BuildItem, type City, type GameState, type JobId, type Player, type Unit } from './types.ts'
 
 /** Povaha, podle které se národ rozhoduje; lidskému hráči radí stavitel. */
 const per = (p: Player): PersonaDef => PERSONAS[p.personality as PersonaId] ?? PERSONAS.builder
@@ -29,6 +29,8 @@ export function aiTurn(s: GameState, pid: number): void {
   }
   aiMilitary(s, p)
   aiNavy(s, p)
+  // Komu po tažení zbyl pohyb na cizím vylepšeném poli, ten plení.
+  for (const u of unitsOf(s, pid)) if (s.units.includes(u) && !pillageBlock(s, u)) pillage(s, u)
   aiSpend(s, p)
 }
 
@@ -40,7 +42,7 @@ function aiResearch(s: GameState, p: Player): void {
   const avail = availableTechs(p)
   if (!avail.length) return
   let order = per(p).research
-  if (seafarer(s, p)) order = ['sailing', ...(p.techs.length >= 5 ? ['navigation' as TechId] : []), ...order]
+  if (seafarer(s, p)) order = ['sailing', 'fishing', ...(p.techs.length >= 5 ? ['navigation' as TechId] : []), ...order]
   p.research = order.find(t => avail.includes(t)) ?? avail[0]
 }
 
@@ -67,7 +69,7 @@ function aiDiplomacy(s: GameState, p: Player): void {
   const aggro = DIFFICULTY[s.difficulty].aiAggro
   const k = per(p)
   const mine = militaryPower(s, p.id)
-  const myMil = unitsOf(s, p.id).filter(u => !isCivilian(u)).length
+  const myMil = headcount(unitsOf(s, p.id).filter(u => !isCivilian(u)))
   // Jak daleko má k nejbližšímu městu soupeře; válka přes půl světa nedává smysl.
   const myCities = citiesOf(s, p.id)
   const reach = (q: Player): number => {
@@ -141,15 +143,18 @@ export function siteScore(s: GameState, pid: number, x: number, y: number): numb
   const t = s.tiles[idx(s, x, y)]
   if (!TERRAIN[t.t].passable || t.special) return -1
   if (t.owner !== -1 && t.owner !== pid) return -1
-  for (const c of s.cities) if (hexDist(c.x, c.y, x, y) < 4) return -1
+  for (const c of s.cities) if (hexDist(c.x, c.y, x, y) < CITY_GAP) return -1
   const p = s.players[pid]
   let v = 0
-  for (const [tx, ty] of tilesWithin(s, x, y, 2)) {
+  const own = citiesOf(s, pid)
+  for (const [tx, ty] of tilesWithin(s, x, y, BORDER_MAX)) {
     const i = idx(s, tx, ty)
     const tt = s.tiles[i]
-    if (tt.owner !== -1 && tt.owner !== pid) { v -= 0.5; continue }
+    // Třetí okruh přijde až za dlouho, proto váží méně.
+    const far = hexDist(x, y, tx, ty) > 2 ? 0.35 : 1
+    if (tt.owner !== -1 && tt.owner !== pid) { v -= 0.5 * far; continue }
     // Hráč nezná, co je v neprozkoumané mlze: počítá se průměrné pole, ať rada nic neprozradí.
-    if (p.human && !p.explored[i]) { v += 2.5; continue }
+    if (p.human && !p.explored[i]) { v += 2.5 * far; continue }
     const yl = tileYield(s, i, pid)
     let tv = yl.food * 1.4 + yl.prod + yl.gold * 0.6
     if (tt.res && resourceVisible(p, tt.res)) {
@@ -157,8 +162,9 @@ export function siteScore(s: GameState, pid: number, x: number, y: number): numb
       const strat = RESOURCES[tt.res].strategic
       tv += strat ? (unitsNeeding(s, pid, tt.res).length ? (resourceCap(s, pid, tt.res) === 0 ? 7 : 4) : 2) : 1.5
     }
-    // Pole, která už patří jinému vlastnímu městu, nové město skoro nevyužije.
-    v += tt.owner === pid && tt.city !== -1 ? tv * 0.3 : tv
+    // Pole, která už patří jinému vlastnímu městu nebo na která si dělá nárok (do tří polí od něj), nové město skoro nevyužije.
+    const taken = (tt.owner === pid && tt.city !== -1) || own.some(c => hexDist(c.x, c.y, tx, ty) <= (hexDist(c.x, c.y, tx, ty) <= 2 ? 2 : BORDER_MAX) && hexDist(c.x, c.y, tx, ty) <= hexDist(x, y, tx, ty))
+    v += (taken ? tv * 0.3 : tv) * far
   }
   if (t.t === 'hills') v += 2
   // Barbarský tábor za humny znamená neustálé nájezdy.
@@ -225,27 +231,39 @@ function aiWorker(s: GameState, p: Player, u: Unit, claimed: Set<number>): void 
     if (c && (c.x !== u.x || c.y !== u.y)) { moveUnit(s, u, c.x, c.y); return }
   }
   if (u.work) return
+  const afloat = isWater(s.tiles[idx(s, u.x, u.y)])
+  // Dělníci počítače smějí na vodu jen kvůli lovišti; na souši se zase vylodí.
+  if (!p.human && u.sea && !afloat) u.sea = false
   const pm = pathMap(s, u)
   // Každý druhý dělník dává přednost cestám mezi městy.
-  if (u.id % 2 === 0 && aiRoad(s, p, u, pm, claimed)) return
-  let best = -1, bv = -Infinity
+  if (!afloat && u.id % 2 === 0 && aiRoad(s, p, u, pm, claimed)) return
+  let best = -1, bv = -Infinity, bestJob: JobId | null = null
   for (let i = 0; i < s.tiles.length; i++) {
     const t = s.tiles[i]
-    if (t.owner !== p.id || t.imp || t.special || pm.dist[i] === Infinity || claimed.has(i)) continue
+    if (t.owner !== p.id || t.special || claimed.has(i)) continue
     const x = i % s.W, y = (i / s.W) | 0
-    if (cityAt(s, x, y)) continue
-    const imps = improvementsFor(s, t, p)
-    if (!imps.length) continue
-    if (s.units.some(o => atWar(s, o.owner, p.id) && !isCivilian(o) && hexDist(o.x, o.y, x, y) <= 2)) continue
+    // Na loviště se počítač nalodí z břehu hned vedle; hráčovi dělníci tam umějí doplout sami.
+    let dist = pm.dist[i]
+    if (dist === Infinity && isWater(t) && !p.human && hasTech(p, 'sailing')) for (const [nx, ny] of neighbors(s, x, y)) dist = Math.min(dist, pm.dist[idx(s, nx, ny)] + 2)
+    if (dist === Infinity) continue
+    // Co se na poli hodí, určuje stejné pravidlo jako rada pro hráče: surovina, oprava, farma či ves podle potřeb města.
+    const job = recommendJob(s, i, p.id)
+    if (!job) continue
+    if (s.units.some(o => atWar(s, o.owner, p.id) && !isCivilian(o) && hexDist(o.x, o.y, x, y) <= (isWater(t) ? 4 : 2))) continue
     const worked = s.cities.some(c => c.owner === p.id && c.worked.includes(i))
-    const v = (t.res ? 6 : 0) + (worked ? 4 : 0) - pm.dist[i] * 1.2
-    if (v > bv) { bv = v; best = i }
+    const v = (t.res ? 6 : 0) + (worked ? 4 : 0) + (job === 'repair' ? 5 : 0) - dist * 1.2
+    if (v > bv) { bv = v; best = i; bestJob = job }
   }
-  if (best < 0) { aiRoad(s, p, u, pm, claimed); return }
+  if (best < 0 || !bestJob) {
+    // Na vodě není co dělat: zpátky na nejbližší břeh.
+    if (afloat) { const c = nearestCity(s, p.id, u.x, u.y); if (c) moveUnit(s, u, c.x, c.y) } else aiRoad(s, p, u, pm, claimed)
+    return
+  }
   claimed.add(best)
   const x = best % s.W, y = (best / s.W) | 0
+  if (!p.human && isWater(s.tiles[best])) u.sea = true
   if (u.x !== x || u.y !== y) moveUnit(s, u, x, y)
-  if (u.x === x && u.y === y && u.moves > 0) startWork(s, u, improvementsFor(s, s.tiles[best], p)[0])
+  if (u.x === x && u.y === y && u.moves > 0) startWork(s, u, bestJob)
 }
 
 /** Když není co vylepšovat, dělníci propojují města cestou do hlavního města. */
@@ -318,7 +336,7 @@ function aiCityBuild(s: GameState, p: Player, c: City): void {
   if (c.build && c.prod >= itemCost(c.build, p) * 0.2) return
   const cities = citiesOf(s, p.id)
   const units = unitsOf(s, p.id)
-  const mil = units.filter(u => !isCivilian(u) && !isNaval(u) && u.type !== 'scout').length
+  const mil = headcount(units.filter(u => !isCivilian(u) && !isNaval(u) && u.type !== 'scout'))
   const navy = units.filter(isNaval).length + cities.filter(o => o.id !== c.id && o.build?.kind === 'unit' && !!UNITS[o.build.id].naval).length
   const settlers = units.filter(u => u.type === 'settler').length + cities.filter(o => o.id !== c.id && o.build?.kind === 'unit' && o.build.id === 'settler').length
   const workers = units.filter(u => u.type === 'worker').length + cities.filter(o => o.id !== c.id && o.build?.kind === 'unit' && o.build.id === 'worker').length
@@ -361,6 +379,8 @@ function aiCityBuild(s: GameState, p: Player, c: City): void {
   // Stroje na chystané tažení se staví, i když je vojska jinak dost.
   if (p.siege && setU(wantedEngine(s, p, c))) return
   if ((war || k.alwaysArm || holds) && mil < armyTarget) { if (setU(bestMilitary(s, p, c, false))) return }
+  // Město pod stropem obyvatel potřebuje akvadukt či kanalizaci dřív než cokoli jiného.
+  if (c.pop >= popCap(c) - 1) for (const b of ['aqueduct', 'sewer'] as BuildingId[]) if (canBuildBuilding(s, c, b)) { setB(b); return }
   for (const b of k.build) {
     if (!canBuildBuilding(s, c, b)) continue
     if ((b === 'walls' || b === 'bastion') && !war && threat === 0 && !k.wallsAlways) continue
@@ -494,6 +514,20 @@ function pressing(s: GameState, p: Player, q: Player): boolean {
   return near >= 3 || (near >= 2 && c.hp < cityMaxHp(c) * 0.6) || s.turn - plan.since < 12
 }
 
+/** Před tažením a během něj se zdravé stejné jednotky spojují: kolem města je jen šest polí a víc síly se tam jinak nedostane. */
+function aiMerge(s: GameState, p: Player): void {
+  if (!p.siege || !hasTech(p, 'tactics')) return
+  const pool = unitsOf(s, p.id).filter(u => !isCivilian(u) && !isNaval(u) && u.hp >= 70)
+  let n = pool.length
+  for (const u of pool) {
+    if (n <= 6) return
+    // Posádka města zůstává na místě, připojit se k ní může soused.
+    if (!s.units.includes(u) || cityAt(s, u.x, u.y)) continue
+    const to = mergeTargets(s, u).filter(o => o.hp >= 70).sort((a, b) => unitSize(b) - unitSize(a))[0]
+    if (to && mergeUnits(s, u, to)) n--
+  }
+}
+
 function nearestCity(s: GameState, pid: number, x: number, y: number): City | null {
   let best: City | null = null, bd = Infinity
   for (const c of s.cities) if (c.owner === pid) { const d = hexDist(c.x, c.y, x, y); if (d < bd) { bd = d; best = c } }
@@ -503,6 +537,7 @@ function nearestCity(s: GameState, pid: number, x: number, y: number): City | nu
 function aiMilitary(s: GameState, p: Player): void {
   const pid = p.id
   const cities = citiesOf(s, pid)
+  aiMerge(s, p)
   const army = unitsOf(s, pid).filter(u => !isCivilian(u) && !isNaval(u))
   if (!army.length) return
   const assigned = new Set<number>()
@@ -581,7 +616,7 @@ function aiMilitary(s: GameState, p: Player): void {
     if (!plan.go) {
       // Vyráží se, až má shromážděné vojsko na město sílu: stroje mu dají čtyři kola palby, pěchota pak zteč.
       const ready = fit.filter(u => !stage || hexDist(u.x, u.y, stage.x, stage.y) <= 3 || dT(u) <= 6)
-      const melee = ready.filter(u => !UNITS[u.type].ranged && !UNITS[u.type].ram).length
+      const melee = headcount(ready.filter(u => !UNITS[u.type].ranged && !UNITS[u.type].ram))
       const power = punch(s, ready, target, 4)
       const waited = s.turn - plan.since
       // Kdo umí stavět stroje, nevyráží bez beranidla (pěchotě přidá sílu) nebo tří střílejících strojů, leda by se čekání protáhlo.
@@ -590,7 +625,7 @@ function aiMilitary(s: GameState, p: Player): void {
       const late = !pre && waited > 10
       const engOk = !canSiege(s, p, cities) || ready.some(u => UNITS[u.type].ram) || eng >= (late ? 1 : 3)
       const enough = melee >= (late ? 2 : 4) && engOk && power >= full * (late ? 0.8 : 1.1) * TUNE.muster
-      if (ready.length >= need && (enough || rush)) {
+      if (headcount(ready) >= need && (enough || rush)) {
         if (pre) { declareWar(s, pid, target.owner); plan.pre = false }
         plan.go = true; plan.since = s.turn
       }
@@ -823,6 +858,8 @@ export function barbTurn(s: GameState): void {
     // Barbaři jsou draví: napadnou i vyrovnaného soupeře, stráž tábora je jen o málo opatrnější.
     if (tryAttack(s, u, isGuard ? 14 : 16)) continue
     if (isGuard) { u.fortified = true; continue }
+    // Nájezdníci plení pole, na která vkročí.
+    if (!pillageBlock(s, u) && rand(s) < 0.6) { pillage(s, u); continue }
     // Tábor bez stráže: nejbližší se vrátí hlídat.
     if (u.home >= 0 && !militaryAt(s, hx, hy)) { moveUnit(s, u, hx, hy); continue }
     if (u.hp < 35) { if (u.home >= 0) approach(s, u, hx, hy, 1); continue }
@@ -894,7 +931,7 @@ export function adviseTech(s: GameState, p: Player): TechId | null {
   const avail = availableTechs(p)
   if (!avail.length) return null
   let order = p.war.length ? PERSONAS.aggressive.research : PERSONAS.builder.research
-  if (seafarer(s, p)) order = ['sailing', ...(p.techs.length >= 5 ? ['navigation' as TechId] : []), ...order]
+  if (seafarer(s, p)) order = ['sailing', 'fishing', ...(p.techs.length >= 5 ? ['navigation' as TechId] : []), ...order]
   return order.find(t => avail.includes(t)) ?? avail[0]
 }
 

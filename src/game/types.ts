@@ -1,7 +1,7 @@
 import type { TraditionId, ScenarioId, BuildingId, Difficulty, ImprovementId, NationId, PersonaId, PromoId, ResourceId, TechId, TerrainId, UnitId } from './data.ts'
 
-/** Práce dělníků: vylepšení pole, nebo cesta. */
-export type JobId = ImprovementId | 'road'
+/** Práce dělníků: vylepšení pole, cesta, vymýcení lesa, nebo oprava po vyplenění. */
+export type JobId = ImprovementId | 'road' | 'clear' | 'repair'
 
 export interface Tile {
   t: TerrainId
@@ -15,6 +15,13 @@ export interface Tile {
   variant: number
   special: 'ruins' | 'camp' | null
   road?: boolean
+  /** Vylepšení je vypleněné: na poli zůstává, ale nefunguje, dokud ho dělníci neopraví. */
+  ruin?: boolean
+  /** Vypleněná cesta: nezrychluje a nespojuje města. */
+  roadRuin?: boolean
+  /** Rozpracovaná práce dělníků a kolik tahů zbývá; přeruší-li se, zůstane na poli. */
+  job?: JobId
+  jobLeft?: number
   /** Řeky na hranách pole: bit d = hrana směrem d (0 = V, dále po směru hodin). */
   river?: number
 }
@@ -47,6 +54,14 @@ export interface City {
   worked: number[]
   /** Zaměření města: čemu dávají obyvatelé při výběru polí přednost (bez hodnoty = vyváženě). */
   focus?: CityFocus
+  /** Kolik polí už město zabralo kulturou (od toho se odvíjí cena dalšího). */
+  grown?: number
+  /** Růst hranic: bez hodnoty vybírá pole město samo, 'manual' = vybírá hráč. */
+  border?: 'manual'
+  /** Pole, které si hráč vybral jako další k zabrání (index), nebo nic. */
+  nextTile?: number
+  /** Město je spojené cestou (nebo přístavem) s hlavním městem; trhové vsi pak vynášejí víc. */
+  linked?: boolean
   /** Město už v tomto tahu vystřelilo z hradeb (na cíl, který vybral hráč). */
   fired?: boolean
 }
@@ -73,6 +88,8 @@ export interface Unit {
   roadTo: [number, number] | null
   xp: number
   promos: PromoId[]
+  /** Spojené jednotky: 2 = šik, 3 = voj. Bez hodnoty je jednotka samostatná. */
+  size?: number
   /** Soupeř či barbar smí na vodu (výsadek, nájezd z moře). */
   sea: boolean
   workLeft: number
@@ -111,6 +128,8 @@ export interface Player {
   cityNames: number
   /** Vztah soupeře k jednotlivým hráčům (−100 až 100), index = id hráče. */
   attitude: number[]
+  /** Kolikrát národ dokončil opakovatelnou technologii Správa říše (+1 zlato v každém městě za každé dokončení). */
+  empire?: number
   /** Nastřádaná kultura národa na další tradici. */
   culture: number
   traditions: TraditionId[]

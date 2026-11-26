@@ -24,16 +24,17 @@ export const SCENARIO_IDS = Object.keys(SCENARIOS) as ScenarioId[]
 
 export type TerrainId = 'ocean' | 'coast' | 'grass' | 'plains' | 'desert' | 'hills' | 'mountain'
 export type ResourceId = 'wheat' | 'horses' | 'iron' | 'gold' | 'stone' | 'fish' | 'deer'
-export type ImprovementId = 'farm' | 'mine' | 'pasture' | 'lumber'
+export type ImprovementId = 'farm' | 'mine' | 'pasture' | 'lumber' | 'village' | 'fishery'
 export type NationId = 'aur' | 'khar' | 'thal' | 'sylv' | 'tark' | 'zahi' | 'morv' | 'lume' | 'barb'
 export type UnitId =
   | 'settler' | 'worker' | 'scout' | 'warrior' | 'spearman' | 'archer' | 'horseman'
   | 'swordsman' | 'catapult' | 'chariot' | 'axeman' | 'hoplite' | 'hunter' | 'galley' | 'trireme'
-  | 'manatarms' | 'knight' | 'trebuchet' | 'ram'
+  | 'manatarms' | 'knight' | 'trebuchet' | 'ram' | 'crossbow'
   | 'raider' | 'camel' | 'ballista' | 'templar'
 export type BuildingId =
   | 'monument' | 'granary' | 'workshop' | 'market' | 'library' | 'walls' | 'barracks'
   | 'temple' | 'aqueduct' | 'academy' | 'court' | 'harbor' | 'bastion' | 'bank' | 'wonder'
+  | 'caravanserai' | 'armory' | 'shipyard' | 'guildhall' | 'university' | 'amphitheater' | 'observatory' | 'sewer'
 export type TechId =
   | 'agriculture' | 'husbandry' | 'mining' | 'archery'
   | 'pottery' | 'bronze' | 'writing' | 'wheel' | 'masonry' | 'forestry'
@@ -41,6 +42,7 @@ export type TechId =
   | 'math' | 'philosophy' | 'law' | 'irrigation'
   | 'astronomy' | 'sailing' | 'navigation'
   | 'steel' | 'engineering' | 'chivalry' | 'siegecraft' | 'banking'
+  | 'fishing' | 'commerce' | 'armory' | 'shipbuilding' | 'guilds' | 'education' | 'architecture' | 'calendar' | 'empire'
 
 export interface Yields { food: number; prod: number; gold: number }
 
@@ -72,25 +74,58 @@ export const IMPROVEMENTS: Record<ImprovementId, ImprovementDef> = {
   mine: { name: 'Důl', verb: 'Vyhloubit důl', turns: 5, tech: 'mining', food: 0, prod: 1, gold: 0 },
   pasture: { name: 'Ohrada', verb: 'Postavit ohradu', turns: 4, tech: 'husbandry', food: 1, prod: 1, gold: 0 },
   lumber: { name: 'Pila', verb: 'Postavit pilu', turns: 4, tech: 'forestry', food: 0, prod: 1, gold: 0 },
+  village: { name: 'Trhová ves', verb: 'Založit trhovou ves', turns: 5, tech: 'currency', food: 0, prod: 0, gold: 1 },
+  fishery: { name: 'Loviště', verb: 'Zřídit loviště', turns: 4, tech: 'fishing', food: 1, prod: 0, gold: 0 },
 }
+/** Vymýcení lesa: les zmizí a nejbližší město dostane jednorázově výrobu. */
+export const CLEAR = { name: 'Vymýcení lesa', verb: 'Vymýtit les', turns: 3, tech: 'bronze' as TechId, prod: 20 }
+/** Oprava vypleněného vylepšení či cesty trvá polovinu původní doby. */
+export const REPAIR = { name: 'Oprava', verb: 'Opravit' }
+/** O kolik tahů déle trvá přestavba stojícího vylepšení na jiné. */
+export const REPLACE_TURNS = 2
+/** Kolik zlata přinese vyplenění pole. */
+export const PILLAGE_GOLD = 10
+/** Od této technologie dávají trhové vsi +1 zlato navíc ve městě spojeném s hlavním městem. */
+export const LINK_TECH: TechId = 'commerce'
 
-/** Tradice: trvalé výhody, které si národ vybírá za nastřádanou kulturu. */
-export type TraditionId = 'craft' | 'stores' | 'trade' | 'scribes' | 'feasts' | 'warrior' | 'militia' | 'builders' | 'settlers' | 'sea'
-export const TRADITIONS: Record<TraditionId, { name: string; desc: string }> = {
-  craft: { name: 'Řemeslné cechy', desc: '+1 výroba v každém městě.' },
-  stores: { name: 'Společné sýpky', desc: '+1 jídlo v každém městě.' },
-  trade: { name: 'Kupecké stezky', desc: '+2 zlato v každém městě.' },
-  scribes: { name: 'Písařské školy', desc: '+1 věda v každém městě, s knihovnou +2.' },
-  feasts: { name: 'Slavnosti', desc: '+2 kultura v každém městě – další tradice i hranice přijdou dřív.' },
-  warrior: { name: 'Válečnický kodex', desc: '+10 % síly při útoku a nové vojenské jednotky začínají s 5 zkušenostmi.' },
-  militia: { name: 'Domobrana', desc: '+25 % k obraně všech měst.' },
-  builders: { name: 'Stavitelské bratrstvo', desc: 'Dělníci dokončí každou práci o tah dřív.' },
-  settlers: { name: 'Osadnický duch', desc: 'Nově založená města začínají se 2 obyvateli.' },
-  sea: { name: 'Námořní tradice', desc: 'Lodě i naloděné jednotky mají +1 pohyb.' },
+/** Tradice: trvalé výhody, které si národ vybírá za nastřádanou kulturu. Jsou ve čtyřech větvích; v každé se postupuje odshora. */
+export type TraditionId =
+  | 'militia' | 'warrior' | 'raiders' | 'campaign'
+  | 'stores' | 'settlers' | 'builders' | 'craft'
+  | 'scribes' | 'feasts' | 'chroniclers' | 'stargazers'
+  | 'trade' | 'merchants' | 'sea' | 'fishers'
+export type BranchId = 'war' | 'land' | 'lore' | 'trade'
+export const BRANCHES: Record<BranchId, { name: string; desc: string }> = {
+  war: { name: 'Válka', desc: 'Obrana měst, útok a kořist.' },
+  land: { name: 'Země', desc: 'Jídlo, výroba, dělníci a nová města.' },
+  lore: { name: 'Učenost', desc: 'Věda, kultura a hranice.' },
+  trade: { name: 'Obchod a moře', desc: 'Zlato, vsi, lodě a rybolov.' },
+}
+export const BRANCH_IDS = Object.keys(BRANCHES) as BranchId[]
+/** Pořadí v tomto zápisu je pořadí ve větvi. */
+export const TRADITIONS: Record<TraditionId, { name: string; desc: string; branch: BranchId }> = {
+  militia: { name: 'Domobrana', desc: '+25 % k obraně všech měst.', branch: 'war' },
+  warrior: { name: 'Válečnický kodex', desc: '+10 % síly při útoku a nové vojenské jednotky začínají s 5 zkušenostmi.', branch: 'war' },
+  raiders: { name: 'Kořistníci', desc: 'Plenění přináší dvojnásobek zlata a plenící jednotce vyléčí 15 životů.', branch: 'war' },
+  campaign: { name: 'Tažení', desc: 'Odpočívající jednotky se mimo vlastní území léčí o 10 životů za tah rychleji.', branch: 'war' },
+  stores: { name: 'Společné sýpky', desc: '+1 jídlo v každém městě.', branch: 'land' },
+  settlers: { name: 'Osadnický duch', desc: 'Nově založená města začínají se 2 obyvateli.', branch: 'land' },
+  builders: { name: 'Stavitelské bratrstvo', desc: 'Dělníci dokončí každou práci o tah dřív.', branch: 'land' },
+  craft: { name: 'Řemeslné cechy', desc: '+1 výroba v každém městě.', branch: 'land' },
+  scribes: { name: 'Písařské školy', desc: '+1 věda v každém městě, s knihovnou +2.', branch: 'lore' },
+  feasts: { name: 'Slavnosti', desc: '+2 kultura v každém městě – další tradice i hranice přijdou dřív.', branch: 'lore' },
+  chroniclers: { name: 'Kronikáři', desc: 'Další pole stojí města o čtvrtinu kultury méně.', branch: 'lore' },
+  stargazers: { name: 'Hvězdáři', desc: '+1 věda v každém městě, s observatoří +3.', branch: 'lore' },
+  trade: { name: 'Kupecké stezky', desc: '+2 zlato v každém městě.', branch: 'trade' },
+  merchants: { name: 'Trhovci', desc: 'Každá trhová ves dává +1 zlato.', branch: 'trade' },
+  sea: { name: 'Námořní tradice', desc: 'Lodě i naloděné jednotky mají +1 pohyb.', branch: 'trade' },
+  fishers: { name: 'Rybáři', desc: 'Loviště dávají +1 jídlo a přístav +1 zlato.', branch: 'trade' },
 }
 export const TRADITION_IDS = Object.keys(TRADITIONS) as TraditionId[]
-/** Kolik kultury stojí další tradice, když jich národ už má `n`. */
-export const traditionCost = (n: number): number => 25 + 20 * n + 5 * n * n
+/** Tradice jedné větve v pořadí, v jakém se přijímají. */
+export const branchOf = (b: BranchId): TraditionId[] => TRADITION_IDS.filter(t => TRADITIONS[t].branch === b)
+/** Kolik kultury stojí další tradice, když jich národ už má `n`. Všechny se za hru stihnout nemají. */
+export const traditionCost = (n: number): number => 30 + 30 * n + 12 * n * n
 
 /** Věky: do dalšího se vstupuje počtem objevených technologií. */
 export const ERAS = [
@@ -127,7 +162,8 @@ export const TUNE = {
   muster: 1,
 }
 
-export const ROAD = { name: 'Cesta', verb: 'Postavit cestu', turns: 2, tech: 'wheel' as TechId }
+/** Cesta: v lese a pahorkatině se staví déle; řeku překlene až most, který umí národ se Stavitelstvím. */
+export const ROAD = { name: 'Cesta', verb: 'Postavit cestu', turns: 2, rough: 3, tech: 'wheel' as TechId, bridgeTech: 'construction' as TechId }
 
 export type PromoId = 'drill' | 'guard' | 'medic' | 'march'
 export const PROMOS: Record<PromoId, { name: string; desc: string }> = {
@@ -171,22 +207,23 @@ export interface UnitDef {
 
 export const UNITS: Record<UnitId, UnitDef> = {
   settler: { name: 'Osadníci', desc: 'Založí nové město.', cost: 62, move: 2, str: 0, civilian: true },
-  worker: { name: 'Dělníci', desc: 'Staví farmy, doly, ohrady a pily.', cost: 36, move: 2, str: 0, civilian: true },
+  worker: { name: 'Dělníci', desc: 'Vylepšují pole, stavějí cesty a opravují, co nepřítel vyplenil.', cost: 36, move: 2, str: 0, civilian: true },
   scout: { name: 'Zvěd', desc: 'Rychlý průzkumník, terén ho nezpomaluje.', cost: 22, move: 3, str: 5, ignoreTerrain: true, sight: 3, upgrade: ['horseman'] },
   warrior: { name: 'Válečník', desc: 'Základní pěchota.', cost: 28, move: 2, str: 8, upgrade: ['swordsman', 'spearman'] },
   spearman: { name: 'Kopiník', desc: 'Pěchota, +50 % proti jízdě.', cost: 42, move: 2, str: 11, tech: 'bronze', antiMounted: true, upgrade: ['swordsman'] },
-  archer: { name: 'Lučištník', desc: 'Střílí na 2 pole, v boji zblízka slabý.', cost: 40, move: 2, str: 5, ranged: 8, range: 2, tech: 'archery' },
+  archer: { name: 'Lučištník', desc: 'Střílí na 2 pole, v boji zblízka slabý.', cost: 40, move: 2, str: 5, ranged: 8, range: 2, tech: 'archery', upgrade: ['crossbow'] },
+  crossbow: { name: 'Kušník', desc: 'Těžký střelec: střílí na 2 pole a prorazí i zbroj.', cost: 68, move: 2, str: 8, ranged: 13, range: 2, tech: 'armory' },
   horseman: { name: 'Jezdec', desc: 'Rychlá jízda. Vyžaduje koně.', cost: 58, move: 4, str: 12, mounted: true, tech: 'riding', needs: 'horses', upgrade: ['knight'] },
   swordsman: { name: 'Šermíř', desc: 'Těžká pěchota. Vyžaduje železo.', cost: 62, move: 2, str: 15, tech: 'iron', needs: 'iron', upgrade: ['manatarms'] },
   catapult: { name: 'Katapult', desc: 'Obléhací stroj: trojnásobný účinek proti městům, proti jednotkám poloviční.', cost: 72, move: 2, str: 4, ranged: 9, range: 2, tech: 'math', siege: true, upgrade: ['trebuchet'] },
   chariot: { name: 'Válečný vůz', desc: 'Rychlý střelecký vůz. Nepotřebuje koně.', cost: 54, move: 4, str: 7, ranged: 9, range: 2, mounted: true, tech: 'riding', replaces: 'horseman', nation: 'aur' },
   axeman: { name: 'Sekerník', desc: 'Silnější než šermíř a nepotřebuje železo.', cost: 58, move: 2, str: 16, tech: 'iron', replaces: 'swordsman', nation: 'khar', upgrade: ['manatarms'] },
-  hoplite: { name: 'Hoplít', desc: 'Odolná falanga, +50 % proti jízdě.', cost: 42, move: 2, str: 13, tech: 'bronze', antiMounted: true, replaces: 'spearman', nation: 'thal' },
+  hoplite: { name: 'Hoplít', desc: 'Odolná falanga, +50 % proti jízdě; spojení v šik či voj se brání o 25 % lépe.', cost: 42, move: 2, str: 13, tech: 'bronze', antiMounted: true, replaces: 'spearman', nation: 'thal' },
   raider: { name: 'Nájezdník', desc: 'Lehká stepní jízda: levnější a silnější než jezdec. Vyžaduje koně.', cost: 50, move: 4, str: 13, mounted: true, tech: 'riding', needs: 'horses', replaces: 'horseman', nation: 'tark', upgrade: ['knight'] },
-  camel: { name: 'Velbloudí střelec', desc: 'Střelec v sedle: rychlejší než lučištník, zblízka slabý.', cost: 42, move: 3, str: 6, ranged: 8, range: 2, mounted: true, tech: 'archery', replaces: 'archer', nation: 'zahi' },
+  camel: { name: 'Velbloudí střelec', desc: 'Střelec v sedle: rychlejší než lučištník, zblízka slabý.', cost: 42, move: 3, str: 6, ranged: 8, range: 2, mounted: true, tech: 'archery', replaces: 'archer', nation: 'zahi', upgrade: ['crossbow'] },
   ballista: { name: 'Balista', desc: 'Obléhací stroj s dostřelem 3 pole: trojnásobný účinek proti městům, proti jednotkám poloviční.', cost: 76, move: 2, str: 4, ranged: 9, range: 3, tech: 'math', siege: true, replaces: 'catapult', nation: 'morv', upgrade: ['trebuchet'] },
   templar: { name: 'Chrámová stráž', desc: 'Pěchota místo válečníka: na vlastním území se brání o 25 % lépe.', cost: 30, move: 2, str: 9, upgrade: ['swordsman', 'spearman'], replaces: 'warrior', nation: 'lume' },
-  hunter: { name: 'Lovec', desc: 'Rychlý lučištník s delším rozhledem.', cost: 40, move: 3, str: 6, ranged: 9, range: 2, tech: 'archery', replaces: 'archer', nation: 'sylv', sight: 3 },
+  hunter: { name: 'Lovec', desc: 'Rychlý lučištník s delším rozhledem.', cost: 40, move: 3, str: 6, ranged: 9, range: 2, tech: 'archery', replaces: 'archer', nation: 'sylv', sight: 3, upgrade: ['crossbow'] },
   ram: { name: 'Beranidlo', desc: 'Samo neútočí. Stojí-li hned u nepřátelského města, má vaše pěchota při útoku na to město +50 % síly a vaše jednotky hned u města +50 % obrany proti odvetě i střelbě z hradeb.', cost: 40, move: 2, str: 4, tech: 'bronze', siege: true, ram: true },
   manatarms: { name: 'Zbrojnoš', desc: 'Pěchota v plné zbroji, nejsilnější v boji zblízka. Vyžaduje železo.', cost: 84, move: 2, str: 20, tech: 'steel', needs: 'iron' },
   knight: { name: 'Rytíř', desc: 'Těžká jízda: rychlá a silná. Vyžaduje koně.', cost: 88, move: 4, str: 18, mounted: true, tech: 'chivalry', needs: 'horses' },
@@ -211,40 +248,60 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   harbor: { name: 'Přístav', desc: '+1 jídlo z každého obdělávaného vodního pole a +2 zlato. Jen v pobřežním městě.', cost: 54, tech: 'sailing', maint: 1 },
   bastion: { name: 'Bašty', desc: 'Dalších +25 % obrana města a +40 životů. Vyžadují hradby.', cost: 84, tech: 'engineering', maint: 1 },
   bank: { name: 'Banka', desc: '+3 zlato a +20 % zlata města.', cost: 92, tech: 'banking', maint: 0 },
-  wonder: { name: 'Sluneční chrám', desc: 'Div světa. Kdo jej dostaví první a udrží jeho město 15 tahů, vyhrává misi.', cost: 900, tech: 'astronomy', maint: 0 },
+  caravanserai: { name: 'Karavanseraj', desc: '+3 zlato, je-li město spojené cestou nebo přístavem s hlavním městem.', cost: 70, tech: 'commerce', maint: 0 },
+  armory: { name: 'Zbrojnice', desc: 'Nové bojové jednotky začínají s 10 zkušenostmi.', cost: 80, tech: 'armory', maint: 1 },
+  shipyard: { name: 'Loděnice', desc: 'Lodě se tu stavějí o polovinu rychleji. Jen v pobřežním městě.', cost: 76, tech: 'shipbuilding', maint: 1 },
+  guildhall: { name: 'Cechovní dům', desc: '+2 výroba a +1 výroba za každé 4 obyvatele.', cost: 96, tech: 'guilds', maint: 1 },
+  university: { name: 'Univerzita', desc: '+4 věda a +1 věda za každé 3 obyvatele.', cost: 110, tech: 'education', maint: 2 },
+  amphitheater: { name: 'Amfiteátr', desc: '+4 kultura.', cost: 100, tech: 'architecture', maint: 1 },
+  observatory: { name: 'Observatoř', desc: '+3 věda; dalších +3, stojí-li město na pahorkatině nebo hned u hor.', cost: 104, tech: 'astronomy', maint: 1 },
+  sewer: { name: 'Kanalizace', desc: 'Město smí růst přes 16 obyvatel. Vyžaduje akvadukt.', cost: 110, tech: 'engineering', maint: 1 },
+  wonder: { name: 'Sluneční chrám', desc: 'Div světa. Kdo jej dostaví první a udrží jeho město 15 tahů, vyhrává misi.', cost: 800, tech: 'calendar', maint: 0 },
 }
 
-export interface TechDef { name: string; tier: number; row: number; cost: number; req: TechId[]; unlocks: string }
-const C = [0, 20, 42, 78, 125, 190, 270]
+export interface TechDef { name: string; tier: number; row: number; cost: number; req: TechId[]; unlocks: string; /** Lze zkoumat opakovaně; každé další kolo je dražší. */ repeat?: boolean }
+const C = [0, 20, 45, 80, 125, 190, 280, 380, 500]
+/** O kolik zdraží opakovatelná technologie s každým dokončením. */
+export const REPEAT_STEP = 150
+/** Každá technologie vyžaduje aspoň jednu ze stupně těsně pod sebou, takže stupně nejdou přeskakovat. */
 export const TECHS: Record<TechId, TechDef> = {
   agriculture: { name: 'Zemědělství', tier: 1, row: 0, cost: C[1], req: [], unlocks: 'Farmy' },
   husbandry: { name: 'Chov zvířat', tier: 1, row: 1, cost: C[1], req: [], unlocks: 'Ohrady (koně, zvěř)' },
   mining: { name: 'Těžba', tier: 1, row: 2, cost: C[1], req: [], unlocks: 'Doly' },
   archery: { name: 'Lukostřelba', tier: 1, row: 3, cost: C[1], req: [], unlocks: 'Lučištník' },
-  sailing: { name: 'Plavba', tier: 1, row: 4, cost: C[1], req: [], unlocks: 'Galéra, přístav, nalodění na pobřežní vody' },
-  navigation: { name: 'Navigace', tier: 3, row: 6, cost: C[3], req: ['sailing'], unlocks: 'Triéra, plavba přes oceán' },
+  sailing: { name: 'Plavba', tier: 1, row: 4, cost: C[1], req: [], unlocks: 'Galéra, přístav, nalodění' },
   pottery: { name: 'Hrnčířství', tier: 2, row: 0, cost: C[2], req: ['agriculture'], unlocks: 'Sýpka' },
   wheel: { name: 'Kolo', tier: 2, row: 1, cost: C[2], req: ['husbandry'], unlocks: 'Dílna, cesty' },
-  bronze: { name: 'Bronz', tier: 2, row: 2, cost: C[2], req: ['mining'], unlocks: 'Kopiník, beranidlo, odhalí železo' },
+  bronze: { name: 'Bronz', tier: 2, row: 2, cost: C[2], req: ['mining'], unlocks: 'Kopiník, beranidlo, mýcení lesa' },
   masonry: { name: 'Zdivo', tier: 2, row: 3, cost: C[2], req: ['mining'], unlocks: 'Hradby' },
   forestry: { name: 'Dřevařství', tier: 2, row: 4, cost: C[2], req: ['archery'], unlocks: 'Pily' },
-  writing: { name: 'Písmo', tier: 2, row: 5, cost: C[2], req: ['pottery'], unlocks: 'Knihovna' },
+  writing: { name: 'Písmo', tier: 2, row: 5, cost: C[2], req: ['agriculture'], unlocks: 'Knihovna' },
+  fishing: { name: 'Rybolov', tier: 2, row: 6, cost: C[2], req: ['sailing'], unlocks: 'Loviště' },
+  mysticism: { name: 'Mystika', tier: 3, row: 0, cost: C[3], req: ['pottery'], unlocks: 'Chrám' },
   riding: { name: 'Jezdectví', tier: 3, row: 1, cost: C[3], req: ['wheel'], unlocks: 'Jezdec' },
   iron: { name: 'Železo', tier: 3, row: 2, cost: C[3], req: ['bronze'], unlocks: 'Šermíř' },
-  tactics: { name: 'Válečnictví', tier: 3, row: 3, cost: C[3], req: ['bronze', 'archery'], unlocks: 'Kasárna' },
-  construction: { name: 'Stavitelství', tier: 3, row: 4, cost: C[3], req: ['masonry', 'wheel'], unlocks: 'Akvadukt' },
-  mysticism: { name: 'Mystika', tier: 3, row: 0, cost: C[3], req: ['pottery'], unlocks: 'Chrám' },
-  currency: { name: 'Měna', tier: 3, row: 5, cost: C[3], req: ['writing'], unlocks: 'Tržiště' },
-  math: { name: 'Matematika', tier: 4, row: 3, cost: C[4], req: ['writing', 'wheel'], unlocks: 'Katapult' },
+  tactics: { name: 'Válečnictví', tier: 3, row: 3, cost: C[3], req: ['bronze', 'archery'], unlocks: 'Kasárna, šik' },
+  construction: { name: 'Stavitelství', tier: 3, row: 4, cost: C[3], req: ['masonry', 'wheel'], unlocks: 'Akvadukt, mosty' },
+  currency: { name: 'Měna', tier: 3, row: 5, cost: C[3], req: ['writing'], unlocks: 'Tržiště, trhové vsi' },
+  navigation: { name: 'Navigace', tier: 3, row: 6, cost: C[3], req: ['fishing'], unlocks: 'Triéra, plavba přes oceán' },
   philosophy: { name: 'Filosofie', tier: 4, row: 0, cost: C[4], req: ['mysticism', 'writing'], unlocks: 'Akademie' },
+  commerce: { name: 'Kupectví', tier: 4, row: 1, cost: C[4], req: ['currency'], unlocks: 'Karavanseraj, výnosnější vsi' },
+  armory: { name: 'Zbrojířství', tier: 4, row: 2, cost: C[4], req: ['iron', 'tactics'], unlocks: 'Zbrojnice, kušník, voj' },
+  math: { name: 'Matematika', tier: 4, row: 3, cost: C[4], req: ['currency', 'wheel'], unlocks: 'Katapult' },
+  irrigation: { name: 'Zavlažování', tier: 4, row: 4, cost: C[4], req: ['construction', 'agriculture'], unlocks: 'Farmy u řeky +1 jídlo' },
   law: { name: 'Zákoník', tier: 4, row: 5, cost: C[4], req: ['currency'], unlocks: 'Soudní dvůr' },
-  irrigation: { name: 'Zavlažování', tier: 4, row: 4, cost: C[4], req: ['construction', 'agriculture'], unlocks: 'Farmy +1 jídlo' },
-  astronomy: { name: 'Astronomie', tier: 6, row: 1, cost: C[6], req: ['philosophy', 'engineering'], unlocks: 'Div: Sluneční chrám' },
-  steel: { name: 'Ocel', tier: 5, row: 2, cost: C[5], req: ['iron', 'tactics'], unlocks: 'Zbrojnoš' },
-  engineering: { name: 'Inženýrství', tier: 5, row: 3, cost: C[5], req: ['math', 'construction'], unlocks: 'Bašty' },
+  shipbuilding: { name: 'Loďařství', tier: 4, row: 6, cost: C[4], req: ['navigation'], unlocks: 'Loděnice' },
+  education: { name: 'Vzdělanost', tier: 5, row: 0, cost: C[5], req: ['philosophy', 'math'], unlocks: 'Univerzita' },
+  steel: { name: 'Ocel', tier: 5, row: 2, cost: C[5], req: ['armory'], unlocks: 'Zbrojnoš' },
+  engineering: { name: 'Inženýrství', tier: 5, row: 3, cost: C[5], req: ['math', 'construction'], unlocks: 'Bašty, kanalizace' },
+  guilds: { name: 'Cechy', tier: 5, row: 5, cost: C[5], req: ['commerce', 'law'], unlocks: 'Cechovní dům' },
+  architecture: { name: 'Architektura', tier: 6, row: 0, cost: C[6], req: ['engineering', 'education'], unlocks: 'Amfiteátr' },
+  astronomy: { name: 'Astronomie', tier: 6, row: 1, cost: C[6], req: ['education', 'engineering'], unlocks: 'Observatoř' },
   chivalry: { name: 'Rytířství', tier: 6, row: 2, cost: C[6], req: ['steel', 'riding'], unlocks: 'Rytíř' },
   siegecraft: { name: 'Obléhání', tier: 6, row: 3, cost: C[6], req: ['engineering', 'steel'], unlocks: 'Trebuchet' },
-  banking: { name: 'Bankovnictví', tier: 6, row: 5, cost: C[6], req: ['law', 'math'], unlocks: 'Banka' },
+  banking: { name: 'Bankovnictví', tier: 6, row: 5, cost: C[6], req: ['guilds', 'math'], unlocks: 'Banka' },
+  calendar: { name: 'Sluneční kalendář', tier: 7, row: 1, cost: C[7], req: ['astronomy', 'architecture'], unlocks: 'Div: Sluneční chrám' },
+  empire: { name: 'Správa říše', tier: 8, row: 1, cost: C[8], req: ['calendar'], unlocks: '+1 zlato ve městech, opakovaně', repeat: true },
 }
 export const TECH_IDS = Object.keys(TECHS) as TechId[]
 export const UNIT_IDS = Object.keys(UNITS) as UnitId[]
@@ -309,10 +366,10 @@ export interface PersonaDef {
   peaceAfter: number
 }
 
-const R_BUILDER: TechId[] = ['agriculture', 'pottery', 'mining', 'husbandry', 'archery', 'writing', 'bronze', 'wheel', 'mysticism', 'masonry', 'currency', 'philosophy', 'math', 'construction', 'engineering', 'astronomy', 'sailing', 'forestry', 'law', 'banking', 'iron', 'tactics', 'irrigation', 'steel', 'riding', 'navigation', 'siegecraft', 'chivalry']
-const R_WAR: TechId[] = ['mining', 'archery', 'agriculture', 'bronze', 'husbandry', 'pottery', 'wheel', 'writing', 'math', 'iron', 'riding', 'tactics', 'masonry', 'steel', 'construction', 'chivalry', 'engineering', 'siegecraft', 'sailing', 'forestry', 'navigation', 'mysticism', 'currency', 'irrigation', 'philosophy', 'law', 'banking', 'astronomy']
-const B_BUILDER: BuildingId[] = ['monument', 'granary', 'library', 'workshop', 'temple', 'market', 'academy', 'harbor', 'aqueduct', 'court', 'bank', 'walls', 'barracks', 'bastion']
-const B_WAR: BuildingId[] = ['monument', 'granary', 'barracks', 'workshop', 'library', 'walls', 'market', 'temple', 'aqueduct', 'academy', 'court', 'bastion', 'bank', 'harbor']
+const R_BUILDER: TechId[] = ['agriculture', 'pottery', 'mining', 'husbandry', 'archery', 'writing', 'bronze', 'wheel', 'mysticism', 'masonry', 'currency', 'philosophy', 'math', 'construction', 'education', 'engineering', 'astronomy', 'architecture', 'calendar', 'sailing', 'forestry', 'law', 'commerce', 'irrigation', 'guilds', 'banking', 'iron', 'tactics', 'fishing', 'armory', 'steel', 'riding', 'navigation', 'shipbuilding', 'siegecraft', 'chivalry', 'empire']
+const R_WAR: TechId[] = ['mining', 'archery', 'agriculture', 'bronze', 'husbandry', 'pottery', 'wheel', 'writing', 'iron', 'tactics', 'riding', 'currency', 'math', 'armory', 'masonry', 'steel', 'construction', 'chivalry', 'engineering', 'siegecraft', 'sailing', 'forestry', 'fishing', 'navigation', 'mysticism', 'irrigation', 'philosophy', 'law', 'commerce', 'education', 'guilds', 'banking', 'shipbuilding', 'astronomy', 'architecture', 'calendar', 'empire']
+const B_BUILDER: BuildingId[] = ['monument', 'granary', 'library', 'workshop', 'temple', 'market', 'academy', 'harbor', 'aqueduct', 'university', 'court', 'caravanserai', 'guildhall', 'observatory', 'amphitheater', 'sewer', 'bank', 'walls', 'barracks', 'shipyard', 'armory', 'bastion']
+const B_WAR: BuildingId[] = ['monument', 'granary', 'barracks', 'workshop', 'library', 'walls', 'armory', 'market', 'temple', 'aqueduct', 'academy', 'guildhall', 'court', 'bastion', 'university', 'caravanserai', 'sewer', 'bank', 'observatory', 'amphitheater', 'harbor', 'shipyard']
 
 export const PERSONAS: Record<PersonaId, PersonaDef> = {
   // Dobyvatel: brzy zbrojí a napadá slabší sousedy.
@@ -330,32 +387,32 @@ export const PERSONAS: Record<PersonaId, PersonaDef> = {
   // Osadník: zabere co nejvíc země a budovy dohání později.
   expansionist: {
     name: 'Osadník', desc: 'Rozpínavý národ: zakládá město za městem a zabírá volnou zemi.', label: 'neúnavný osadník',
-    research: ['agriculture', 'pottery', 'husbandry', 'mining', 'wheel', 'archery', 'bronze', 'writing', 'masonry', 'currency', 'forestry', 'sailing', 'irrigation', 'construction', 'math', 'mysticism', 'iron', 'law', 'philosophy', 'banking', 'riding', 'tactics', 'navigation', 'astronomy', 'steel', 'engineering', 'chivalry', 'siegecraft'],
-    build: ['granary', 'monument', 'workshop', 'market', 'library', 'walls', 'court', 'aqueduct', 'bank', 'temple', 'harbor', 'barracks', 'academy', 'bastion'],
+    research: ['agriculture', 'pottery', 'husbandry', 'mining', 'wheel', 'archery', 'bronze', 'writing', 'masonry', 'currency', 'forestry', 'sailing', 'fishing', 'irrigation', 'construction', 'math', 'commerce', 'mysticism', 'iron', 'law', 'philosophy', 'guilds', 'banking', 'riding', 'tactics', 'navigation', 'education', 'engineering', 'astronomy', 'architecture', 'calendar', 'armory', 'steel', 'shipbuilding', 'chivalry', 'siegecraft', 'empire'],
+    build: ['granary', 'monument', 'workshop', 'market', 'library', 'walls', 'court', 'aqueduct', 'caravanserai', 'guildhall', 'bank', 'temple', 'harbor', 'sewer', 'university', 'barracks', 'academy', 'amphitheater', 'observatory', 'shipyard', 'armory', 'bastion'],
     martial: false, cities: 8, settleUntil: 100, armyBase: 2, armyPace: 30, alwaysArm: true, wonderInWar: false, wallsAlways: false,
     reserve: 70, marchAt: 4, warFrom: 45, warMil: 5, warRatio: 1.6, warChance: 0.12, dogpile: 0, peaceRatio: 1.0, peaceAfter: 20,
   },
   // Učenec: věda a kultura především, malé vojsko, chrám staví i za války.
   scholar: {
     name: 'Učenec', desc: 'Národ učenců: žene vědu a kulturu, vojsko drží malé.', label: 'zahloubaný učenec',
-    research: ['agriculture', 'pottery', 'writing', 'mysticism', 'mining', 'philosophy', 'husbandry', 'wheel', 'math', 'masonry', 'construction', 'engineering', 'currency', 'astronomy', 'archery', 'bronze', 'law', 'banking', 'irrigation', 'forestry', 'sailing', 'iron', 'tactics', 'steel', 'riding', 'navigation', 'siegecraft', 'chivalry'],
-    build: ['library', 'monument', 'granary', 'temple', 'academy', 'workshop', 'market', 'aqueduct', 'walls', 'court', 'bank', 'harbor', 'barracks', 'bastion'],
+    research: ['agriculture', 'pottery', 'writing', 'mysticism', 'mining', 'philosophy', 'husbandry', 'wheel', 'currency', 'math', 'education', 'masonry', 'construction', 'engineering', 'astronomy', 'architecture', 'calendar', 'archery', 'bronze', 'law', 'commerce', 'guilds', 'banking', 'irrigation', 'forestry', 'sailing', 'fishing', 'iron', 'tactics', 'armory', 'steel', 'riding', 'navigation', 'shipbuilding', 'siegecraft', 'chivalry', 'empire'],
+    build: ['library', 'monument', 'granary', 'temple', 'academy', 'workshop', 'university', 'market', 'aqueduct', 'observatory', 'amphitheater', 'walls', 'court', 'guildhall', 'sewer', 'caravanserai', 'bank', 'harbor', 'barracks', 'shipyard', 'armory', 'bastion'],
     martial: false, cities: 4, settleUntil: 70, armyBase: 1, armyPace: 45, alwaysArm: false, wonderInWar: true, wallsAlways: false,
     reserve: 80, marchAt: 5, warFrom: 70, warMil: 6, warRatio: 2.5, warChance: 0.05, dogpile: 0, peaceRatio: 1.1, peaceAfter: 16,
   },
   // Vypočítavý: čeká na příležitost a vrhne se na toho, kdo už krvácí jinde; z prohrané války rychle couvne.
   opportunist: {
     name: 'Vypočítavý', desc: 'Vypočítavý národ: udeří, když soupeř válčí jinde, a z prohrané války rychle couvne.', label: 'vypočítavý soused',
-    research: ['mining', 'agriculture', 'archery', 'pottery', 'bronze', 'husbandry', 'writing', 'wheel', 'math', 'iron', 'currency', 'masonry', 'riding', 'tactics', 'steel', 'mysticism', 'law', 'banking', 'chivalry', 'sailing', 'forestry', 'construction', 'engineering', 'siegecraft', 'philosophy', 'navigation', 'irrigation', 'astronomy'],
-    build: ['monument', 'granary', 'workshop', 'barracks', 'market', 'library', 'walls', 'temple', 'court', 'bank', 'aqueduct', 'academy', 'bastion', 'harbor'],
+    research: ['mining', 'agriculture', 'archery', 'pottery', 'bronze', 'husbandry', 'writing', 'wheel', 'currency', 'math', 'iron', 'masonry', 'riding', 'tactics', 'armory', 'steel', 'mysticism', 'law', 'commerce', 'guilds', 'banking', 'chivalry', 'sailing', 'forestry', 'construction', 'engineering', 'siegecraft', 'philosophy', 'education', 'fishing', 'navigation', 'irrigation', 'astronomy', 'architecture', 'calendar', 'shipbuilding', 'empire'],
+    build: ['monument', 'granary', 'workshop', 'barracks', 'market', 'library', 'walls', 'temple', 'court', 'caravanserai', 'guildhall', 'bank', 'armory', 'aqueduct', 'academy', 'university', 'sewer', 'bastion', 'observatory', 'amphitheater', 'harbor', 'shipyard'],
     martial: true, cities: 5, settleUntil: 85, armyBase: 2, armyPace: 24, alwaysArm: true, wonderInWar: false, wallsAlways: false,
     reserve: 70, marchAt: 3, warFrom: 40, warMil: 4, warRatio: 1.7, warChance: 0.1, dogpile: 0.3, peaceRatio: 1.15, peaceAfter: 14,
   },
   // Obránce: sám nezačíná, ale města má za hradbami a s posádkou.
   defender: {
     name: 'Obránce', desc: 'Národ obránců: válku nezačíná, ale jeho města stojí za hradbami.', label: 'ostražitý obránce',
-    research: ['mining', 'agriculture', 'archery', 'masonry', 'pottery', 'bronze', 'husbandry', 'writing', 'wheel', 'construction', 'math', 'engineering', 'iron', 'mysticism', 'currency', 'tactics', 'steel', 'philosophy', 'forestry', 'irrigation', 'law', 'astronomy', 'siegecraft', 'banking', 'riding', 'chivalry', 'sailing', 'navigation'],
-    build: ['monument', 'walls', 'granary', 'workshop', 'barracks', 'library', 'bastion', 'temple', 'market', 'aqueduct', 'court', 'academy', 'bank', 'harbor'],
+    research: ['mining', 'agriculture', 'archery', 'masonry', 'pottery', 'bronze', 'husbandry', 'writing', 'wheel', 'construction', 'currency', 'math', 'engineering', 'iron', 'mysticism', 'tactics', 'armory', 'steel', 'philosophy', 'forestry', 'irrigation', 'law', 'education', 'astronomy', 'architecture', 'calendar', 'siegecraft', 'commerce', 'guilds', 'banking', 'riding', 'chivalry', 'sailing', 'fishing', 'navigation', 'shipbuilding', 'empire'],
+    build: ['monument', 'walls', 'granary', 'workshop', 'barracks', 'library', 'bastion', 'armory', 'temple', 'market', 'aqueduct', 'guildhall', 'court', 'academy', 'university', 'sewer', 'caravanserai', 'bank', 'observatory', 'amphitheater', 'harbor', 'shipyard'],
     martial: false, cities: 5, settleUntil: 85, armyBase: 3, armyPace: 30, alwaysArm: true, wonderInWar: true, wallsAlways: true,
     reserve: 80, marchAt: 6, warFrom: 9999, warMil: 99, warRatio: 99, warChance: 0, dogpile: 0, peaceRatio: 1.2, peaceAfter: 12,
   },

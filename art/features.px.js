@@ -205,3 +205,34 @@ tall("i_lumber", [shadowBlob(16, 42, 13, 3)], (c) => {
   c.line(23, 32, 25, 36, "B"); c.rect(21, 31, 3, 2, "u"); c.px(21, 33, "W")
   c.px(18, 41, "L"); c.px(27, 40, "L"); c.px(16, 42, "l")               // chips
 })
+
+// Trhová ves: tři domky a krám s plachtou.
+tall("i_village", [shadowBlob(16, 42, 13, 3)], (c) => {
+  hut(c, 17, 22, "s", "Z"); hut(c, 3, 25, "r", "R"); hut(c, 12, 31, "l", "b")
+  c.rect(2, 36, 9, 2, "r"); for (let x = 3; x < 11; x += 2) c.px(x, 37, "w")
+  c.vline(2, 38, 4, "b"); c.vline(10, 38, 4, "b"); c.rect(3, 40, 7, 2, "y"); c.hline(3, 40, 7, "x")
+  c.px(24, 36, "y"); c.px(25, 37, "Y"); c.px(23, 38, "L")
+})
+
+// Loviště: rybářský člun se sítí a plováky.
+tall("i_fishery", [], (c) => {
+  c.poly([6, 33, 23, 33, 20, 38, 9, 38], "b"); c.hline(6, 33, 18, "L"); c.hline(10, 37, 10, "B"); c.hline(7, 34, 16, "l")
+  c.vline(14, 21, 12, "B"); c.poly([15, 22, 23, 31, 15, 31], "w"); c.poly([15, 22, 18, 26, 15, 31], "W")
+  c.line(23, 34, 27, 40, "W"); c.line(25, 36, 28, 37, "W"); c.px(28, 40, "r"); c.px(27, 41, "w")
+  c.px(3, 39, "r"); c.px(3, 40, "w"); c.px(1, 36, "r"); c.px(1, 37, "w")
+  c.px(11, 41, "I"); c.px(12, 41, "I"); c.px(22, 42, "I")
+})
+
+// Vymýcení lesa (značka práce): pařez se zaseknutou sekerou.
+tall("i_clear", [shadowBlob(16, 42, 10, 3)], (c) => {
+  c.rect(10, 32, 9, 8, "b"); c.hline(10, 32, 9, "L"); c.hline(11, 33, 7, "l"); c.vline(18, 33, 7, "B"); c.px(13, 34, "B"); c.px(15, 33, "B")
+  c.line(21, 21, 16, 31, "B"); c.line(22, 21, 17, 31, "b"); c.rect(20, 19, 5, 3, "u"); c.hline(20, 19, 5, "W"); c.px(24, 22, "t")
+  c.px(6, 40, "L"); c.px(23, 39, "L"); c.px(8, 38, "l"); c.px(21, 41, "l")
+})
+
+// Vypleněné vylepšení: dým a doutnající trosky přes obrázek vylepšení.
+sprite("i_ruin", { w: 32, h: 48 }, (c) => {
+  for (const [x, y, r] of [[15, 18, 3], [18, 13, 3], [14, 9, 2], [20, 7, 2], [12, 23, 2]]) c.circ(x, y, r, "#3c4058b0")
+  for (const [x, y] of [[16, 15], [19, 10], [13, 20]]) c.px(x, y, "#5c6278c0")
+  c.px(14, 30, "a"); c.px(15, 31, "r"); c.px(13, 31, "y"); c.px(17, 30, "a"); c.px(18, 31, "R"); c.px(16, 29, "y")
+})

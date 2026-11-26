@@ -99,6 +99,9 @@ kbd { font-family: var(--font); font-size: 16px; background: #0008; color: #ffe;
 #city .sub { color: var(--muted); font-size: 19px; display: flex; align-items: center; gap: 8px; margin: 3px 0; }
 #city h4 { margin: 10px 0 4px; color: var(--gold); font-size: 21px; font-weight: 600; border-bottom: 2px solid var(--line); }
 .build { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font-family: var(--font); font-size: 20px; color: var(--text); background: #0f1530; border: 2px solid var(--line); padding: 3px 6px; margin-bottom: 3px; cursor: pointer; }
+.buildrow { display: flex; align-items: stretch; gap: 3px; margin-bottom: 3px; }
+.buildrow .build { margin-bottom: 0; flex: 1; min-width: 0; }
+.buildrow .buyit { padding: 0 7px; min-width: 0; white-space: nowrap; }
 .build:hover { border-color: var(--gold); background: #1a2348; }
 .build.cur { border-color: var(--gold); background: #2b3466; }
 .build.off { opacity: .5; cursor: default; }
@@ -249,7 +252,13 @@ button[data-tip], .build[data-tip], .tech.avail[data-tip], [data-a][data-tip] { 
 .stat.clickable { cursor: pointer; }
 .stat.clickable:hover { color: #fff; }
 .stat.need { outline: 2px solid var(--gold); outline-offset: 2px; animation: pillpulse 1.6s ease-in-out infinite; }
-.trads { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.trads { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; align-items: start; }
+.branch { display: flex; flex-direction: column; gap: 6px; }
+.branch h4 { margin: 0; }
+.branch p { margin: 0; color: var(--muted); font-size: 17.5px; line-height: 1.15; min-height: 40px; }
+.branch p.fin { min-height: 0; color: #b872ea; }
+.branch.done p.fin { color: #6fd08c; }
+.trad.next { border-color: #6a4a8a; }
 .trad { background: #0f1530; border: 2px solid var(--line); padding: 6px 10px; font-size: 19px; line-height: 1.2; }
 .trad b { display: block; font-family: var(--head); font-size: 18px; font-weight: 600; }
 .trad small { color: var(--muted); font-size: 18px; }

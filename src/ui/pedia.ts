@@ -1,11 +1,11 @@
 // Encyklopedie: přehled jednotek, staveb, výzkumu, národů, polí, pravidel a kláves.
 // Čte jen herní data, ne stav hry – jde tedy otevřít i z hlavního menu.
 import {
-  BUILDINGS, BUILDING_IDS, ERAS, GOLDEN_TURNS, IMPROVEMENTS, NATIONS, PERSONAS, PLAYABLE, PROMOS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS,
+  BRANCHES, BRANCH_IDS, branchOf, CLEAR, BUILDINGS, BUILDING_IDS, ERAS, GOLDEN_TURNS, IMPROVEMENTS, NATIONS, PERSONAS, PLAYABLE, PROMOS, PROMO_IDS, RESOURCES, ROAD, TECHS, TECH_IDS,
   TERRAIN, TRADITIONS, TRADITION_IDS, TUNE, UNITS, UNIT_IDS, XP_LEVELS, traditionCost,
   type BuildingId, type ImprovementId, type NationId, type ResourceId, type TechId, type TerrainId, type UnitDef, type UnitId,
 } from '../game/data.ts'
-import { BORDER_AT, CONQUEST_TURNS, RAM_BONUS, RAM_COVER, SIEGE_UNITS, SIEGE_VS_CITY, SIEGE_VS_UNIT, UNITS_PER_SOURCE, WONDER_TURNS } from '../game/rules.ts'
+import { BORDER_BASE, BORDER_STEP, POP_CAP, CONQUEST_TURNS, RAM_BONUS, RAM_COVER, SIEGE_UNITS, SIEGE_VS_CITY, SIEGE_VS_UNIT, UNITS_PER_SOURCE, WONDER_TURNS } from '../game/rules.ts'
 import { unitIconUrl } from '../view/nationArt.ts'
 import { esc, ic, tip, UI } from './hud.ts'
 
@@ -92,6 +92,7 @@ function buildingsTab(): string {
 /** Obrázek k technologii: to hlavní, co odemyká (jednotka, stavba, nebo vylepšení pole). */
 export function techArtUrl(id: TechId, nation: NationId): string {
   if (id === 'irrigation') return `${UI}r_wheat.png`
+  if (id === 'empire') return `${UI}ic_gold.png`
   const unit = UNIT_IDS.find(u => UNITS[u].tech === id && !UNITS[u].replaces)
   if (unit) return unitIconUrl(unit, nation)
   const b = BUILDING_IDS.find(o => BUILDINGS[o].tech === id)
@@ -172,14 +173,15 @@ function landTab(): string {
     <h4>Krajina</h4>
     <table class="scores ptab"><tr><th>Pole</th><th>Výnos</th><th>Obrana</th><th></th></tr>${terrain}
       <tr><td><b>Les</b></td><td><span class="ps">${ic('prod', 's')}+1</span></td><td>+25 %</td><td>${esc('Roste na loukách, pláních i pahorkatině. Jídlo pole sníží nejvýš na 1, krok sem stojí 2 body pohybu.')}</td></tr>
-      <tr><td><b>Řeka</b></td><td><span class="ps">${ic('gold', 's')}+1</span></td><td>–</td><td>${esc('Teče po hranách polí. Přechod stojí bod pohybu navíc a útok zblízka přes řeku je o 20 % slabší; cesta na obou březích je most.')}</td></tr>
+      <tr><td><b>Řeka</b></td><td><span class="ps">${ic('gold', 's')}+1</span></td><td>–</td><td>${esc('Teče po hranách polí. Přechod stojí bod pohybu navíc a útok zblízka přes řeku je o 20 % slabší; cesta na obou březích je mostem až se Stavitelstvím.')}</td></tr>
     </table>
     <h4>Suroviny</h4>
     <table class="scores ptab"><tr><th>Surovina</th><th>Výnos</th><th></th></tr>${resources}</table>
     <h4>Vylepšení polí</h4>
-    <p>${esc('Staví je dělníci na vlastním území. Výnos se přičítá k výnosu pole a suroviny.')}</p>
+    <p>${esc('Staví je dělníci na vlastním území. Na poli stojí jen jedno; na rovině se volí mezi farmou a trhovou vsí. Výnos se přičítá k výnosu pole a suroviny. Farma u řeky dává se Zavlažováním +1 jídlo navíc, pila u řeky +1 výrobu, trhová ves ve městě spojeném s hlavním městem +1 zlato (s Kupectvím). Přestavba na jiné vylepšení trvá o 2 tahy déle; vypleněné vylepšení nefunguje, dokud ho dělníci za polovinu doby neopraví.')}</p>
     <table class="scores ptab"><tr><th>Vylepšení</th><th>Výnos</th><th>Práce</th><th>Technologie</th></tr>${imps}
-      <tr><td><b>${esc(ROAD.name)}</b></td><td>–</td><td>${esc(`${ROAD.turns} tahy`)}</td><td>${techLink(ROAD.tech)}</td></tr>
+      <tr><td><b>${esc(ROAD.name)}</b></td><td>–</td><td>${esc(`${ROAD.turns} tahy, v lese a pahorkatině ${ROAD.rough}`)}</td><td>${techLink(ROAD.tech)}</td></tr>
+      <tr><td><b>${esc(CLEAR.name)}</b></td><td>${esc(`jednorázově +${CLEAR.prod} výroby`)}</td><td>${esc(`${CLEAR.turns} tahy`)}</td><td>${techLink(CLEAR.tech)}</td></tr>
     </table>
     <p>${esc('Krok z cesty na cestu stojí půl bodu pohybu; města se počítají jako cesta.')}</p>`
 }
@@ -204,13 +206,17 @@ function rulesTab(): string {
       <li>${esc('Na jednom poli smí stát jedna vojenská a jedna civilní jednotka.')}</li>
       <li>${esc('V boji zblízka utrpí ztráty obě strany, střelci odvetu nedostanou.')}</li>
       <li>${esc('Obránce má v pahorkatině a v lese +25 %, opevněný dalších +25 %. Útok zblízka přes řeku je o 20 % slabší.')}</li>
-      <li>${esc('Jednotka, která se celý tah nehýbe, se léčí; nejrychleji ve městě.')}</li></ul>
+      <li>${esc('Jednotka, která se celý tah nehýbe, se léčí; nejrychleji ve městě.')}</li>
+      <li>${esc('Šik a voj: dvě stejné jednotky vedle sebe se s Válečnictvím spojí v šik (+50 % síly), se Zbrojířstvím tři ve voj (+90 %). Životy se zprůměrují a zůstává jich nejvýš 100; žold a suroviny se platí za každou jednotku. Rozdělit jde jen na vlastním území.')}</li>
+      <li>${esc('Plenění: bojová jednotka na poli nepřítele vyřadí vylepšení, napodruhé cestu, a získá zlato. Vypleněné pole nefunguje, dokud ho dělníci neopraví.')}</li></ul>
     <h4>Povýšení</h4>
     <p>${esc(`Jednotky sbírají bojem zkušenosti. Při ${list(XP_LEVELS.map(String))} bodech si vyberou jedno povýšení:`)}</p>
     <table class="scores ptab">${PROMO_IDS.map(id => `<tr><td><b>${esc(PROMOS[id].name)}</b></td><td>${esc(PROMOS[id].desc)}</td></tr>`).join('')}</table>
     <h4>Tradice</h4>
-    <p>${esc(`Kultura měst se sčítá do pokladnice národa a platí se jí za tradice, trvalé výhody pro celý národ. První stojí ${traditionCost(0)} kultury, druhá ${traditionCost(1)}, třetí ${traditionCost(2)} a každá další víc. Kultura zároveň rozšiřuje hranice města: druhý okruh při ${BORDER_AT[0]}, třetí při ${BORDER_AT[1]} bodech.`)}</p>
-    <table class="scores ptab">${TRADITION_IDS.map(id => `<tr><td><b>${esc(TRADITIONS[id].name)}</b></td><td>${esc(TRADITIONS[id].desc)}</td></tr>`).join('')}</table>
+    <p>${esc(`Kultura měst se sčítá do pokladnice národa a platí se jí za tradice, trvalé výhody pro celý národ. První stojí ${traditionCost(0)} kultury, druhá ${traditionCost(1)}, třetí ${traditionCost(2)} a každá další víc, takže všechny se za hru stihnout nedají. Tradice jsou ve čtyřech větvích a v každé se postupuje odshora; kdo větev dokončí, získá zlatý věk na ${GOLDEN_TURNS} tahů.`)}</p>
+    <table class="scores ptab">${BRANCH_IDS.map(b => `<tr><th colspan="2">${esc(BRANCHES[b].name)}</th></tr>` + branchOf(b).map((id, k) => `<tr><td><b>${k + 1}. ${esc(TRADITIONS[id].name)}</b></td><td>${esc(TRADITIONS[id].desc)}</td></tr>`).join('')).join('')}</table>
+    <h4>Hranice a velikost měst</h4>
+    <p>${esc(`Město při založení dostane šest sousedních polí. Další zabírá za kulturu po jednom, nejdál 3 pole od sebe: první stojí ${BORDER_BASE} kultury a každé další o ${BORDER_STEP} víc. Samo si bere nejdřív suroviny, pak pole u řeky a výnosná pole; v okně města lze přepnout na ruční výběr. Obdělávat jde každé zabrané pole. Kulturu dává město samo, jeho stavby a +1 za každé 4 obyvatele. Bez akvaduktu město neporoste přes ${POP_CAP[0]} obyvatel, bez kanalizace přes ${POP_CAP[1]}.`)}</p>
     <p class="plead">${esc('Města, pokladnu, obchod a nalodění popisuje nápověda (klávesa H).')}</p>`
 }
 

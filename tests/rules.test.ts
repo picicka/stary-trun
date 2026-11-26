@@ -4,7 +4,7 @@ import { hexDist, hexCenter, pixelToHex, neighborXY } from '../src/game/hex.ts'
 import { createGame, endTurn, serialize, deserialize } from '../src/game/state.ts'
 import { aiTurn } from '../src/game/ai.ts'
 import {
-  attack, canFoundCity, citiesOf, cityYields, declareWar, drainEvents, foundCity, idx, makeUnit, moveUnit, previewAttack, reachable, score, unitsOf,
+  attack, buyItem, buyItemBlock, buyItemCost, canFoundCity, citiesOf, hasRoad, impOptions, ownSources, pillage, pillageBlock, recommendJob, startWork, tileYield, unitsAt, cityYields, declareWar, drainEvents, foundCity, idx, makeUnit, moveUnit, previewAttack, reachable, score, unitsOf,
 } from '../src/game/rules.ts'
 import { TERRAIN, UNITS } from '../src/game/data.ts'
 
@@ -200,7 +200,85 @@ test('cesty a řeky: půl bodu po cestě, brod stojí bod navíc, most ho ruší
   assert.ok(pair)
   assert.equal(mc2(s, u, pair![0], pair![1]), 2)
   s.tiles[pair![0]].road = true; s.tiles[pair![1]].road = true
+  // Bez Stavitelství cesta řeku nepřeklene: brodí se dál.
+  assert.equal(mc2(s, u, pair![0], pair![1]), 2)
+  // Most umí národ se Stavitelstvím, kterému aspoň jedno z polí patří.
+  s.players[0].techs.push('construction')
+  assert.equal(mc2(s, u, pair![0], pair![1]), 2)
+  s.tiles[pair![0]].owner = 0
   assert.equal(mc2(s, u, pair![0], pair![1]), 0.5)
+  // Vypleněná cesta nezrychluje.
+  s.tiles[pair![1]].roadRuin = true
+  assert.equal(mc2(s, u, pair![0], pair![1]), 2)
+})
+
+test('pole: volba vylepšení, zavlažování jen u řeky, rozpracovanost na poli, vymýcení', () => {
+  const s = createGame('aur', 'normal')
+  foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)
+  const c = citiesOf(s, 0)[0], p = s.players[0]
+  p.techs.push('agriculture', 'currency', 'bronze', 'irrigation')
+  const flat = s.tiles.findIndex((t, i) => t.owner === 0 && t.t === 'grass' && !t.forest && !t.res && !t.river && !(i === idx(s, c.x, c.y)))
+  assert.ok(flat >= 0)
+  const t = s.tiles[flat]
+  // Na rovině je na výběr farma i trhová ves.
+  assert.deepEqual(impOptions(t, p), ['farm', 'village'])
+  assert.ok(tj2(s, flat, 0).filter(j => j.ok).some(j => j.job === 'village'))
+  // Farma mimo řeku: +1 jídlo (Auřané +2), Zavlažování nic nepřidá; u řeky přidá další.
+  const base = tileYield(s, flat, 0).food
+  t.imp = 'farm'
+  const dry = tileYield(s, flat, 0).food - base
+  t.river = 1
+  assert.equal(tileYield(s, flat, 0).food - base, dry + 1)
+  delete t.river
+  // Vypleněná farma nedává nic navíc a rada zní opravit.
+  t.ruin = true
+  assert.equal(tileYield(s, flat, 0).food, base)
+  assert.equal(recommendJob(s, flat, 0), 'repair')
+  delete t.ruin; t.imp = null
+  // Rozpracovaná práce zůstane na poli a jiný dělník ji dodělá.
+  const w = makeUnit(s, 0, 'worker', flat % s.W, (flat / s.W) | 0)
+  assert.ok(startWork(s, w, 'village'))
+  const full = w.workLeft
+  endTurn(s); 
+  assert.equal(t.job, 'village')
+  assert.equal(t.jobLeft, full - 1)
+  w.work = null
+  assert.ok(startWork(s, w, 'village'))
+  assert.equal(w.workLeft, full - 1)
+  // Přestavba stojícího vylepšení trvá déle.
+  t.imp = 'farm'; delete t.job; delete t.jobLeft
+  assert.equal(tj2(s, flat, 0).find(j => j.job === 'village')!.turns, 5 + 2)
+})
+
+test('plenění: vyřadí vylepšení a surovinu, pak cestu, a přeruší spojení měst', () => {
+  const s = createGame('aur', 'normal')
+  foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)
+  foundCity(s, unitsOf(s, 1).find(u => u.type === 'settler')!)
+  const c = citiesOf(s, 1)[0]
+  declareWar(s, 0, 1)
+  const i = s.tiles.findIndex((t, k) => t.owner === 1 && TERRAIN[t.t].passable && !t.special && k !== idx(s, c.x, c.y) && !unitsAt(s, k % s.W, (k / s.W) | 0).length)
+  const t = s.tiles[i]
+  t.res = 'horses'; t.imp = 'pasture'; t.road = true; t.forest = false
+  assert.equal(ownSources(s, 1, 'horses'), 1)
+  const u = makeUnit(s, 0, 'warrior', i % s.W, (i / s.W) | 0)
+  const gold = s.players[0].gold
+  assert.equal(pillageBlock(s, u), null)
+  assert.ok(pillage(s, u))
+  assert.equal(t.ruin, true)
+  assert.equal(t.imp, 'pasture')
+  assert.equal(ownSources(s, 1, 'horses'), 0)
+  assert.equal(s.players[0].gold, gold + 10)
+  assert.equal(u.moves, 0)
+  // Podruhé padne cesta.
+  u.moves = 2
+  assert.ok(pillage(s, u))
+  assert.equal(t.roadRuin, true)
+  assert.equal(hasRoad(s, i), false)
+  u.moves = 2
+  assert.match(pillageBlock(s, u) ?? '', /Není tu co plenit/)
+  // Na vlastním území a bez války plenit nejde.
+  const own = makeUnit(s, 1, 'warrior', c.x, c.y)
+  assert.notEqual(pillageBlock(s, own), null)
 })
 
 test('dělníci: rozkaz na dálku a cesta až do cíle', () => {
@@ -324,7 +402,7 @@ test('scénáře: souostroví a náhodná země jsou hratelné, Thalassové vlá
   assert.ok(cap && ic2(v, cap.x, cap.y), 'hlavní město Thalassů leží na pobřeží')
 })
 
-import { adoptTradition, traditionReady, eraOf, grantTech as gt2 } from '../src/game/rules.ts'
+import { adoptTradition, openTraditions, traditionReady, eraOf, grantTech as gt2, borderCost, borderOptions, borderTarget, popCap, growBorders, cityWorkable, foundBlock } from '../src/game/rules.ts'
 import { traditionCost, ERAS } from '../src/game/data.ts'
 
 test('kultura a věky: tradice za kulturu, milníky a zlatý věk za výzkum', () => {
@@ -338,12 +416,19 @@ test('kultura a věky: tradice za kulturu, milníky a zlatý věk za výzkum', (
   assert.ok(p.culture >= 2)
   assert.ok(!traditionReady(p))
   p.culture = traditionCost(0)
-  const before = cityYields(s, c).prod
-  assert.ok(adoptTradition(s, p, 'craft'))
-  assert.equal(cityYields(s, c).prod, before + 1)
+  const before = cityYields(s, c).food
+  // Ve větvi se postupuje odshora: Řemeslné cechy jsou až čtvrté ve větvi Země.
+  assert.ok(!adoptTradition(s, p, 'craft'), 'tradice mimo pořadí nejde')
+  assert.deepEqual(openTraditions(p), ['militia', 'stores', 'scribes', 'trade'])
+  assert.ok(adoptTradition(s, p, 'stores'))
+  assert.equal(cityYields(s, c).food, before + 1)
   assert.equal(p.culture, 0)
-  assert.ok(!adoptTradition(s, p, 'stores'), 'bez kultury další tradice nejde')
+  assert.ok(!adoptTradition(s, p, 'settlers'), 'bez kultury další tradice nejde')
   assert.ok(traditionCost(1) > traditionCost(0))
+  // Dokončená větev spustí zlatý věk.
+  for (const t of ['settlers', 'builders', 'craft'] as const) { p.culture = traditionCost(p.traditions.length); assert.ok(adoptTradition(s, p, t)) }
+  assert.ok(p.goldenUntil > s.turn)
+  p.goldenUntil = 0
   // Šestá technologie = Bronzový věk, první národ dostane zlatý věk.
   const gold = p.gold
   for (const t of ['husbandry', 'mining', 'archery', 'pottery', 'wheel'] as const) gt2(s, p, t)
@@ -382,20 +467,20 @@ test('fronta výzkumu: cesta ke vzdálené technologii a postupné zkoumání', 
   const s = createGame('aur', 'normal')
   foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)
   const p = s.players[0]
-  // Filosofie: mystika + písmo, obojí přes hrnčířství (zemědělství už umíme).
-  assert.deepEqual(techPath(p, 'philosophy'), ['pottery', 'writing', 'mysticism', 'philosophy'])
+  // Filosofie: písmo a mystika přes hrnčířství (zemědělství už umíme); levnější předpoklad jde první.
+  assert.deepEqual(techPath(p, 'philosophy'), ['writing', 'pottery', 'mysticism', 'philosophy'])
   assert.ok(planResearch(p, 'philosophy'))
-  assert.equal(p.research, 'pottery')
-  assert.deepEqual(p.techQueue, ['writing', 'mysticism', 'philosophy'])
+  assert.equal(p.research, 'writing')
+  assert.deepEqual(p.techQueue, ['pottery', 'mysticism', 'philosophy'])
   // Přidání za plán nic nezruší.
   planResearch(p, 'mining', true)
-  assert.equal(p.research, 'pottery')
-  assert.deepEqual(p.techQueue, ['writing', 'mysticism', 'philosophy', 'mining'])
-  // Po objevu se výzkum sám posune dál.
-  gt2(s, p, 'pottery')
   assert.equal(p.research, 'writing')
-  for (let i = 0; i < 60 && !p.techs.includes('writing'); i++) endTurn(s)
-  assert.ok(p.techs.includes('writing'))
+  assert.deepEqual(p.techQueue, ['pottery', 'mysticism', 'philosophy', 'mining'])
+  // Po objevu se výzkum sám posune dál.
+  gt2(s, p, 'writing')
+  assert.equal(p.research, 'pottery')
+  for (let i = 0; i < 60 && !p.techs.includes('pottery'); i++) endTurn(s)
+  assert.ok(p.techs.includes('pottery'))
   assert.equal(p.research, 'mysticism')
   // Nový plán bez Shiftu nahradí starý.
   planResearch(p, 'archery')
@@ -496,4 +581,136 @@ test('střelba z hradeb: hráč vybere cíl, město střílí jednou za tah', as
   delete c.fired
   assert.ok(cityShoot(s, c))
   assert.ok(weak.hp < 60)
+})
+
+test('koupě ze seznamu: položka vznikne hned, rozestavěná výroba a fronta zůstanou', () => {
+  const s = createGame('aur', 'normal')
+  foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)
+  const c = citiesOf(s, 0)[0]
+  const p = s.players[0]
+  c.build = { kind: 'building', id: 'monument' }; c.prod = 7; c.queue = [{ kind: 'unit', id: 'warrior' }]
+  p.gold = 0
+  const it = { kind: 'unit', id: 'worker' } as const
+  assert.match(buyItemBlock(s, c, it) ?? '', /Chybí zlato/)
+  assert.equal(buyItem(s, c, it), false)
+  p.gold = 500
+  const cost = buyItemCost(s, c, it)
+  const before = unitsOf(s, 0).filter(u => u.type === 'worker').length
+  assert.equal(buyItem(s, c, it), true)
+  assert.equal(unitsOf(s, 0).filter(u => u.type === 'worker').length, before + 1)
+  assert.equal(p.gold, 500 - cost)
+  assert.deepEqual(c.build, { kind: 'building', id: 'monument' })
+  assert.equal(c.prod, 7)
+  assert.deepEqual(c.queue, [{ kind: 'unit', id: 'warrior' }])
+  // Rozestavěná položka se kupuje se slevou za hotovou výrobu; chrám koupit nejde nikdy.
+  assert.ok(buyItemCost(s, c, { kind: 'building', id: 'monument' }) < Math.ceil(30 * 2.6))
+  assert.match(buyItemBlock(s, c, { kind: 'building', id: 'wonder' }) ?? '', /koupit nelze/)
+})
+
+test('hranice: město zabírá pole po jednom, nejdřív suroviny, a hráč může vybírat sám', () => {
+  const s = createGame('aur', 'normal')
+  const c = foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)!
+  const owned = () => s.tiles.filter(t => t.city === c.id).length
+  assert.equal(owned(), 7, 'při založení město a šest sousedních polí')
+  const cost = borderCost(s, c)
+  // Surovina na dosah má přednost před vším ostatním.
+  const opts = borderOptions(s, c)
+  assert.ok(opts.length > 0)
+  for (const i of opts) s.tiles[i].res = null
+  const prize = opts[opts.length - 1]
+  s.tiles[prize].res = 'horses'
+  assert.equal(borderTarget(s, c), prize)
+  c.culture = cost
+  growBorders(s, c)
+  assert.equal(owned(), 8)
+  assert.equal(s.tiles[prize].city, c.id)
+  assert.equal(c.culture, 0)
+  assert.equal(cost, 8, 'první pole stojí 8 kultury')
+  assert.equal(borderCost(s, c), cost + 2, 'každé další pole je o 2 dražší')
+  // Každé zabrané pole jde obdělávat.
+  assert.ok(cityWorkable(s, c).includes(prize))
+  // Ruční režim: město čeká na výběr a vezme pole, které hráč určí.
+  c.border = 'manual'
+  c.culture = 50
+  growBorders(s, c)
+  assert.equal(owned(), 8)
+  assert.equal(borderTarget(s, c), -1)
+  const pick = borderOptions(s, c)[0]
+  c.nextTile = pick
+  growBorders(s, c)
+  assert.equal(s.tiles[pick].city, c.id)
+  assert.equal(c.nextTile, undefined)
+})
+
+test('velikost měst: strop bez akvaduktu a kanalizace, kultura za obyvatele, města dál od sebe', () => {
+  const s = createGame('aur', 'normal')
+  const c = foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)!
+  assert.equal(popCap(c), 6)
+  c.pop = 6; c.food = 9999
+  endTurn(s)
+  assert.equal(c.pop, 6, 'bez akvaduktu město přes strop neroste')
+  c.buildings.push('aqueduct')
+  assert.equal(popCap(c), 12)
+  c.food = 9999
+  endTurn(s)
+  assert.equal(c.pop, 7)
+  c.buildings.push('sewer')
+  assert.equal(popCap(c), Infinity)
+  // +1 kultura za každé 4 obyvatele.
+  c.pop = 3
+  const base = cityYields(s, c).culture
+  c.pop = 8
+  assert.equal(cityYields(s, c).culture, base + 2)
+  // Čtyři pole od města už město založit nejde, pět ano (pokud tam smí stát).
+  assert.match(foundBlock(s, 0, c.x + 4, c.y) ?? '', /blízko/)
+})
+
+import { mergeBlock, mergeUnits, splitBlock, splitUnit, unitSize, mergeTargets } from '../src/game/rules.ts'
+
+test('šik a voj: spojení stejných jednotek, průměr životů, síla, žold a rozdělení na vlastním území', () => {
+  const s = createGame('aur', 'normal')
+  const c = foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)!
+  const p = s.players[0]
+  const spots = nb2(s, c.x, c.y).filter(n => TERRAIN[s.tiles[idx(s, n[0], n[1])].t].passable && !unitsAt(s, n[0], n[1]).length)
+  assert.ok(spots.length >= 2)
+  for (const u of unitsOf(s, 0).filter(v => v.type === 'warrior')) s.units.splice(s.units.indexOf(u), 1)
+  const a = makeUnit(s, 0, 'warrior', c.x, c.y), b = makeUnit(s, 0, 'warrior', spots[0][0], spots[0][1])
+  a.hp = 100; b.hp = 60; b.xp = 12; b.promos = ['drill']
+  // Bez Válečnictví to nejde, s jinou jednotkou také ne.
+  assert.match(mergeBlock(s, b, a) ?? '', /Válečnictví/)
+  p.techs.push('tactics')
+  const arch = makeUnit(s, 0, 'archer', spots[1][0], spots[1][1])
+  assert.match(mergeBlock(s, arch, a) ?? '', /stejného druhu/)
+  s.units.splice(s.units.indexOf(arch), 1)
+  const single = us2(s, a)
+  const upkeepBefore = pi2(s, 0).upkeep
+  assert.deepEqual(mergeTargets(s, b), [a])
+  assert.ok(mergeUnits(s, b, a))
+  assert.ok(!s.units.includes(b))
+  assert.equal(unitSize(a), 2)
+  assert.equal(a.hp, 80, 'životy jsou průměr')
+  assert.equal(a.xp, 12, 'zkušenosti od zkušenější')
+  assert.deepEqual(a.promos, ['drill'])
+  // Síla šiku: +50 % (před srážkou za zranění a bez povýšení navíc).
+  a.hp = 100; a.promos = []
+  assert.ok(Math.abs(us2(s, a) / single - 1.5) < 0.01)
+  // Žold se platí dál za dvě jednotky.
+  assert.equal(pi2(s, 0).upkeep, upkeepBefore)
+  // Voj až se Zbrojířstvím.
+  const d = makeUnit(s, 0, 'warrior', spots[0][0], spots[0][1])
+  assert.match(mergeBlock(s, d, a) ?? '', /Zbrojířství/)
+  p.techs.push('armory')
+  assert.ok(mergeUnits(s, d, a))
+  assert.equal(unitSize(a), 3)
+  assert.ok(Math.abs(us2(s, a) / single - 1.9) < 0.01)
+  // Rozdělení: každá jednotka má životy celku; mimo vlastní území nejde.
+  a.hp = 70
+  assert.equal(splitBlock(s, a), null)
+  assert.ok(splitUnit(s, a))
+  const ws = unitsOf(s, 0).filter(v => v.type === 'warrior')
+  assert.equal(ws.length, 3)
+  for (const w of ws) { assert.equal(w.hp, 70); assert.equal(unitSize(w), 1) }
+  a.size = 2
+  s.tiles[idx(s, a.x, a.y)].owner = -1
+  assert.match(splitBlock(s, a) ?? '', /vlastním území/)
 })
