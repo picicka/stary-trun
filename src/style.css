@@ -423,3 +423,6 @@ table.keys kbd { margin-left: 0; font-size: 18px; padding: 1px 7px; }
 .tech b, .tech small, .tech .cost { position: relative; text-shadow: 0 1px 0 #0b1024, 1px 0 0 #0b1024; }
 .tech .cost { position: absolute; }
 #city .seg.focus button { font-family: var(--font); font-size: 18px; padding: 2px 8px; display: flex; align-items: center; gap: 4px; }
+.mk { image-rendering: pixelated; height: 1em; zoom: 1; vertical-align: -2px; }
+.mk.dim { filter: grayscale(1) brightness(.75); }
+.btn.upok { animation: recglow 1.6s ease-in-out infinite; }

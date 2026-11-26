@@ -1730,9 +1730,109 @@
     "h": 6
    }
   },
-  "u_settler": {
+  "mk_rank1": {
    "frame": {
     "x": 46,
+    "y": 286,
+    "w": 7,
+    "h": 5
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 7,
+    "h": 5
+   },
+   "sourceSize": {
+    "w": 7,
+    "h": 5
+   }
+  },
+  "mk_rank2": {
+   "frame": {
+    "x": 55,
+    "y": 286,
+    "w": 7,
+    "h": 8
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 7,
+    "h": 8
+   },
+   "sourceSize": {
+    "w": 7,
+    "h": 8
+   }
+  },
+  "mk_rank3": {
+   "frame": {
+    "x": 64,
+    "y": 286,
+    "w": 7,
+    "h": 11
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 7,
+    "h": 11
+   },
+   "sourceSize": {
+    "w": 7,
+    "h": 11
+   }
+  },
+  "mk_promo": {
+   "frame": {
+    "x": 73,
+    "y": 286,
+    "w": 9,
+    "h": 9
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 9,
+    "h": 9
+   },
+   "sourceSize": {
+    "w": 9,
+    "h": 9
+   }
+  },
+  "mk_up": {
+   "frame": {
+    "x": 84,
+    "y": 286,
+    "w": 9,
+    "h": 9
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 9,
+    "h": 9
+   },
+   "sourceSize": {
+    "w": 9,
+    "h": 9
+   }
+  },
+  "u_settler": {
+   "frame": {
+    "x": 95,
     "y": 286,
     "w": 22,
     "h": 22
@@ -1752,7 +1852,7 @@
   },
   "u_worker": {
    "frame": {
-    "x": 70,
+    "x": 119,
     "y": 286,
     "w": 22,
     "h": 22
@@ -1772,7 +1872,7 @@
   },
   "u_scout": {
    "frame": {
-    "x": 94,
+    "x": 143,
     "y": 286,
     "w": 22,
     "h": 22
@@ -1792,7 +1892,7 @@
   },
   "u_warrior": {
    "frame": {
-    "x": 118,
+    "x": 167,
     "y": 286,
     "w": 22,
     "h": 22
@@ -1812,7 +1912,7 @@
   },
   "u_spearman": {
    "frame": {
-    "x": 142,
+    "x": 191,
     "y": 286,
     "w": 22,
     "h": 22
@@ -1832,106 +1932,6 @@
   },
   "u_archer": {
    "frame": {
-    "x": 166,
-    "y": 286,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_crossbow": {
-   "frame": {
-    "x": 190,
-    "y": 286,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_swordsman": {
-   "frame": {
-    "x": 214,
-    "y": 286,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_axeman": {
-   "frame": {
-    "x": 238,
-    "y": 286,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hoplite": {
-   "frame": {
-    "x": 262,
-    "y": 286,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_hunter": {
-   "frame": {
     "x": 0,
     "y": 324,
     "w": 22,
@@ -1950,7 +1950,7 @@
     "h": 22
    }
   },
-  "u_horseman": {
+  "u_crossbow": {
    "frame": {
     "x": 24,
     "y": 324,
@@ -1970,7 +1970,7 @@
     "h": 22
    }
   },
-  "u_chariot": {
+  "u_swordsman": {
    "frame": {
     "x": 48,
     "y": 324,
@@ -1990,7 +1990,7 @@
     "h": 22
    }
   },
-  "u_catapult": {
+  "u_axeman": {
    "frame": {
     "x": 72,
     "y": 324,
@@ -2010,7 +2010,7 @@
     "h": 22
    }
   },
-  "u_ram": {
+  "u_hoplite": {
    "frame": {
     "x": 96,
     "y": 324,
@@ -2030,7 +2030,7 @@
     "h": 22
    }
   },
-  "u_manatarms": {
+  "u_hunter": {
    "frame": {
     "x": 120,
     "y": 324,
@@ -2050,7 +2050,7 @@
     "h": 22
    }
   },
-  "u_knight": {
+  "u_horseman": {
    "frame": {
     "x": 144,
     "y": 324,
@@ -2070,7 +2070,7 @@
     "h": 22
    }
   },
-  "u_trebuchet": {
+  "u_chariot": {
    "frame": {
     "x": 168,
     "y": 324,
@@ -2090,7 +2090,7 @@
     "h": 22
    }
   },
-  "u_galley": {
+  "u_catapult": {
    "frame": {
     "x": 192,
     "y": 324,
@@ -2110,7 +2110,7 @@
     "h": 22
    }
   },
-  "u_trireme": {
+  "u_ram": {
    "frame": {
     "x": 216,
     "y": 324,
@@ -2130,7 +2130,7 @@
     "h": 22
    }
   },
-  "u_boat": {
+  "u_manatarms": {
    "frame": {
     "x": 240,
     "y": 324,
@@ -2150,7 +2150,7 @@
     "h": 22
    }
   },
-  "u_raider": {
+  "u_knight": {
    "frame": {
     "x": 264,
     "y": 324,
@@ -2170,7 +2170,7 @@
     "h": 22
    }
   },
-  "u_camel": {
+  "u_trebuchet": {
    "frame": {
     "x": 0,
     "y": 348,
@@ -2190,7 +2190,7 @@
     "h": 22
    }
   },
-  "u_ballista": {
+  "u_galley": {
    "frame": {
     "x": 24,
     "y": 348,
@@ -2210,7 +2210,7 @@
     "h": 22
    }
   },
-  "u_templar": {
+  "u_trireme": {
    "frame": {
     "x": 48,
     "y": 348,
@@ -2230,7 +2230,7 @@
     "h": 22
    }
   },
-  "u_workerb": {
+  "u_boat": {
    "frame": {
     "x": 72,
     "y": 348,
@@ -2250,9 +2250,109 @@
     "h": 22
    }
   },
-  "fx_hit_0": {
+  "u_raider": {
    "frame": {
     "x": 96,
+    "y": 348,
+    "w": 22,
+    "h": 22
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 22,
+    "h": 22
+   },
+   "sourceSize": {
+    "w": 22,
+    "h": 22
+   }
+  },
+  "u_camel": {
+   "frame": {
+    "x": 120,
+    "y": 348,
+    "w": 22,
+    "h": 22
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 22,
+    "h": 22
+   },
+   "sourceSize": {
+    "w": 22,
+    "h": 22
+   }
+  },
+  "u_ballista": {
+   "frame": {
+    "x": 144,
+    "y": 348,
+    "w": 22,
+    "h": 22
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 22,
+    "h": 22
+   },
+   "sourceSize": {
+    "w": 22,
+    "h": 22
+   }
+  },
+  "u_templar": {
+   "frame": {
+    "x": 168,
+    "y": 348,
+    "w": 22,
+    "h": 22
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 22,
+    "h": 22
+   },
+   "sourceSize": {
+    "w": 22,
+    "h": 22
+   }
+  },
+  "u_workerb": {
+   "frame": {
+    "x": 192,
+    "y": 348,
+    "w": 22,
+    "h": 22
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 22,
+    "h": 22
+   },
+   "sourceSize": {
+    "w": 22,
+    "h": 22
+   }
+  },
+  "fx_hit_0": {
+   "frame": {
+    "x": 216,
     "y": 348,
     "w": 16,
     "h": 16
@@ -2273,7 +2373,7 @@
   },
   "fx_hit_1": {
    "frame": {
-    "x": 114,
+    "x": 234,
     "y": 348,
     "w": 16,
     "h": 16
@@ -2294,7 +2394,7 @@
   },
   "fx_hit_2": {
    "frame": {
-    "x": 132,
+    "x": 252,
     "y": 348,
     "w": 16,
     "h": 16
@@ -2315,8 +2415,8 @@
   },
   "fx_hit_3": {
    "frame": {
-    "x": 150,
-    "y": 348,
+    "x": 0,
+    "y": 372,
     "w": 16,
     "h": 16
    },
@@ -2336,8 +2436,8 @@
   },
   "fx_hit_4": {
    "frame": {
-    "x": 168,
-    "y": 348,
+    "x": 18,
+    "y": 372,
     "w": 16,
     "h": 16
    },
@@ -2357,8 +2457,8 @@
   },
   "fx_smoke_0": {
    "frame": {
-    "x": 186,
-    "y": 348,
+    "x": 36,
+    "y": 372,
     "w": 16,
     "h": 16
    },
@@ -2378,8 +2478,8 @@
   },
   "fx_smoke_1": {
    "frame": {
-    "x": 204,
-    "y": 348,
+    "x": 54,
+    "y": 372,
     "w": 16,
     "h": 16
    },
@@ -2399,8 +2499,8 @@
   },
   "fx_smoke_2": {
    "frame": {
-    "x": 222,
-    "y": 348,
+    "x": 72,
+    "y": 372,
     "w": 16,
     "h": 16
    },
@@ -2420,7 +2520,7 @@
   },
   "fx_smoke_3": {
    "frame": {
-    "x": 0,
+    "x": 90,
     "y": 372,
     "w": 16,
     "h": 16
@@ -2441,7 +2541,7 @@
   },
   "fx_arrow": {
    "frame": {
-    "x": 18,
+    "x": 108,
     "y": 372,
     "w": 9,
     "h": 3
@@ -2461,7 +2561,7 @@
   },
   "fx_rock": {
    "frame": {
-    "x": 29,
+    "x": 119,
     "y": 372,
     "w": 5,
     "h": 5
@@ -2510,14 +2610,14 @@
    },
    {
     "name": "fx_hit",
-    "from": 112,
-    "to": 116,
+    "from": 117,
+    "to": 121,
     "direction": "forward"
    },
    {
     "name": "fx_smoke",
-    "from": 117,
-    "to": 120,
+    "from": 122,
+    "to": 125,
     "direction": "forward"
    }
   ]

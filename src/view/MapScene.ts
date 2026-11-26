@@ -2,7 +2,7 @@
 import Phaser from 'phaser'
 import { NATIONS, TERRAIN, UNITS } from '../game/data.ts'
 import { ROW_H, TILE_W, hexCenter, neighborXY, pixelToHex } from '../game/hex.ts'
-import { atWar, hasRoad, idx, inMap, isCivilian, resourceVisible, isEmbarked } from '../game/rules.ts'
+import { atWar, hasRoad, idx, inMap, isCivilian, resourceVisible, isEmbarked, pendingPromos, upgradeBlock, upgradeTarget } from '../game/rules.ts'
 import type { GameEvent, GameState, Unit } from '../game/types.ts'
 import { sfx } from '../audio.ts'
 import { addNationFrames } from './nationArt.ts'
@@ -17,7 +17,7 @@ export interface MapHost {
   onCameraMove(): void
 }
 
-interface UnitView { extra?: Phaser.GameObjects.Image[]; c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
+interface UnitView { rank?: Phaser.GameObjects.Image; promo?: Phaser.GameObjects.Image; up?: Phaser.GameObjects.Image; extra?: Phaser.GameObjects.Image[]; c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
 
 const A = 'atlas'
 const D_FOG = 100000
@@ -627,7 +627,32 @@ export class MapScene extends Phaser.Scene {
     while (extra.length > more) extra.pop()!.destroy()
     extra.forEach((im, k) => im.setFrame(this.frameOf(u)).setPosition(k === 0 ? -6 : 6, -3).setFlipX(v.spr.flipX).setTint(spent ? 0x8f93a3 : 0xd8dbe6))
     v.spr.setAlpha(u.owner === this.host.me && (u.sleep || u.fortified) ? 0.88 : 1)
+    this.unitMarks(u, v)
     this.animateWork(v, u.work && v.c.visible ? u.work : null)
+  }
+
+  /** Značky u jednotky: hodnost podle počtu povýšení (u všech), u vlastních navíc čekající povýšení a možnost přezbrojit. */
+  private unitMarks(u: Unit, v: UnitView): void {
+    const s = this.host.state
+    const mine = u.owner === this.host.me, civ = isCivilian(u)
+    const rank = civ ? 0 : Math.min(3, u.promos.length)
+    if (rank) {
+      if (!v.rank) { v.rank = this.add.image(-11, 9, A, 'mk_rank1').setOrigin(0.5, 1); v.c.add(v.rank) }
+      v.rank.setFrame(`mk_rank${rank}`)
+    }
+    v.rank?.setVisible(rank > 0)
+    const promo = mine && !civ && pendingPromos(u) > 0
+    if (promo && !v.promo) {
+      v.promo = this.add.image(0, -13, A, 'mk_promo'); v.c.add(v.promo)
+      this.tweens.add({ targets: v.promo, y: -15, duration: 520, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })
+    }
+    v.promo?.setVisible(promo)
+    const up = mine && !civ && !!upgradeTarget(s, u)
+    if (up) {
+      if (!v.up) { v.up = this.add.image(9, -7, A, 'mk_up'); v.c.add(v.up) }
+      v.up.setTint(upgradeBlock(s, u) ? 0x8f96aa : 0xffffff)
+    }
+    v.up?.setVisible(up)
   }
 
   syncUnits(): void {

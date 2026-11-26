@@ -241,3 +241,42 @@ sprite("_o_mark_worked", { w: 7, h: 7, outline: "k" }, `
   .fFFFf.
   ..fff..`)
 sprite("mark_worked", { w: 32, h: 32 }, stamp("_o_mark_worked", 11, 3))
+
+// značky u jednotek: hodnost (počet povýšení), čekající povýšení, možnost přezbrojit
+sprite("mk_rank1", { w: 5, h: 3, outline: "k" }, `
+  ..x..
+  .xyx.
+  xy.yx`)
+sprite("mk_rank2", { w: 5, h: 6, outline: "k" }, `
+  ..x..
+  .xyx.
+  xy.yx
+  ..x..
+  .xyx.
+  xy.yx`)
+sprite("mk_rank3", { w: 5, h: 9, outline: "k" }, `
+  ..x..
+  .xyx.
+  xy.yx
+  ..x..
+  .xyx.
+  xy.yx
+  ..x..
+  .xyx.
+  xy.yx`)
+sprite("mk_promo", { w: 7, h: 7, outline: "k" }, `
+  ...x...
+  ..xyx..
+  xxyyyxx
+  .yyyyy.
+  ..yyy..
+  .yyYyy.
+  .yY.Yy.`)
+sprite("mk_up", { w: 7, h: 7, outline: "k" }, `
+  ...w...
+  ..www..
+  .wwwww.
+  wwwwwww
+  ..whw..
+  ..whw..
+  ..hmh..`)

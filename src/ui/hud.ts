@@ -631,7 +631,7 @@ export class Hud {
     const upT = civ ? null : upgradeTarget(s, u)
     if (upT) {
       const why = upgradeBlock(s, u)
-      acts.push(`<button class="btn" data-a="unit" data-v="upgrade" ${why ? 'disabled' : ''}${tip(`Přezbrojit: ${UNITS[upT].name}|${UNITS[upT].desc}\nSíla ${UNITS[upT].str}${UNITS[upT].ranged ? `, střelba ${UNITS[upT].ranged}` : ''}, pohyb ${UNITS[upT].move}. Zkušenosti a povýšení zůstanou.\nCena ${upgradeCost(s, u)} zlata, spotřebuje tah.${why ? `\nNelze: ${why}` : ''}`)}>${ic('up', 's')}${UNITS[upT].name} ${ic('gold', 's')}${upgradeCost(s, u)}<kbd>U</kbd></button>`)
+      acts.push(`<button class="btn${why ? '' : ' upok'}" data-a="unit" data-v="upgrade" ${why ? 'disabled' : ''}${tip(`Přezbrojit: ${UNITS[upT].name}|${UNITS[upT].desc}\nSíla ${UNITS[upT].str}${UNITS[upT].ranged ? `, střelba ${UNITS[upT].ranged}` : ''}, pohyb ${UNITS[upT].move}. Zkušenosti a povýšení zůstanou.\nCena ${upgradeCost(s, u)} zlata, spotřebuje tah.${why ? `\nNelze: ${why}` : ''}`)}>${ic('up', 's')}${UNITS[upT].name} ${ic('gold', 's')}${upgradeCost(s, u)}<kbd>U</kbd></button>`)
       const same = unitsOf(s, this.my).filter(o => o.type === u.type && !upgradeBlock(s, o))
       if (same.length > 1) acts.push(`<button class="btn small" data-a="unit" data-v="upgradeall"${tip(`Přezbrojit všechny|Přezbrojí všech ${same.length} jednotek tohoto druhu, které stojí na vašem území a mají pohyb – dokud stačí zlato (${upgradeCost(s, u)} za kus).`)}>${ic('up', 's')}Všechny (${same.length})</button>`)
     }
@@ -663,8 +663,8 @@ export class Hud {
     this.unitPanel.classList.remove('hidden')
     this.unitPanel.innerHTML = `
       <div class="head"><img class="portrait" src="${emb ? unitIconUrl('boat', this.me.nation) : this.unitIcon(u.type, u.owner)}" alt="">
-        <div style="flex:1"><h3>${title}${status ? ` <small style="color:var(--muted);font-size:15px">– ${status}</small>` : ''}</h3>
-          <div class="stats"><span data-tip="Zdraví">${ic('hp', 's')}${u.hp}</span>${str}${rng}<span data-tip="Pohyb">${ic('move', 's')}${mv(u.moves)}${NB}/${NB}${maxMoves(s, u)}</span>${civ ? '' : `<span${tip(`Zkušenosti: ${u.xp}|Jednotka je získává bojem. Povýšení při ${XP_LEVELS.join(', ')} bodech.${u.promos.length ? `\nMá: ${u.promos.map(x => `${PROMOS[x].name} (${PROMOS[x].desc})`).join(' ')}` : ''}`)}>${ic('xp', 's')}${u.xp}${'★'.repeat(u.promos.length)}</span>`}</div>
+        <div style="flex:1"><h3>${title}${this.rankMark(u)}${status ? ` <small style="color:var(--muted);font-size:15px">– ${status}</small>` : ''}</h3>
+          <div class="stats"><span data-tip="Zdraví">${ic('hp', 's')}${u.hp}</span>${str}${rng}<span data-tip="Pohyb">${ic('move', 's')}${mv(u.moves)}${NB}/${NB}${maxMoves(s, u)}</span>${civ ? '' : `<span${tip(`Zkušenosti: ${u.xp}|Jednotka je získává bojem. Povýšení při ${XP_LEVELS.join(', ')} bodech.${u.promos.length ? `\nMá: ${u.promos.map(x => `${PROMOS[x].name} (${PROMOS[x].desc})`).join(' ')}` : ''}`)}>${ic('xp', 's')}${u.xp}${XP_LEVELS[u.promos.length] ? `${NB}/${NB}${XP_LEVELS[u.promos.length]}` : ''}</span>`}</div>
           <div class="bar hp ${u.hp < 40 ? 'low' : ''}" style="margin-top:4px"><i style="width:${u.hp}%"></i></div>
         </div></div>
       <div class="desc">${esc(d.desc)}${u.vet ? ' Veterán (+15 % síla).' : ''}${emb ? esc(` Na člunech: nemůže útočit a brání se slabě (síla ${this.me.nation === 'thal' ? 8 : 4}). Vylodění ukončí tah.`) : ''}</div>
@@ -884,6 +884,12 @@ export class Hud {
     this.render()
   }
 
+  /** Značka hodnosti: jeden šíp za každé povýšení. */
+  private rankMark(u: Unit): string {
+    const n = Math.min(3, u.promos.length)
+    return n ? ` <img class="mk" src="${UI}mk_rank${n}.png" alt=""${tip(`${n}. hodnost|${u.promos.map(x => `${PROMOS[x].name}: ${PROMOS[x].desc}`).join('\n')}`)}>` : ''
+  }
+
   /** Krátký popis toho, co jednotka právě dělá; druhá hodnota = čeká na rozkaz. */
   private unitDoing(u: Unit): [string, boolean] {
     const s = this.s
@@ -922,7 +928,7 @@ export class Hud {
     const row = (u: Unit) => {
       const [doing, idle] = this.unitDoing(u)
       const emb = isEmbarked(s, u)
-      return `<div class="ov ${u.id === this.app.selUnit ? 'sel' : ''}" data-a="ov-unit" data-v="${u.id}"><img src="${emb ? unitIconUrl('boat', this.me.nation) : this.unitIcon(u.type, this.my)}" alt=""><div><b>${UNITS[u.type].name}</b>${pendingPromos(u) > 0 ? ` <span style="color:var(--gold)"${tip('Čeká na povýšení')}>★</span>` : ''} <small>${u.hp < 100 ? `<span style="color:${u.hp < 40 ? 'var(--bad)' : 'var(--war)'}">${ic('hp', 's')}${u.hp}</span> · ` : ''}${ic('move', 's')}${mv(u.moves)}${emb ? ' · na moři' : ''}</small><br><span class="${idle ? 'idle' : 'doing'}">${esc(doing)}</span></div></div>`
+      return `<div class="ov ${u.id === this.app.selUnit ? 'sel' : ''}" data-a="ov-unit" data-v="${u.id}"><img src="${emb ? unitIconUrl('boat', this.me.nation) : this.unitIcon(u.type, this.my)}" alt=""><div><b>${UNITS[u.type].name}</b>${this.rankMark(u)}${pendingPromos(u) > 0 ? ` <img class="mk" src="${UI}mk_promo.png" alt=""${tip('Čeká na povýšení')}>` : ''}${upgradeTarget(s, u) ? ` <img class="mk${upgradeBlock(s, u) ? ' dim' : ''}" src="${UI}mk_up.png" alt=""${tip(`Lze přezbrojit: ${UNITS[upgradeTarget(s, u)!].name}${upgradeBlock(s, u) ? `|Teď ne: ${upgradeBlock(s, u)}` : ''}`)}>` : ''} <small>${u.hp < 100 ? `<span style="color:${u.hp < 40 ? 'var(--bad)' : 'var(--war)'}">${ic('hp', 's')}${u.hp}</span> · ` : ''}${ic('move', 's')}${mv(u.moves)}${emb ? ' · na moři' : ''}</small><br><span class="${idle ? 'idle' : 'doing'}">${esc(doing)}</span></div></div>`
     }
     const civ = mine.filter(u => isCivilian(u)), mil = mine.filter(u => !isCivilian(u))
     const waiting = mine.filter(u => this.unitDoing(u)[1]).length
@@ -1406,7 +1412,7 @@ export class Hud {
       <h4>Kultura, tradice a věky</h4><p>${esc('Kultura měst se sčítá do společné pokladnice národa. Jakmile jí je dost, vyberete si tradici (klávesa C) – trvalou výhodu pro celý národ. První stojí 30 kultury, každá další víc. Zároveň každé město svou kulturou rozšiřuje hranice.')}</p>
       <p>${esc(`Výzkum vás posouvá věky: ${ERAS.slice(1).map(e => `${e.name} při ${e.techs} technologiích`).join(', ')}. Vstup do věku je milník s odměnou ve zlatě a kultuře; národ, který do věku vstoupí první, získá zlatý věk (+1 výroba, zlato a kultura v každém městě na ${GOLDEN_TURNS} tahů). Každý národ začíná s jednou technologií, kterou si přinesl z domoviny.`)}</p>
       <h4>Cesty a řeky</h4><p>${esc('Po objevu Kola stavějí dělníci cesty (2 tahy na pole, v lese a pahorkatině 3; rozkaz Cesta do… postaví celou trasu). Krok z cesty na cestu stojí půl bodu pohybu, města se počítají jako cesta. Řeky tečou po hranách polí: pole u řeky dává +1 zlato, přechod řeky stojí bod pohybu navíc a útok zblízka přes řeku je o 20 % slabší. Cesta sama řeku nepřeklene; most na ní vznikne, až národ, kterému některý břeh patří, objeví Stavitelství. Město spojené cestou s hlavním městem (nebo přístavem na přístav) má po objevu Kupectví z každé trhové vsi +1 zlato navíc.')}</p>
-      <h4>Zkušenosti a přezbrojení</h4><p>${esc('Jednotky získávají bojem zkušenosti a při 10, 25 a 45 bodech si vyberou povýšení: Výcvik (+15 % útok), Zocelení (+20 % obrana), Ranhojič (rychlejší léčení) nebo Pochodník (+1 pohyb). Zastaralou jednotku lze na vlastním území za zlato přezbrojit (klávesa U): válečník → kopiník → šermíř, zvěd → jezdec, galéra → triéra.')}</p>
+      <h4>Zkušenosti a přezbrojení</h4><p>${esc('Jednotky získávají bojem zkušenosti a při 10, 25 a 45 bodech si vyberou povýšení: Výcvik (+15 % útok), Zocelení (+20 % obrana), Ranhojič (rychlejší léčení) nebo Pochodník (+1 pohyb). Zastaralou jednotku lze na vlastním území za zlato přezbrojit (klávesa U): válečník → kopiník → šermíř, zvěd → jezdec, galéra → triéra. Na mapě má jednotka u nohou zlatý šíp za každé povýšení, nad jednotkou čekající na povýšení se pohupuje hvězda a šipka nahoru značí, že ji lze přezbrojit – bílá hned, šedá až na vlastním území nebo s dostatkem zlata.')}</p>
       <h4>Obchod a spojenectví</h4><p>${esc('V okně Diplomacie vidíte vztah každého soupeře k vám. Koně a železo můžete prodávat či kupovat za zlato za tah, darem vztah zlepšíte. Vstřícný soupeř přijme spojenectví proti třetímu národu a 25 tahů vás nenapadne; někdy o pomoc požádá sám.')}</p>
       <h4>Lodě a nalodění</h4><p>${esc('Technologie Plavba dovolí pozemním jednotkám vstoupit na pobřežní vody, Navigace i na oceán. Nalodění i vylodění ukončí tah; naloděná jednotka pluje 3 pole za tah (s Navigací 4), nemůže útočit a brání se silou 4. Pobřežní město staví galéry (boj zblízka proti lodím a člunům) a triéry (střelba na 2 pole, i na břeh a města) a přístav (+1 jídlo z vodních polí, +2 zlato).')}</p>
       <h4>Suroviny</h4><p>${esc('Obilí, zvěř, ryby, kámen a zlato zvyšují výnos pole. Koně a železo jsou strategické: teprve s ohradou (koně) či dolem (železo) na vašem území jdou stavět jezdci a šermíři, a každý takový zdroj uživí jen 2 jednotky. Kdo chce víc jezdců či šermířů, potřebuje víc ložisek nebo surovinu dokoupit; přijdete-li o zdroj, hotové jednotky vám zůstanou, ale nové nepostavíte. Železo se na mapě objeví až po objevu Bronzu. Stav obou surovin ukazují ikony v horní liště, všechny suroviny na vašem území najdete v Přehledu (L). Chybějící surovinu lze koupit v Diplomacii.')}</p>
