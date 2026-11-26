@@ -1563,6 +1563,19 @@ function damage(s: GameState, a: number, d: number): number {
 
 export interface AttackPreview { ranged: boolean; city: City | null; target: Unit | null; dmgDef: number; dmgAtt: number; defHp: number; attHp: number; needWar: number; river: boolean }
 
+/**
+ * Stojí na sousedním poli civilní jednotka národa, se kterým je mír, a `u` by ji po vyhlášení války zajala?
+ * Vrací číslo toho národa, jinak -1.
+ */
+export function captureNeedsWar(s: GameState, u: Unit, x: number, y: number): number {
+  if (isCivilian(u) || u.moves <= 0 || isEmbarked(s, u) || hexDist(u.x, u.y, x, y) !== 1) return -1
+  const t = s.tiles[idx(s, x, y)]
+  if (!canEnterTile(s, u, t) || isWater(t) || cityAt(s, x, y) || militaryAt(s, x, y)) return -1
+  const o = unitsAt(s, x, y).find(v => v.owner !== u.owner && isCivilian(v))
+  if (!o || atWar(s, u.owner, o.owner)) return -1
+  return o.owner
+}
+
 /** Lze zaútočit na pole? Vrací náhled (očekávané ztráty), nebo null. */
 export function previewAttack(s: GameState, u: Unit, x: number, y: number): AttackPreview | null {
   const d = UNITS[u.type]

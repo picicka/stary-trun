@@ -714,3 +714,19 @@ test('šik a voj: spojení stejných jednotek, průměr životů, síla, žold a
   s.tiles[idx(s, a.x, a.y)].owner = -1
   assert.match(splitBlock(s, a) ?? '', /vlastním území/)
 })
+
+test('zajetí dělníků národa, se kterým je mír, jde jen s vědomým vyhlášením války', async () => {
+  const { exec } = await import('../src/game/commands.ts')
+  const { captureNeedsWar, atWar, makeUnit, neighbors: nb, isWater: iw } = await import('../src/game/rules.ts')
+  const s = createGame('aur', 'normal')
+  const w = unitsOf(s, 0).find(u => u.type === 'warrior')!
+  const [x, y] = nb(s, w.x, w.y).find(([a, b]) => !iw(s.tiles[idx(s, a, b)]) && s.tiles[idx(s, a, b)].t !== 'mountain' && !unitsAt(s, a, b).length)!
+  const foe = s.players.find(p => !p.human && p.id !== s.players.length - 1)!.id
+  const worker = makeUnit(s, foe, 'worker', x, y)
+  assert.equal(captureNeedsWar(s, w, x, y), foe)
+  assert.equal(exec(s, 0, { t: 'move', unit: w.id, x, y }).ok, false, 'bez války tam jednotka nesmí')
+  assert.equal(atWar(s, 0, foe), false)
+  assert.ok(exec(s, 0, { t: 'move', unit: w.id, x, y, war: true }).ok)
+  assert.equal(atWar(s, 0, foe), true)
+  assert.equal(worker.owner, 0, 'dělníci jsou zajati')
+})

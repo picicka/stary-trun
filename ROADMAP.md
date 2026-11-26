@@ -9,6 +9,8 @@ Co chceme ve hře udělat a v jakém pořadí. Hotové body odškrtáváme, no
 Věci, které jsou nasazené, ale nikdo je nevyzkoušel v podmínkách, pro které jsou určené.
 
 - [ ] **Nová pravidla v rukou člověka.** Volba vylepšení, plenění, ruční výběr hranic, větve tradic, šik a voj i koupě ze seznamu prošly testy, simulací a krátkou kontrolou v prohlížeči, ale nikdo s nimi neodehrál partii. Zajímá nás hlavně, jestli je volba farma, nebo ves opravdu rozhodnutí a jestli strop obyvatel nepřekáží.
+- [ ] **Chat, zvonek a návrat k tahu mezi skutečnými počítači.** Prošly testy a zkouškou dvou panelů v jednom prohlížeči. Vyzkoušet hlavně zvonek u hráče, který má hru na pozadí, a návrat k tahu těsně před koncem kola.
+- [ ] **Návrat hráče, za kterého hrál počítač.** Předání národa počítači je vyzkoušené v prohlížeči, návrat hráče jen automatickým testem. Vyzkoušet mezi dvěma počítači: odejít, nechat počítač odehrát pár tahů a vrátit se stejným kódem.
 - [ ] **Síťová hra mezi skutečnými počítači.** Zatím běžela jen na jednom stroji. Vyzkoušet různé sítě a routery, největší mapu, panel na pozadí, výpadek a návrat.
 - [ ] **Souběžné tahy přes internet.** Totéž pro souběžnou hru: dva až čtyři lidé, odezva při souběhu příkazů, přechod na střídání po setkání.
 - [ ] **Nasazení na GitHub Pages.** Po posledních pushích zkontrolovat, že stránka běží s novou verzí.
@@ -501,3 +503,8 @@ Dvě samostatné jednotky mají dva útoky a 200 životů. Šik má jeden útok
 - [x] Hranice měst po polích s automatickým i ručním výběrem, obdělávání všech zabraných polí, města nejméně 5 polí od sebe, strop obyvatel bez akvaduktu a kanalizace, kultura za obyvatele.
 - [x] Šestnáct tradic ve čtyřech větvích, zlatý věk za dokončenou větev.
 - [x] Spojování stejných jednotek v šik a voj, rozdělení na vlastním území, bonus pro hoplíty.
+- [x] Chat a zvonek v síťové hře: okno se zprávami (klávesa Y), počet nepřečtených a tlačítko, které ostatním zazvoní.
+- [x] Zajetí civilních jednotek národa, se kterým je mír, se zeptá a po potvrzení vyhlásí válku – stejně jako útok.
+- [x] Návrat k ukončenému tahu při souběžných tazích, dokud ostatní táhnou. Nejde to hráči, po kterém už ve skupině táhne někdo další, ani ve hře, kde se hráči střídají.
+- [x] Jeleni se pasou, otáčejí a přecházejí; nad horami občas sněží.
+- [x] Národ hráče, který ze síťové hry odešel, může hostitel předat počítači: ten dohraje tah a vede národ dál, dokud se hráč nevrátí. Vrácený hráč hraje od následujícího tahu.

@@ -88,6 +88,8 @@ const SFX: Record<string, (t: number, d: AudioNode) => void> = {
   found: (t, d) => { [0, 4, 7, 12].forEach((s, i) => tone(d, t, { f: N(s + 3), t: i * 0.09, d: 0.18, v: 0.2 })) },
   build: (t, d) => { tone(d, t, { f: N(7), d: 0.08, v: 0.16 }); tone(d, t, { f: N(12), t: 0.08, d: 0.14, v: 0.16 }) },
   tech: (t, d) => { [0, 7, 12, 16, 19].forEach((s, i) => tone(d, t, { f: N(s + 5), t: i * 0.07, d: 0.2, type: 'triangle', v: 0.26 })) },
+  bell: (t, d) => { [0, 1, 2].forEach(i => { tone(d, t, { f: N(19), t: i * 0.22, d: 0.2, type: 'triangle', v: 0.3 }); tone(d, t, { f: N(26), t: i * 0.22, d: 0.16, v: 0.14 }) }) },
+  chat: (t, d) => { tone(d, t, { f: N(12), d: 0.07, type: 'triangle', v: 0.16 }); tone(d, t, { f: N(17), t: 0.07, d: 0.1, type: 'triangle', v: 0.16 }) },
   turn: (t, d) => { tone(d, t, { f: N(0), d: 0.12, type: 'triangle', v: 0.22 }); tone(d, t, { f: N(7), t: 0.1, d: 0.2, type: 'triangle', v: 0.22 }) },
   quest: (t, d) => { [0, 4, 7, 12, 16].forEach((s, i) => tone(d, t, { f: N(s + 7), t: i * 0.08, d: 0.22, v: 0.18 })) },
   war: (t, d) => { [0, 0, -2, -5].forEach((s, i) => tone(d, t, { f: N(s - 5), t: i * 0.16, d: 0.22, type: 'sawtooth', v: 0.22 })); noise(d, t, 0.5, 0.2, 500) },

@@ -6,10 +6,10 @@ import type { PromoId, ScenarioId, TraditionId } from './game/data.ts'
 import { hexDist } from './game/hex.ts'
 import {
   atWar, availableTechs, canFoundCity, cityAt, cityById, citiesOf, cityWorkable, drainEvents, idx, isCivilian, isEmbarked,
-  cityTargets, escortOf, inMap, isNaval, isWater, traditionReady, borderOptions, borderTarget, mergeTargets, splitBlock, unitSize, tileJobs, jobInfo, recommendJob, pillageBlock, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
+  cityTargets, captureNeedsWar, escortOf, inMap, isNaval, isWater, traditionReady, borderOptions, borderTarget, mergeTargets, splitBlock, unitSize, tileJobs, jobInfo, recommendJob, pillageBlock, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
   type PathMap,
 } from './game/rules.ts'
-import { actors, canAct, clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
+import { actors, canAct, canResume, clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
 import { cleanCode, ClientSession, HostSession, roomCode, type Lobby, type NetEvents, type NetGame, type SavedSeat, type Session } from './net/session.ts'
 import { localTransport, NetError, peerTransport, type Transport } from './net/transport.ts'
 import type { BuildItem, City, CityFocus, GameState, JobId, Unit } from './game/types.ts'
@@ -103,7 +103,7 @@ export class App implements MapHost {
     if (!s) return false
     this.leaveNet()
     const saved = store.get<{ code: string; seats: SavedSeat[] }>(NET_KEY)
-    if (saved && saved.seats.length === s.players.filter(p => p.human).length) { void this.resumeHost(s, saved.code, saved.seats); return true }
+    if (saved && saved.seats.length === s.players.filter(p => p.human || p.away).length) { void this.resumeHost(s, saved.code, saved.seats); return true }
     this.begin(s)
     if (this.hotseat) this.handover()
     return true
@@ -119,11 +119,11 @@ export class App implements MapHost {
   cmd(c: Command): Result {
     const net = this.net
     if (net) {
-      if (!this.myTurn) return { ok: false, text: 'Nejste na tahu.' }
+      if (!this.myTurn && c.t !== 'resume') return { ok: false, text: 'Nejste na tahu.' }
       if (!net.ready) return { ok: false, text: 'Spojení je přerušeno, hra čeká na jeho obnovení.' }
     }
     // Táhne-li zároveň někdo další, může hostitel jeho příkaz zařadit dřív: uschováme stav pro přepočet.
-    if (net && actors(this.state).length > 1) net.predict()
+    if (net && (actors(this.state).length > 1 || c.t === 'resume')) net.predict()
     const r = exec(this.state, this.me, c)
     net?.local(this.me, c, c.t === 'endTurn' ? stateHash(this.state) : undefined)
     return r
@@ -173,6 +173,27 @@ export class App implements MapHost {
         if (this.inGame && this.state.over) return
         this.inGame = false
         this.hud.showNet('', why)
+      },
+      rejoined: seat => {
+        // Za hráče mezitím hrál počítač: od příštího kola hraje zase sám.
+        const net = this.net
+        if (!net || net.role !== 'host' || !this.inGame || !this.state.players[seat]?.away) return
+        const cmd: Command = { t: 'back' }
+        if (exec(this.state, seat, cmd).ok) { net.local(seat, cmd); this.commit() }
+      },
+      chat: (from, text) => { if (this.inGame) { sfx('chat'); this.hud.addChat(from, text) } },
+      ring: from => {
+        if (!this.inGame) return
+        sfx('bell')
+        const p = this.state.players[from]
+        this.hud.toast(`${this.hud.chatName(from)}${p ? ` (${NATIONS[p.nation].name})` : ''} na vás zvoní.`)
+        // Hráč, který má hru na pozadí, to uvidí v názvu panelu.
+        if (document.hidden) {
+          const title = document.title
+          document.title = '🔔 Zvoní na vás – Starý trůn'
+          const back = () => { if (!document.hidden) { document.title = title; document.removeEventListener('visibilitychange', back) } }
+          document.addEventListener('visibilitychange', back)
+        }
       },
     }
   }
@@ -351,12 +372,32 @@ export class App implements MapHost {
     const net = this.net
     if (!this.canForceEnd || !net || net.role !== 'host' || this.busy) return
     const pid = this.offlineActor
-    const cmd: Command = { t: 'endTurn' }
-    void this.remote(pid, cmd, false, () => net.local(pid, cmd, stateHash(this.state)))
+    // Tah dohraje počítač a hraje za hráče dál, dokud se nevrátí.
+    const cmd: Command = { t: 'away' }
+    void this.remote(pid, cmd, false, () => net.local(pid, cmd))
   }
 
   /** Ukončí síťové sezení (hostitel tím hru pro ostatní zavře, uložená mu zůstane). */
+  /** Pošle zprávu do chatu síťové hry. */
+  say(text: string): void {
+    if (!this.net || !text) return
+    this.net.say(text)
+    this.hud.addChat(this.me, text)
+  }
+
+  private rangAt = 0
+  /** Zazvoní na ostatní hráče (nejvýš jednou za pět vteřin). */
+  ring(): void {
+    if (!this.net) return
+    if (Date.now() - this.rangAt < 5000) { this.hud.toast('Zvonit jde jednou za pět vteřin.'); return }
+    this.rangAt = Date.now()
+    this.net.ring()
+    sfx('bell')
+    this.hud.toast('Zazvonili jste na ostatní hráče.')
+  }
+
   leaveNet(): void {
+    this.hud.clearChat()
     const net = this.net
     if (!net) return
     this.net = null
@@ -606,6 +647,16 @@ export class App implements MapHost {
     }
     if (u) {
       if (this.targets.has(i)) { this.orderAttack(u, x, y); return }
+      // Civilisté národa, se kterým je mír: zajmout je znamená válku.
+      const foe = this.player.visible[i] ? captureNeedsWar(s, u, x, y) : -1
+      if (foe >= 0) {
+        const n = NATIONS[s.players[foe].nation]
+        const what = unitsAt(s, x, y).find(o => o.owner === foe)!
+        this.hud.confirm('Vyhlásit válku?', `${what.type === 'worker' ? 'Zajmout dělníky' : `Zničit jednotku ${UNITS[what.type].name}`} národa ${n.name} znamená válku. ${n.leader} vám to jen tak nezapomene.`, 'Vyhlásit válku', () => {
+          void this.run(() => { const r = this.cmd({ t: 'move', unit: u.id, x, y, war: true }); if (!r.ok && r.text) this.hud.toast(r.text) }).then(() => { const v = this.unit; if (!v || v.moves <= 0) this.autoAdvance() })
+        })
+        return
+      }
       // Osadníci: klik na doporučené místo = dojít tam a založit město.
       if (u.type === 'settler' && this.sites.has(i) && !right && !shift && !(u.x === x && u.y === y)) {
         sfx('build')
@@ -702,9 +753,10 @@ export class App implements MapHost {
   mainAction(force = false): void {
     if (this.busy || this.state.over || this.hud.modalOpen) return
     if (!this.myTurn) {
+      if (this.canResume) { this.resumeTurn(); return }
       if (this.canForceEnd) {
         const p = this.state.players[this.offlineActor]
-        this.hud.confirm('Ukončit tah za hráče?', `${this.seatName(p.id) || 'Hráč'} nemá spojení. Národ ${NATIONS[p.nation].name} tento tah nic dalšího neudělá a hra půjde dál; vrátit se do ní dá kdykoli stejným kódem.`, 'Ukončit tah', () => this.forceEnd())
+        this.hud.confirm('Předat národ počítači?', `${this.seatName(p.id) || 'Hráč'} nemá spojení. Za národ ${NATIONS[p.nation].name} dohraje tah počítač a povede ho i v dalších tazích. Hráč se může kdykoli vrátit stejným kódem; hrát zase začne od následujícího tahu.`, 'Předat počítači', () => this.forceEnd())
       }
       return
     }
@@ -715,6 +767,17 @@ export class App implements MapHost {
     else if (a.kind === 'city') this.openCity(a.city)
     else if (a.kind === 'unit') this.select(a.unit, true)
     else this.endTurn()
+  }
+
+  /** Lze se vrátit k tahu, který hráč už ukončil? */
+  get canResume(): boolean { return !!this.net && this.net.ready && canResume(this.state, this.me) }
+
+  resumeTurn(): void {
+    if (this.busy || !this.canResume) return
+    sfx('click')
+    const r = this.cmd({ t: 'resume' })
+    this.commit()
+    this.hud.toast(r.ok ? 'Jste zpět ve svém tahu.' : r.text ?? 'K tahu se už vrátit nejde.')
   }
 
   endTurn(): void {
@@ -924,6 +987,7 @@ export class App implements MapHost {
 
   private onKey(e: KeyboardEvent): void {
     if (e.metaKey || e.ctrlKey || e.altKey) return
+    if ((e.target as HTMLElement | null)?.tagName === 'INPUT') return
     // V menu jde klávesou jen zavřít otevřené okno (návod, encyklopedie).
     if (!this.inGame) { if (e.key === 'Escape' && this.hud.modalOpen) this.hud.closeModal(); return }
     if (this.hud.modalOpen) { if (e.key === 'Escape') this.hud.closeModal(); return }
@@ -937,6 +1001,7 @@ export class App implements MapHost {
     if (k === 'i') { this.toggleHints(); return }
     if (k === 'm') { this.hud.showMission(); return }
     if (k === 'k') { this.hud.showPedia(); return }
+    if (k === 'y' && this.net) { e.preventDefault(); this.hud.toggleChat(); return }
     if (k === 'h' || e.key === '?') { this.hud.showHelp(); return }
     if (e.key === '+' || e.key === '=') { this.scene.zoomBy(1); return }
     if (e.key === '-') { this.scene.zoomBy(-1); return }

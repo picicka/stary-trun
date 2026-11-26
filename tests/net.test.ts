@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { exec, type Command } from '../src/game/commands.ts'
-import { createGame, deserialize, serialize, stateHash } from '../src/game/state.ts'
+import { canAct, createGame, deserialize, serialize, stateHash } from '../src/game/state.ts'
 import type { GameState } from '../src/game/types.ts'
 import { cleanCode, ClientSession, HostSession, roomCode, type HostEnd, type Link, type Lobby, type Msg, type NetGame } from '../src/net/session.ts'
 
@@ -34,7 +34,9 @@ class Seat implements NetGame {
   net!: HostSession | ClientSession
   lobby: Lobby | null = null
   closed = ''
-  ev = { lobby: (l: Lobby) => { this.lobby = l }, status: (t: string) => { this.log.push(t) }, closed: (w: string) => { this.closed = w } }
+  chat: string[] = []
+  rings: number[] = []
+  ev = { lobby: (l: Lobby) => { this.lobby = l }, status: (t: string) => { this.log.push(t) }, closed: (w: string) => { this.closed = w }, chat: (from: number, text: string) => { this.chat.push(`${from}:${text}`) }, ring: (from: number) => { this.rings.push(from) }, rejoined: (seat: number) => { const c: Command = { t: 'back' }; if (this.s?.players[seat]?.away && exec(this.s, seat, c).ok) (this.net as HostSession).local(seat, c) } }
   replays = 0
   async apply(pid: number, cmd: Command, hashed: boolean, at?: () => void) { await tick(this.lag); exec(this.s!, pid, cmd); at?.(); const h = hashed ? this.hash() : ''; await tick(1); return h }
   /** Zdržení před provedením cizího příkazu (jako když hostiteli dobíhá animace). */
@@ -274,4 +276,66 @@ test('místnost: hostitel přidá soupeře vedené počítačem, ti zaberou mís
   assert.match(b.g.closed, /plná/)
   r.hs.removeBot(0)
   assert.equal(r.hs.lobby().bots.length, 0)
+})
+
+test('chat a zvonek dojdou všem ostatním, odesílateli ne', async () => {
+  const r = room(3)
+  const a = await r.joinIn('Anna'), b = await r.joinIn('Bob')
+  await r.start()
+  a.cs.say('ahoj')
+  r.hs.say('vítejte')
+  b.cs.ring()
+  await until(() => r.host.chat.length === 1 && a.g.chat.length === 1 && b.g.chat.length === 2 && r.host.rings.length === 1 && a.g.rings.length === 1, 'zprávy doručeny')
+  assert.deepEqual(r.host.chat, ['1:ahoj'])
+  assert.deepEqual(a.g.chat, ['0:vítejte'])
+  assert.deepEqual(b.g.chat.slice().sort(), ['0:vítejte', '1:ahoj'])
+  assert.deepEqual([r.host.rings, a.g.rings, b.g.rings], [[2], [2], []])
+})
+
+test('souběžné tahy po síti: hráč se vrátí k ukončenému tahu a stav zůstane všude stejný', async () => {
+  const r = room(3)
+  const a = await r.joinIn('Anna'), b = await r.joinIn('Bob')
+  await r.start(true)
+  a.g.cmd({ t: 'endTurn' })
+  await until(() => r.same() && !canAct(r.host.s!, 1), 'Anna skončila')
+  assert.ok(a.g.cmd({ t: 'resume' }).ok)
+  await until(() => r.same() && canAct(r.host.s!, 1), 'Anna je zpět na tahu')
+  playTurn(a.g); playTurn(b.g); playTurn(r.host)
+  await until(() => r.same() && r.host.s!.turn === 2, 'kolo doběhlo')
+  assert.equal(r.host.s!.cities.filter(c => c.owner === 1).length, 1)
+})
+
+test('odešlého hráče převezme počítač; po návratu hraje od dalšího kola zase sám', async () => {
+  const r = room()
+  const a = await r.joinIn('Anna'), b = await r.joinIn('Bob')
+  await r.start()
+  playTurn(r.host); await until(r.same, 'shoda')
+  // Anna zavře hru (sama se nevrací).
+  a.cs.close()
+  await until(() => !r.hs.online(1) && b.g.lobby!.members[1].online === false, 'výpadek')
+  // Anna je na tahu a není tu: hostitel její národ předá počítači.
+  const s = r.host.s!
+  assert.equal(s.cur, 1)
+  assert.ok(exec(s, 1, { t: 'away' }).ok)
+  r.hs.local(1, { t: 'away' })
+  assert.equal(s.players[1].human, false)
+  assert.equal(s.cur, 2, 'na tahu je Bob')
+  await until(() => b.g.s!.cur === 2 && b.g.hash() === r.host.hash(), 'Bob má stejný stav')
+  playTurn(b.g); await until(() => b.g.hash() === r.host.hash() && s.turn === 2, 'kolo doběhlo')
+  // Další kolo: po hostiteli táhne rovnou Bob, za Annu hraje počítač.
+  playTurn(r.host); await until(() => b.g.hash() === r.host.hash() && s.cur === 2, 'Anna se přeskočila')
+  assert.ok(s.cities.some(c => c.owner === 1), 'počítač za Annu založil město')
+  // Anna se vrací uprostřed kola: hrát začne až od dalšího.
+  const a2 = r.join('Anna')
+  r.all[1] = a2.g
+  await a2.cs.open()
+  await until(() => a2.g.loads === 1 && r.same(), 'návrat')
+  assert.equal(s.players[1].back, true)
+  assert.equal(s.players[1].human, false)
+  playTurn(b.g); await until(() => r.same() && s.turn === 3, 'kolo doběhlo')
+  assert.equal(s.players[1].human, true)
+  assert.equal(s.players[1].away, undefined)
+  playTurn(r.host); await until(() => r.same() && s.cur === 1, 'na tahu je Anna')
+  assert.ok(a2.g.cmd({ t: 'endTurn' }).ok)
+  await until(() => r.same() && s.cur === 2, 'Anna odehrála')
 })

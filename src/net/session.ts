@@ -19,6 +19,9 @@ export type Msg =
   | { t: 'start'; state: string; seat: number; n: number; first: boolean }
   | { t: 'deny'; why: string }
   | { t: 'bye' }
+  /** Zpráva v chatu a zazvonění na ostatní; `from` doplňuje hostitel. */
+  | { t: 'chat'; from?: number; text: string }
+  | { t: 'ring'; from?: number }
 
 /** Jedno spojení mezi hostitelem a hráčem. */
 export interface Link {
@@ -65,6 +68,12 @@ export interface NetEvents {
   status(text: string): void
   /** Hra po síti skončila a nejde v ní pokračovat. */
   closed(why: string): void
+  /** Zpráva od jiného hráče. */
+  chat(from: number, text: string): void
+  /** Jiný hráč zvoní. */
+  ring(from: number): void
+  /** Hostitel: hráč se vrátil do běžící hry (ještě než dostane stav). */
+  rejoined(seat: number): void
 }
 
 /** Uložená sestava hráčů, aby šla rozehraná hra znovu hostit. */
@@ -177,7 +186,7 @@ export class HostSession {
       p.link = link
       this.ev.status(`${p.name}: ${this.started ? 'znovu ve hře' : 'v místnosti'}.`)
       this.announce()
-      if (this.started) this.sync(p, false)
+      if (this.started) { this.ev.rejoined(i); this.sync(p, false) }
       return
     }
     if (seat < 1) return
@@ -185,6 +194,8 @@ export class HostSession {
     if (m.t === 'pick') this.pick(m.nation, seat)
     else if (m.t === 'leave') { link.close(); this.drop(link) }
     else if (m.t === 'resync') { if (this.started) this.sync(p, false) }
+    else if (m.t === 'chat') { const text = m.text.slice(0, CHAT_MAX).trim(); if (text) { this.ev.chat(seat, text); this.tell({ t: 'chat', from: seat, text }, seat) } }
+    else if (m.t === 'ring') { this.ev.ring(seat); this.tell({ t: 'ring', from: seat }, seat) }
     else if (m.t === 'cmd') {
       if (!this.started || !p.ready) return
       this.queued += 1
@@ -204,6 +215,14 @@ export class HostSession {
     link.onClose = () => {}
     link.onMessage = () => {}
   }
+
+  /** Zprávy mimo hru (chat, zvonek) jdou hned všem připojeným. */
+  private tell(m: Msg, except: number): void {
+    this.peers.forEach((p, i) => { if (i !== except) p.link?.send(m) })
+  }
+
+  say(text: string): void { this.tell({ t: 'chat', from: 0, text: text.slice(0, CHAT_MAX) }, 0) }
+  ring(): void { this.tell({ t: 'ring', from: 0 }, 0) }
 
   private relay(m: Msg, except: number): void {
     this.peers.forEach((p, i) => {
@@ -310,6 +329,8 @@ export class ClientSession {
     if (m.t === 'lobby') { this.view = m.lobby; this.seat = m.lobby.you; this.ev.lobby(m.lobby) }
     else if (m.t === 'deny') this.finish(m.why)
     else if (m.t === 'bye') this.finish('Hostitel hru ukončil.')
+    else if (m.t === 'chat') this.ev.chat(m.from ?? 0, m.text)
+    else if (m.t === 'ring') this.ev.ring(m.from ?? 0)
     else if (m.t === 'start') {
       this.chain = this.chain.then(() => {
         this.seat = m.seat; this.n = m.n; this.started = true; this.ready = true
@@ -369,6 +390,8 @@ export class ClientSession {
   }
 
   pick(nation: NationId): void { this.link?.send({ t: 'pick', nation }) }
+  say(text: string): void { this.link?.send({ t: 'chat', text: text.slice(0, CHAT_MAX) }) }
+  ring(): void { this.link?.send({ t: 'ring' }) }
 
   private lost(): void {
     this.link = null
@@ -406,6 +429,8 @@ export class ClientSession {
 }
 
 export type Session = HostSession | ClientSession
+/** Nejdelší zpráva v chatu. */
+export const CHAT_MAX = 300
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 /** Kód místnosti: pět znaků bez těch, které se pletou (0/O, 1/I). */

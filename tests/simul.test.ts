@@ -77,3 +77,53 @@ test('bez volby souběžných tahů se hraje po řadě jako dřív', () => {
   end(s, 0)
   assert.deepEqual(actors(s), [1])
 })
+
+test('souběžné tahy: k ukončenému tahu se jde vrátit, dokud ostatní táhnou', () => {
+  const s = game()
+  const u = unitsOf(s, 1).find(x => x.type === 'settler')!
+  assert.ok(end(s, 1).ok)
+  assert.equal(canAct(s, 1), false)
+  assert.ok(exec(s, 1, { t: 'resume' }).ok)
+  assert.equal(canAct(s, 1), true)
+  assert.ok(exec(s, 1, { t: 'found', unit: u.id }).ok, 'po návratu hráč normálně táhne')
+  assert.equal(exec(s, 1, { t: 'resume' }).ok, false, 'kdo je na tahu, nemá se k čemu vracet')
+  end(s, 1); end(s, 0); end(s, 2)
+  assert.equal(s.turn, 2)
+  assert.equal(exec(s, 1, { t: 'resume' }).ok, false, 'po konci kola už to nejde')
+  // Město založené po návratu se s koncem kola vyhodnotilo právě jednou.
+  const c = s.cities.find(x => x.owner === 1)!
+  const twin = game()
+  exec(twin, 1, { t: 'found', unit: unitsOf(twin, 1).find(x => x.type === 'settler')!.id })
+  for (const pid of [1, 0, 2]) end(twin, pid)
+  assert.equal(c.food, twin.cities.find(x => x.owner === 1)!.food)
+})
+
+test('souběžné tahy: kdo ve skupině předal tah dalšímu, vrátit se nemůže', () => {
+  const s = game()
+  meet(s, 0, 1)
+  for (const pid of [0, 1, 2]) end(s, pid)
+  end(s, 0)
+  assert.equal(exec(s, 0, { t: 'resume' }).ok, false, 'po hráči 0 už táhne hráč 1')
+  end(s, 1)
+  assert.ok(exec(s, 1, { t: 'resume' }).ok, 'poslední ve skupině se vrátit smí, dokud táhne hráč 2')
+})
+
+test('souběžné tahy: odešlého hráče převezme počítač a kolo na něj nečeká', () => {
+  const s = game()
+  end(s, 0)
+  assert.ok(exec(s, 1, { t: 'away' }).ok)
+  drainEvents()
+  assert.equal(s.players[1].human, false)
+  assert.deepEqual(actors(s), [2])
+  const cities = s.cities.filter(c => c.owner === 1).length
+  end(s, 2)
+  assert.equal(s.turn, 2)
+  assert.equal(s.cities.filter(c => c.owner === 1).length, cities, 'v kole převzetí už počítač podruhé netáhne')
+  assert.deepEqual(actors(s), [0, 2])
+  assert.ok(exec(s, 1, { t: 'back' }).ok)
+  assert.equal(exec(s, 1, { t: 'back' }).ok, false)
+  end(s, 0); end(s, 2)
+  assert.equal(s.turn, 3)
+  assert.deepEqual(actors(s), [0, 1, 2], 'po návratu hraje zase sám')
+  assert.ok(s.notes.some(n => n.pid === 1 && n.text.includes('zpět')))
+})

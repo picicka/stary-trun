@@ -426,3 +426,12 @@ table.keys kbd { margin-left: 0; font-size: 18px; padding: 1px 7px; }
 .mk { image-rendering: pixelated; height: 1em; zoom: 1; vertical-align: -2px; }
 .mk.dim { filter: grayscale(1) brightness(.75); }
 .btn.upok { animation: recglow 1.6s ease-in-out infinite; }
+#chat { position: absolute; left: 424px; bottom: 56px; width: 360px; max-width: calc(100vw - 424px - 280px); display: flex; flex-direction: column; }
+#chat h2 { margin: 0 0 4px; font-size: 20px; display: flex; gap: 6px; align-items: center; }
+#chat h2 .x { margin-left: auto; cursor: pointer; background: none; border: none; color: var(--muted); font-family: var(--font); font-size: 24px; }
+#chat .log { height: 170px; overflow-y: auto; font-size: 19px; line-height: 1.2; user-select: text; -webkit-user-select: text; overflow-wrap: anywhere; }
+#chat .log div { margin-bottom: 3px; }
+#chat input { margin-top: 5px; font-family: var(--font); font-size: 19px; background: #0f1530; color: var(--text); border: 2px solid var(--line); padding: 3px 6px; outline: none; user-select: text; -webkit-user-select: text; }
+#chat input:focus { border-color: var(--gold); }
+#topbar .tbtn.unread { border-color: var(--gold); animation: pulse 1s infinite; }
+#topbar .tbtn.unread b { color: var(--gold); font-weight: 400; }

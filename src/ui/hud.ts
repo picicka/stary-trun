@@ -15,7 +15,7 @@ import {
   unitsAt, unitsOf, UNITS_PER_SOURCE, resourceReport, unitsNeeding, traditionAdvice, techPath, foundBlock, isCoastal, traditionReady, pendingPromos, techCost, unitSize, formationName, FORMATION, mergeTargets, splitBlock, tileJobs, jobInfo, recommendJob, pillageBlock, upgradeBlock, upgradeCost, upgradeTarget, xpLevel,
 } from '../game/rules.ts'
 import { actors, canAct, hasSave, START_TECH } from '../game/state.ts'
-import { cleanCode } from '../net/session.ts'
+import { CHAT_MAX, cleanCode } from '../net/session.ts'
 import { tipKey } from '../game/commands.ts'
 import { barbId, type BuildItem, type City, type CityFocus, type Note, type Unit } from '../game/types.ts'
 import { isMusicOn, isMuted, setMusic, setMuted, sfx } from '../audio.ts'
@@ -69,6 +69,11 @@ export class Hud {
   private modal = h('div', { id: 'modal', class: 'hidden' })
   private menu = h('div', { id: 'menu' })
   private tipBox = h('div', { id: 'tooltip', class: 'hidden' })
+  /** Chat síťové hry: zprávy této hry (jen v paměti), počet nepřečtených a okno, které se nepřekresluje s ostatním rozhraním. */
+  private chat = h('div', { id: 'chat', class: 'panel hidden' })
+  private chatLog: { from: number; text: string }[] = []
+  private chatUnread = 0
+  private chatOn = false
   private overview = h('div', { id: 'overview', class: 'panel hidden' })
   private overviewOn = (() => { try { return localStorage.getItem('hex4x-overview') === '1' } catch { return false } })()
   private tipFor: HTMLElement | null = null
@@ -103,7 +108,7 @@ export class Hud {
   constructor(app: App) {
     this.app = app
     this.corner.append(this.mini, this.endBtn)
-    this.root.append(this.labels, this.top, this.notes, this.unitPanel, this.tileInfo, this.corner, this.cityPanel, this.tip, this.overview, this.waiting, this.modal, this.menu, this.tipBox)
+    this.root.append(this.labels, this.top, this.notes, this.unitPanel, this.tileInfo, this.corner, this.cityPanel, this.tip, this.overview, this.chat, this.waiting, this.modal, this.menu, this.tipBox)
     this.root.addEventListener('mouseover', e => this.showTip((e.target as HTMLElement).closest<HTMLElement>('[data-tip]')))
     this.root.addEventListener('mouseleave', () => this.showTip(null))
     this.root.addEventListener('pointerdown', () => this.showTip(null), { capture: true })
@@ -116,7 +121,14 @@ export class Hud {
       else if (el.id === 'netcode') { this.netCode = cleanCode(el.value); if (el.value !== this.netCode) el.value = this.netCode }
     })
     this.root.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target as HTMLElement).id === 'netcode') { sfx('click'); void this.app.joinGame(this.netCode) } })
-    this.root.addEventListener('wheel', e => { if (!(e.target as HTMLElement).closest('.body, .inner, #menu')) e.preventDefault() }, { passive: false })
+    this.chat.innerHTML = `<h2>${ic('chat', 's')}Chat<button class="x" data-a="chat" data-tip="Zavřít chat">✕</button></h2><div class="log"></div><input id="chatin" type="text" maxlength="${CHAT_MAX}" autocomplete="off" placeholder="Napište zprávu a stiskněte Enter">`
+    this.chat.addEventListener('keydown', e => {
+      e.stopPropagation()
+      const inp = e.target as HTMLInputElement
+      if (e.key === 'Escape') { inp.blur(); this.toggleChat(false) }
+      else if (e.key === 'Enter' && inp.value.trim()) { this.app.say(inp.value.trim()); inp.value = '' }
+    })
+    this.root.addEventListener('wheel', e => { if (!(e.target as HTMLElement).closest('.body, .inner, .log, #menu')) e.preventDefault() }, { passive: false })
   }
 
   // ------------------------------------------------------------ bublinová nápověda
@@ -195,6 +207,8 @@ export class Hud {
       case 'tech-open': sfx('click'); this.showTech(); break
       case 'temple': { const c = wonderCity(this.s); if (c && !app.busy) { sfx('select'); app.scene.centerOn(c.x, c.y); app.scene.ping(c.x, c.y) } break }
       case 'overview': sfx('click'); this.toggleOverview(); break
+      case 'chat': sfx('click'); this.toggleChat(); break
+      case 'ring': app.ring(); break
       case 'ov-city': { const c = this.s.cities.find(o => o.id === Number(arg)); if (c && !app.busy) { sfx('select'); app.openCity(c) } break }
       case 'ov-tile': { const i = Number(arg); if (!app.busy) { sfx('select'); app.scene.centerOn(i % this.s.W, (i / this.s.W) | 0); app.scene.ping(i % this.s.W, (i / this.s.W) | 0) } break }
       case 'ov-unit': { const u = this.s.units.find(o => o.id === Number(arg)); if (u && !app.busy) { sfx('select'); app.select(u, true) } break }
@@ -562,6 +576,7 @@ export class Hud {
       ${this.templeChip()}
       <div class="stat"${tip('Skóre|Technologie 6 bodů, město 12, obyvatel 4, budova 3, pole území 0,5, splněné vedlejší úkoly 20–25.')}>${ic('star')}${score(s, this.my)}</div>
       ${this.netChip()}
+      ${this.app.net ? `<button class="tbtn ${this.chatOn ? 'on' : ''}${this.chatUnread ? ' unread' : ''}" data-a="chat"${tip('Chat (Y)|Zprávy mezi hráči této hry.')}>${ic('chat', 's')}${this.chatUnread ? `<b>${this.chatUnread}</b>` : ''}</button><button class="tbtn" data-a="ring"${tip('Zazvonit na ostatní|Ostatním hráčům zazní zvonek a ukáže se, kdo zvoní – hodí se, když se na někoho čeká.')}>${ic('bell', 's')}</button>` : ''}
       <div class="spacer"></div>
       <button class="tbtn ${this.overviewOn ? 'on' : ''}" data-a="overview"${tip('Přehled měst a jednotek (L)|Postranní seznam: co která města stavějí a co dělají jednotky. Kliknutím na řádek na ně skočíte. Zůstává otevřený, dokud ho nevypnete.')}>${ic('pop', 's')}<span class="lbl">Přehled</span></button>
       <button class="tbtn" data-a="mission" data-tip="Cíle mise (M)">${ic('flag', 's')}<span class="lbl">Mise</span></button>
@@ -580,9 +595,37 @@ export class Hud {
     const net = this.app.net, l = net?.lobby()
     if (!net || !l) return ''
     const s = this.s
-    const rows = l.members.map((m, i) => `${net.online(i) ? '●' : '○'} ${m.name} – ${NATIONS[m.nation].name}${i === l.you ? ' (vy)' : ''}${m.host ? ' (hostitel)' : ''}${net.online(i) ? '' : ' – bez spojení'}${s.cur === i && !s.over ? ' – na tahu' : ''}`)
+    const rows = l.members.map((m, i) => `${net.online(i) ? '●' : '○'} ${m.name} – ${NATIONS[m.nation].name}${i === l.you ? ' (vy)' : ''}${m.host ? ' (hostitel)' : ''}${net.online(i) ? '' : ' – bez spojení'}${s.players[i]?.away ? ' – hraje počítač' : ''}${s.cur === i && !s.over ? ' – na tahu' : ''}`)
     const off = l.members.some((_, i) => !net.online(i)) || !net.ready
-    return `<div class="stat"${tip(`Hra po síti – místnost ${l.code}|${rows.join('\n')}${net.role === 'host' ? '\nHráč, kterému vypadne spojení, se vrátí stejným kódem. Je-li zrovna na tahu, můžete jeho tah ukončit.' : ''}`)}><b style="color:${off ? 'var(--bad)' : 'var(--good)'}">●</b> ${l.code}</div>`
+    return `<div class="stat"${tip(`Hra po síti – místnost ${l.code}|${rows.join('\n')}${net.role === 'host' ? '\nHráč, kterému vypadne spojení, se vrátí stejným kódem. Je-li zrovna na tahu, můžete jeho národ předat počítači.' : ''}`)}><b style="color:${off ? 'var(--bad)' : 'var(--good)'}">●</b> ${l.code}</div>`
+  }
+
+  // ------------------------------------------------------------ chat
+
+  toggleChat(on = !this.chatOn): void {
+    this.chatOn = on && !!this.app.net
+    this.chat.classList.toggle('hidden', !this.chatOn)
+    if (this.chatOn) { this.chatUnread = 0; this.drawChat(); this.chat.querySelector<HTMLInputElement>('#chatin')?.focus() }
+    if (this.app.inGame) this.renderTop()
+  }
+
+  /** Nová zpráva (vlastní i cizí). Při zavřeném okně se cizí zpráva ukáže krátce dole a přičte se k nepřečteným. */
+  addChat(from: number, text: string): void {
+    this.chatLog.push({ from, text })
+    if (this.chatLog.length > 200) this.chatLog.shift()
+    if (this.chatOn) this.drawChat()
+    else if (from !== this.my) { this.chatUnread += 1; this.toast(`${this.chatName(from)}: ${text}`) }
+    if (this.app.inGame) this.renderTop()
+  }
+
+  clearChat(): void { this.chatLog = []; this.chatUnread = 0; this.toggleChat(false) }
+
+  chatName(pid: number): string { return this.app.seatName(pid) || NATIONS[this.s.players[pid]?.nation]?.name || 'Hráč' }
+
+  private drawChat(): void {
+    const log = this.chat.querySelector<HTMLElement>('.log')!
+    log.innerHTML = this.chatLog.map(m => `<div><b style="color:${NATIONS[this.s.players[m.from]?.nation]?.css ?? 'var(--text)'}">${esc(this.chatName(m.from))}:</b> ${esc(m.text)}</div>`).join('') || '<div class="sub">Zatím tu nic není. Zprávu uvidí všichni hráči.</div>'
+    log.scrollTop = log.scrollHeight
   }
 
   markNotesRead(): void { for (const n of this.s.notes) if (n.pid === this.my) this.read.add(n) }
@@ -788,7 +831,12 @@ export class Hud {
     if (this.app.net && !this.app.myTurn) {
       const force = this.app.canForceEnd
       this.endBtn.classList.toggle('attn', false)
-      this.endBtn.innerHTML = force ? `Ukončit tah za hráče<small>${esc('hráč na tahu nemá spojení')}</small>` : `${this.s.simul && (this.s.done ?? []).includes(this.my) ? 'Čekáte na ostatní' : 'Čekáte na tah'}<small>${esc('mapu si zatím můžete prohlížet')}</small>`
+      if (this.app.canResume) {
+        this.endBtn.innerHTML = `Vrátit se k tahu<small>${esc('ostatní ještě táhnou')}</small>`
+        this.endBtn.disabled = this.app.busy
+        return
+      }
+      this.endBtn.innerHTML = force ? `Předat národ počítači<small>${esc('hráč na tahu nemá spojení')}</small>` : this.me.away ? `Hraje za vás počítač<small>${esc('od příštího tahu hrajete zase vy')}</small>` : `${this.s.simul && (this.s.done ?? []).includes(this.my) ? 'Čekáte na ostatní' : 'Čekáte na tah'}<small>${esc('mapu si zatím můžete prohlížet')}</small>`
       this.endBtn.disabled = !force || this.app.busy
       return
     }
@@ -1412,6 +1460,7 @@ export class Hud {
       <h4>Kultura, tradice a věky</h4><p>${esc('Kultura měst se sčítá do společné pokladnice národa. Jakmile jí je dost, vyberete si tradici (klávesa C) – trvalou výhodu pro celý národ. První stojí 30 kultury, každá další víc. Zároveň každé město svou kulturou rozšiřuje hranice.')}</p>
       <p>${esc(`Výzkum vás posouvá věky: ${ERAS.slice(1).map(e => `${e.name} při ${e.techs} technologiích`).join(', ')}. Vstup do věku je milník s odměnou ve zlatě a kultuře; národ, který do věku vstoupí první, získá zlatý věk (+1 výroba, zlato a kultura v každém městě na ${GOLDEN_TURNS} tahů). Každý národ začíná s jednou technologií, kterou si přinesl z domoviny.`)}</p>
       <h4>Cesty a řeky</h4><p>${esc('Po objevu Kola stavějí dělníci cesty (2 tahy na pole, v lese a pahorkatině 3; rozkaz Cesta do… postaví celou trasu). Krok z cesty na cestu stojí půl bodu pohybu, města se počítají jako cesta. Řeky tečou po hranách polí: pole u řeky dává +1 zlato, přechod řeky stojí bod pohybu navíc a útok zblízka přes řeku je o 20 % slabší. Cesta sama řeku nepřeklene; most na ní vznikne, až národ, kterému některý břeh patří, objeví Stavitelství. Město spojené cestou s hlavním městem (nebo přístavem na přístav) má po objevu Kupectví z každé trhové vsi +1 zlato navíc.')}</p>
+      <h4>Hra po síti</h4><p>${esc('Chat otevřete tlačítkem s bublinou nahoře (klávesa Y), zvonek vedle něj zazvoní všem ostatním hráčům. Když táhnete zároveň s ostatními a ukončíte tah dřív, hlavní tlačítko vás k tahu vrátí, dokud ostatní ještě táhnou. Útok na národ, se kterým máte mír, i zajetí jeho dělníků znamená válku – hra se nejdřív zeptá.')}</p>
       <h4>Zkušenosti a přezbrojení</h4><p>${esc('Jednotky získávají bojem zkušenosti a při 10, 25 a 45 bodech si vyberou povýšení: Výcvik (+15 % útok), Zocelení (+20 % obrana), Ranhojič (rychlejší léčení) nebo Pochodník (+1 pohyb). Zastaralou jednotku lze na vlastním území za zlato přezbrojit (klávesa U): válečník → kopiník → šermíř, zvěd → jezdec, galéra → triéra. Na mapě má jednotka u nohou zlatý šíp za každé povýšení, nad jednotkou čekající na povýšení se pohupuje hvězda a šipka nahoru značí, že ji lze přezbrojit – bílá hned, šedá až na vlastním území nebo s dostatkem zlata.')}</p>
       <h4>Obchod a spojenectví</h4><p>${esc('V okně Diplomacie vidíte vztah každého soupeře k vám. Koně a železo můžete prodávat či kupovat za zlato za tah, darem vztah zlepšíte. Vstřícný soupeř přijme spojenectví proti třetímu národu a 25 tahů vás nenapadne; někdy o pomoc požádá sám.')}</p>
       <h4>Lodě a nalodění</h4><p>${esc('Technologie Plavba dovolí pozemním jednotkám vstoupit na pobřežní vody, Navigace i na oceán. Nalodění i vylodění ukončí tah; naloděná jednotka pluje 3 pole za tah (s Navigací 4), nemůže útočit a brání se silou 4. Pobřežní město staví galéry (boj zblízka proti lodím a člunům) a triéry (střelba na 2 pole, i na břeh a města) a přístav (+1 jídlo z vodních polí, +2 zlato).')}</p>

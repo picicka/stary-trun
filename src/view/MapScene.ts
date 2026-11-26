@@ -1,7 +1,7 @@
 // Vykreslení mapy v Phaseru: terén, města, jednotky, mlha války, zvýraznění a animace událostí.
 import Phaser from 'phaser'
 import { NATIONS, TERRAIN, UNITS } from '../game/data.ts'
-import { ROW_H, TILE_W, hexCenter, neighborXY, pixelToHex } from '../game/hex.ts'
+import { ROW_H, TILE_W, hexCenter, hexDist, neighborXY, pixelToHex } from '../game/hex.ts'
 import { atWar, hasRoad, idx, inMap, isCivilian, resourceVisible, isEmbarked, pendingPromos, upgradeBlock, upgradeTarget } from '../game/rules.ts'
 import type { GameEvent, GameState, Unit } from '../game/types.ts'
 import { sfx } from '../audio.ts'
@@ -44,6 +44,11 @@ export class MapScene extends Phaser.Scene {
   /** Obrázky, které se hýbou samy: lesy a tábory (snímek „_w“), stíny mraků, čas a krok oživení mapy. */
   private swaying = new Map<number, { img: Phaser.GameObjects.Image; frame: string; on: boolean }>()
   private clouds: Phaser.GameObjects.Image[] = []
+  /** Zvěř na polích se surovinou: `home` = výchozí poloha, `busy` = do kterého kroku oživení se nerozhoduje znovu. */
+  private deer = new Map<number, { img: Phaser.GameObjects.Image; home: number; busy: number }>()
+  /** Hory, nad kterými právě sněží, a kolik kroků ještě bude. */
+  private snowing = new Map<number, number>()
+  private snowAt = 30
   private ambientAcc = 0
   private tick = 0
   private flockAt = 40
@@ -249,7 +254,7 @@ export class MapScene extends Phaser.Scene {
     this.borders = []
     this.borderSig = ''
     this.units.clear()
-    this.swaying.clear()
+    this.swaying.clear(); this.deer.clear(); this.snowing.clear()
     this.placeClouds()
     this.selRing.setVisible(false)
     this.cameras.main.setZoom(this.defaultZoom())
@@ -309,6 +314,7 @@ export class MapScene extends Phaser.Scene {
     this.tileSig[i] = sig
     for (const o of this.tileDyn[i]) o.destroy()
     this.swaying.delete(i)
+    this.deer.delete(i)
     const objs: Phaser.GameObjects.GameObject[] = []
     const d = y * 10
     const tall = (frame: string, dd = 3) => { const img = this.add.image(px, py - 16, A, frame).setOrigin(0, 0).setDepth(d + dd); objs.push(img); return img }
@@ -325,7 +331,11 @@ export class MapScene extends Phaser.Scene {
       const ruined = (img: Phaser.GameObjects.Image) => { if (t.ruin) img.setTint(0x6a5a55) }
       if (t.imp === 'farm') ruined(tall('i_farm', 2))
       if (t.forest) sway(`f_forest_${1 + ((x * 3 + y * 5 + t.variant) % 2)}`)
-      if (res) objs.push(this.add.image(px, py, A, `r_${res}`).setOrigin(0, 0).setDepth(d + 4))
+      if (res === 'deer') {
+        // Jelen je samostatný obrázek: pase se a přechází (viz ambient).
+        const img = this.add.image(px + 9.5, py + 19, A, 'an_deer').setDepth(d + 4).setFlipX((x * 7 + y * 3) % 2 === 0)
+        objs.push(img); this.deer.set(i, { img, home: px + 9.5, busy: 0 })
+      } else if (res) objs.push(this.add.image(px, py, A, `r_${res}`).setOrigin(0, 0).setDepth(d + 4))
       if (t.imp && t.imp !== 'farm') ruined(tall(`i_${t.imp}`, 4))
       if (t.imp && t.ruin) tall('i_ruin', 4.5)
       if (t.special === 'ruins') tall('f_ruins', 4)
@@ -463,6 +473,47 @@ export class MapScene extends Phaser.Scene {
       const x = i % s.W, y = (i / s.W) | 0
       const on = f.frame === 'f_camp' ? Math.random() < 0.5 : Math.sin(x * 0.5 + y * 0.28 - tick * 0.22) + Math.sin(x * 1.7 - y * 1.3 + tick * 0.6) * 0.35 > 0.72
       if (on !== f.on) { f.on = on; f.img.setFrame(on ? `${f.frame}_w` : f.frame) }
+    }
+    // Zvěř: většinu času stojí, občas skloní hlavu k pastvě, otočí se nebo popojde.
+    for (const [, dr] of this.deer) {
+      if (tick < dr.busy || !view.contains(dr.img.x, dr.img.y)) continue
+      const r = Math.random()
+      if (dr.img.frame.name === 'an_deer_g') { if (r < 0.12) dr.img.setFrame('an_deer') ; continue }
+      if (r < 0.03) { dr.img.setFrame('an_deer_g'); dr.busy = tick + 12 }
+      else if (r < 0.04) { dr.img.setFlipX(!dr.img.flipX); dr.busy = tick + 10 }
+      else if (r < 0.055) {
+        // Pár kroků směrem, kterým se dívá (obrázek hledí doprava, převrácený doleva); od svého místa se nevzdálí.
+        const to = Phaser.Math.Clamp(Math.round(dr.img.x + (dr.img.flipX ? -1 : 1) * (2 + Math.floor(Math.random() * 3)) - dr.home), -3, 5) + dr.home
+        if (to === dr.img.x) { dr.img.setFlipX(!dr.img.flipX); continue }
+        dr.busy = tick + 8
+        const y0 = dr.img.y
+        this.tweens.add({ targets: dr.img, x: to, duration: 900, ease: 'Linear' })
+        this.tweens.add({ targets: dr.img, y: y0 - 1, duration: 150, yoyo: true, repeat: 2, onComplete: () => { if (dr.img.active) dr.img.y = y0 } })
+      }
+    }
+    // Sněžení v horách: čas od času se nad některým pohořím ve výřezu spustí přeháňka.
+    if (--this.snowAt <= 0) {
+      this.snowAt = 50 + Math.floor(Math.random() * 90)
+      const peaks: number[] = []
+      for (let i = 0; i < s.tiles.length; i++) if (s.tiles[i].t === 'mountain' && me.explored[i]) { const [cx, cy] = hexCenter(i % s.W, (i / s.W) | 0); if (view.contains(cx, cy)) peaks.push(i) }
+      if (peaks.length) {
+        const c = peaks[Math.floor(Math.random() * peaks.length)], len = 45 + Math.floor(Math.random() * 60)
+        for (const i of peaks) if (hexDist(i % s.W, (i / s.W) | 0, c % s.W, (c / s.W) | 0) <= 2) this.snowing.set(i, len - Math.floor(Math.random() * 12))
+      }
+    }
+    for (const [i, left] of this.snowing) {
+      if (left <= 0) { this.snowing.delete(i); continue }
+      this.snowing.set(i, left - 1)
+      const [, y, px, py] = this.tilePos(i)
+      if (!view.contains(px + 16, py)) continue
+      // Na začátku a na konci přeháňky padá vloček méně.
+      const n = left < 8 ? 2 : 6 + (tick % 2)
+      for (let k = 0; k < n; k++) {
+        const f = this.add.rectangle(Math.round(px + 1 + Math.random() * 28), Math.round(py - 18 + Math.random() * 34), 1, 1, 0xffffff, 1).setDepth(y * 10 + 3.5)
+        const dur = 1300 + Math.random() * 600
+        this.tweens.add({ targets: f, x: f.x + 3 + Math.random() * 3, y: f.y + 12 + Math.random() * 6, duration: dur, ease: 'Linear', onComplete: () => f.destroy() })
+        this.tweens.add({ targets: f, alpha: 0, duration: dur, ease: 'Cubic.easeIn' })
+      }
     }
     // Přešlapuje jen vybraná jednotka.
     for (const [id, v] of this.units) v.spr.y = id === this.selId && !v.work && tick % 6 < 2 ? -1 : 0

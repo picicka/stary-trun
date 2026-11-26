@@ -128,7 +128,8 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
 export function aiRound(s: GameState): void {
   for (const p of s.players) {
     if (s.over) break
-    if (p.human || p.id === barbId(s) || !p.alive) continue
+    // Hráč, kterého počítač převzal v tomto kole, už svůj tah odehrál.
+    if (p.human || p.id === barbId(s) || !p.alive || p.sat === s.turn) continue
     beginTurn(s, p.id)
     aiTurn(s, p.id)
     endPlayerTurn(s, p.id)
@@ -140,7 +141,36 @@ export function aiRound(s: GameState): void {
     endPlayerTurn(s, barbId(s))
   }
   s.turn += 1
+  // Hráči, kteří se vrátili, hrají od nového kola zase sami.
+  for (const p of s.players) {
+    if (!p.back) continue
+    p.human = true; p.personality = 'human'
+    delete p.away; delete p.back; delete p.sat
+    updateVisibility(s, p.id)
+    note(s, p.id, 'Jste zpět ve hře. Za váš národ mezitím hrál počítač.', 'info')
+  }
   checkVictory(s)
+}
+
+/** Za hráče na tahu, který odešel, dohraje tah počítač a hraje za něj i dál, dokud se nevrátí. */
+export function takeOver(s: GameState, pid: number): boolean {
+  const p = s.players[pid]
+  if (!canAct(s, pid)) return false
+  p.away = true; p.sat = s.turn
+  p.personality = NATIONS[p.nation].persona
+  aiTurn(s, pid)
+  if (!s.over) endTurn(s, pid)
+  p.human = false
+  if (s.simul) s.held = (s.held ?? []).filter(x => x !== pid)
+  return true
+}
+
+/** Hráč, za kterého hrál počítač, se vrátil: od příštího kola hraje sám. */
+export function comeBack(s: GameState, pid: number): boolean {
+  const p = s.players[pid]
+  if (!p?.away || p.back || !p.alive || s.over) return false
+  p.back = true
+  return true
 }
 
 // ---------------------------------------------------------------- souběžné tahy
@@ -186,6 +216,8 @@ export function settle(s: GameState): void {
       s.cur = act[0]
       break
     }
+    closeHeld(s)
+    if (s.over) break
     aiRound(s)
     if (s.over) break
     if (s.turn === s.maxTurns - 10) noteAll(s, 'Zbývá posledních 10 tahů. Po nich rozhodne skóre.', 'info')
@@ -202,6 +234,25 @@ export function settle(s: GameState): void {
   for (const p of s.players) if (p.human) updateVisibility(s, p.id)
 }
 
+/** Vyhodnotí konce tahů hráčů, kteří se ještě mohli vrátit. */
+function closeHeld(s: GameState): void {
+  for (const pid of s.held ?? []) { endPlayerTurn(s, pid); checkVictory(s) }
+  s.held = []
+}
+
+/** Smí se hráč vrátit k tahu, který už ukončil? Jen při souběžných tazích, dokud kolo běží. */
+export function canResume(s: GameState, pid: number): boolean {
+  return !s.over && !!s.simul && (s.held ?? []).includes(pid)
+}
+
+/** Vrátí hráče k tahu, který ukončil. */
+export function resumeTurn(s: GameState, pid: number): boolean {
+  if (!canResume(s, pid)) return false
+  s.held = s.held!.filter(x => x !== pid)
+  s.done = (s.done ?? []).filter(x => x !== pid)
+  return true
+}
+
 /**
  * Ukončí tah hráče (bez udání toho, kdo je na řadě). Je-li ve hře další lidský hráč, přijde na řadu on;
  * po posledním odehrají soupeři a barbaři a začne nový tah.
@@ -210,9 +261,12 @@ export function endTurn(s: GameState, pid = s.cur): void {
   if (s.over) return
   if (s.simul) {
     if (!canAct(s, pid)) return
-    endPlayerTurn(s, pid)
-    checkVictory(s)
+    const g = s.groups ?? []
+    // Po hráči, za kterým ve skupině nikdo další netáhne, se konec tahu vyhodnotí až s koncem kola: do té doby se smí vrátit.
+    const last = !s.players.some(q => q.id > pid && q.human && q.alive && g[q.id] === g[pid])
     ;(s.done ??= []).push(pid)
+    if (last) (s.held ??= []).push(pid)
+    else { endPlayerTurn(s, pid); checkVictory(s) }
     settle(s)
     return
   }

@@ -5,16 +5,16 @@ import { NATIONS, type PromoId, type ResourceId, type TechId, type TraditionId }
 import { adviseBuild, aiAcceptsPeace } from './ai.ts'
 import { answerAlly, askAlliance, buyResource, giveGold, sellResource } from './diplo.ts'
 import {
-  adoptTradition, atWar, attack, buy, canFoundCity, canWork, cityAt, cityById, declareWar, dequeue, enqueue, foundCity, killUnit, makePeace, moveUnit, note, pathMap, pathTo,
+  adoptTradition, atWar, attack, buy, captureNeedsWar, canFoundCity, canWork, cityAt, cityById, declareWar, dequeue, enqueue, foundCity, killUnit, makePeace, moveUnit, note, pathMap, pathTo,
   borderOptions, buyItem, growBorders, mergeBlock, mergeUnits, splitBlock, splitUnit, pillage, pillageBlock, planResearch, previewAttack, promote, promoteUnit, roadStep, startWork, stopUnit, unitById, unitsOf, updateVisibility, upgradeBlock, upgradeUnit,
   assignWorkers, cityShoot, cityTargets, escortBlock, follow, followAll,
 } from './rules.ts'
-import { canAct, endTurn, settle } from './state.ts'
+import { canAct, comeBack, endTurn, resumeTurn, settle, takeOver } from './state.ts'
 import { barbId, type BuildItem, type CityFocus, type GameState, type JobId } from './types.ts'
 
 export type Command =
   /** Pohyb na pole (i na více tahů). `todo` = co udělat po příchodu: práce dělníků, nebo založení města. */
-  | { t: 'move'; unit: number; x: number; y: number; todo?: JobId | 'found' }
+  | { t: 'move'; unit: number; x: number; y: number; todo?: JobId | 'found'; war?: boolean }
   /** Další průjezdní bod do fronty rozkazů. */
   | { t: 'waypoint'; unit: number; x: number; y: number }
   /** Útok; `war` = útočník tím vědomě vyhlašuje válku. */
@@ -56,6 +56,11 @@ export type Command =
   /** Rada rádce přečtena. */
   | { t: 'tip'; id: string }
   | { t: 'endTurn' }
+  /** Návrat k ukončenému tahu (souběžné tahy, dokud ostatní táhnou). */
+  | { t: 'resume' }
+  /** Síťová hra: za odešlého hráče dohraje tah počítač a hraje za něj dál; `back` = hráč se vrátil. */
+  | { t: 'away' }
+  | { t: 'back' }
 
 export interface Result {
   ok: boolean
@@ -82,7 +87,10 @@ export function exec(s: GameState, pid: number, c: Command): Result {
 function run(s: GameState, pid: number, c: Command): Result {
   if (s.over) return no('Hra skončila.')
   const me = s.players[pid]
+  if (c.t === 'back') return me && comeBack(s, pid) ? OK : no()
   if (!me || !me.human || !me.alive) return no('Tento hráč nehraje.')
+  if (c.t === 'away') return takeOver(s, pid) ? OK : no('Nejste na tahu.')
+  if (c.t === 'resume') return resumeTurn(s, pid) ? OK : no('K tahu se už vrátit nejde.')
   if (!canAct(s, pid)) return no('Nejste na tahu.')
 
   if ('unit' in c) {
@@ -102,6 +110,12 @@ function run(s: GameState, pid: number, c: Command): Result {
         return OK
       }
       case 'move': {
+        if (c.war) {
+          // Zajetí civilistů národa, se kterým je mír: hráč tím vědomě vyhlašuje válku.
+          const foe = captureNeedsWar(s, u, c.x, c.y)
+          if (foe < 0) return no()
+          declareWar(s, pid, foe)
+        }
         stopUnit(u); u.auto = false
         if (!pathTo(s, pathMap(s, u, undefined, me), c.x, c.y)) return no(c.todo ? 'Tam dělníci cestu nedovedou.' : 'Tam se jednotka nedostane.')
         if (c.todo) u.todo = c.todo

@@ -121,6 +121,10 @@ export interface Player {
   war: number[]
   met: number[]
   personality: PersonaId | 'human' | 'barbarian'
+  /** Síťová hra: hráč odešel a hraje za něj počítač (`human` je po tu dobu false). `sat` = tah, ve kterém ho počítač převzal, `back` = hráč je zpět a od příštího kola hraje sám. */
+  away?: boolean
+  sat?: number
+  back?: boolean
   lastWarTurn: number
   /** Tažení počítače: na které město táhne, zda už vyrazil (jinak shromažďuje vojsko) a odkdy. `pre` = válka ještě nebyla vyhlášena. */
   siege?: { city: number; go: boolean; since: number; pre?: boolean } | null
@@ -183,6 +187,8 @@ export interface GameState {
   groups?: number[]
   done?: number[]
   begun?: number[]
+  /** Kdo kolo ukončil, ale jeho konec tahu se ještě nevyhodnotil – může se k tahu vrátit, dokud táhnou ostatní. */
+  held?: number[]
   difficulty: Difficulty
   W: number
   H: number

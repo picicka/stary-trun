@@ -1830,9 +1830,49 @@
     "h": 9
    }
   },
-  "u_settler": {
+  "an_deer": {
    "frame": {
     "x": 95,
+    "y": 286,
+    "w": 15,
+    "h": 14
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 15,
+    "h": 14
+   },
+   "sourceSize": {
+    "w": 15,
+    "h": 14
+   }
+  },
+  "an_deer_g": {
+   "frame": {
+    "x": 112,
+    "y": 286,
+    "w": 15,
+    "h": 14
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 15,
+    "h": 14
+   },
+   "sourceSize": {
+    "w": 15,
+    "h": 14
+   }
+  },
+  "u_settler": {
+   "frame": {
+    "x": 129,
     "y": 286,
     "w": 22,
     "h": 22
@@ -1852,7 +1892,7 @@
   },
   "u_worker": {
    "frame": {
-    "x": 119,
+    "x": 153,
     "y": 286,
     "w": 22,
     "h": 22
@@ -1872,7 +1912,7 @@
   },
   "u_scout": {
    "frame": {
-    "x": 143,
+    "x": 177,
     "y": 286,
     "w": 22,
     "h": 22
@@ -1892,8 +1932,8 @@
   },
   "u_warrior": {
    "frame": {
-    "x": 167,
-    "y": 286,
+    "x": 0,
+    "y": 324,
     "w": 22,
     "h": 22
    },
@@ -1912,8 +1952,8 @@
   },
   "u_spearman": {
    "frame": {
-    "x": 191,
-    "y": 286,
+    "x": 24,
+    "y": 324,
     "w": 22,
     "h": 22
    },
@@ -1932,7 +1972,7 @@
   },
   "u_archer": {
    "frame": {
-    "x": 0,
+    "x": 48,
     "y": 324,
     "w": 22,
     "h": 22
@@ -1952,7 +1992,7 @@
   },
   "u_crossbow": {
    "frame": {
-    "x": 24,
+    "x": 72,
     "y": 324,
     "w": 22,
     "h": 22
@@ -1972,7 +2012,7 @@
   },
   "u_swordsman": {
    "frame": {
-    "x": 48,
+    "x": 96,
     "y": 324,
     "w": 22,
     "h": 22
@@ -1992,7 +2032,7 @@
   },
   "u_axeman": {
    "frame": {
-    "x": 72,
+    "x": 120,
     "y": 324,
     "w": 22,
     "h": 22
@@ -2012,7 +2052,7 @@
   },
   "u_hoplite": {
    "frame": {
-    "x": 96,
+    "x": 144,
     "y": 324,
     "w": 22,
     "h": 22
@@ -2032,7 +2072,7 @@
   },
   "u_hunter": {
    "frame": {
-    "x": 120,
+    "x": 168,
     "y": 324,
     "w": 22,
     "h": 22
@@ -2052,7 +2092,7 @@
   },
   "u_horseman": {
    "frame": {
-    "x": 144,
+    "x": 192,
     "y": 324,
     "w": 22,
     "h": 22
@@ -2072,7 +2112,7 @@
   },
   "u_chariot": {
    "frame": {
-    "x": 168,
+    "x": 216,
     "y": 324,
     "w": 22,
     "h": 22
@@ -2092,7 +2132,7 @@
   },
   "u_catapult": {
    "frame": {
-    "x": 192,
+    "x": 240,
     "y": 324,
     "w": 22,
     "h": 22
@@ -2112,7 +2152,7 @@
   },
   "u_ram": {
    "frame": {
-    "x": 216,
+    "x": 264,
     "y": 324,
     "w": 22,
     "h": 22
@@ -2132,46 +2172,6 @@
   },
   "u_manatarms": {
    "frame": {
-    "x": 240,
-    "y": 324,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_knight": {
-   "frame": {
-    "x": 264,
-    "y": 324,
-    "w": 22,
-    "h": 22
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 22,
-    "h": 22
-   },
-   "sourceSize": {
-    "w": 22,
-    "h": 22
-   }
-  },
-  "u_trebuchet": {
-   "frame": {
     "x": 0,
     "y": 348,
     "w": 22,
@@ -2190,7 +2190,7 @@
     "h": 22
    }
   },
-  "u_galley": {
+  "u_knight": {
    "frame": {
     "x": 24,
     "y": 348,
@@ -2210,7 +2210,7 @@
     "h": 22
    }
   },
-  "u_trireme": {
+  "u_trebuchet": {
    "frame": {
     "x": 48,
     "y": 348,
@@ -2230,7 +2230,7 @@
     "h": 22
    }
   },
-  "u_boat": {
+  "u_galley": {
    "frame": {
     "x": 72,
     "y": 348,
@@ -2250,7 +2250,7 @@
     "h": 22
    }
   },
-  "u_raider": {
+  "u_trireme": {
    "frame": {
     "x": 96,
     "y": 348,
@@ -2270,7 +2270,7 @@
     "h": 22
    }
   },
-  "u_camel": {
+  "u_boat": {
    "frame": {
     "x": 120,
     "y": 348,
@@ -2290,7 +2290,7 @@
     "h": 22
    }
   },
-  "u_ballista": {
+  "u_raider": {
    "frame": {
     "x": 144,
     "y": 348,
@@ -2310,7 +2310,7 @@
     "h": 22
    }
   },
-  "u_templar": {
+  "u_camel": {
    "frame": {
     "x": 168,
     "y": 348,
@@ -2330,7 +2330,7 @@
     "h": 22
    }
   },
-  "u_workerb": {
+  "u_ballista": {
    "frame": {
     "x": 192,
     "y": 348,
@@ -2350,9 +2350,49 @@
     "h": 22
    }
   },
-  "fx_hit_0": {
+  "u_templar": {
    "frame": {
     "x": 216,
+    "y": 348,
+    "w": 22,
+    "h": 22
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 22,
+    "h": 22
+   },
+   "sourceSize": {
+    "w": 22,
+    "h": 22
+   }
+  },
+  "u_workerb": {
+   "frame": {
+    "x": 240,
+    "y": 348,
+    "w": 22,
+    "h": 22
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 22,
+    "h": 22
+   },
+   "sourceSize": {
+    "w": 22,
+    "h": 22
+   }
+  },
+  "fx_hit_0": {
+   "frame": {
+    "x": 264,
     "y": 348,
     "w": 16,
     "h": 16
@@ -2373,48 +2413,6 @@
   },
   "fx_hit_1": {
    "frame": {
-    "x": 234,
-    "y": 348,
-    "w": 16,
-    "h": 16
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 16,
-    "h": 16
-   },
-   "sourceSize": {
-    "w": 16,
-    "h": 16
-   },
-   "duration": 71
-  },
-  "fx_hit_2": {
-   "frame": {
-    "x": 252,
-    "y": 348,
-    "w": 16,
-    "h": 16
-   },
-   "rotated": false,
-   "trimmed": false,
-   "spriteSourceSize": {
-    "x": 0,
-    "y": 0,
-    "w": 16,
-    "h": 16
-   },
-   "sourceSize": {
-    "w": 16,
-    "h": 16
-   },
-   "duration": 71
-  },
-  "fx_hit_3": {
-   "frame": {
     "x": 0,
     "y": 372,
     "w": 16,
@@ -2434,7 +2432,7 @@
    },
    "duration": 71
   },
-  "fx_hit_4": {
+  "fx_hit_2": {
    "frame": {
     "x": 18,
     "y": 372,
@@ -2455,7 +2453,7 @@
    },
    "duration": 71
   },
-  "fx_smoke_0": {
+  "fx_hit_3": {
    "frame": {
     "x": 36,
     "y": 372,
@@ -2474,9 +2472,9 @@
     "w": 16,
     "h": 16
    },
-   "duration": 125
+   "duration": 71
   },
-  "fx_smoke_1": {
+  "fx_hit_4": {
    "frame": {
     "x": 54,
     "y": 372,
@@ -2495,9 +2493,9 @@
     "w": 16,
     "h": 16
    },
-   "duration": 125
+   "duration": 71
   },
-  "fx_smoke_2": {
+  "fx_smoke_0": {
    "frame": {
     "x": 72,
     "y": 372,
@@ -2518,7 +2516,7 @@
    },
    "duration": 125
   },
-  "fx_smoke_3": {
+  "fx_smoke_1": {
    "frame": {
     "x": 90,
     "y": 372,
@@ -2539,9 +2537,51 @@
    },
    "duration": 125
   },
-  "fx_arrow": {
+  "fx_smoke_2": {
    "frame": {
     "x": 108,
+    "y": 372,
+    "w": 16,
+    "h": 16
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "sourceSize": {
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  "fx_smoke_3": {
+   "frame": {
+    "x": 126,
+    "y": 372,
+    "w": 16,
+    "h": 16
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 16,
+    "h": 16
+   },
+   "sourceSize": {
+    "w": 16,
+    "h": 16
+   },
+   "duration": 125
+  },
+  "fx_arrow": {
+   "frame": {
+    "x": 144,
     "y": 372,
     "w": 9,
     "h": 3
@@ -2561,7 +2601,7 @@
   },
   "fx_rock": {
    "frame": {
-    "x": 119,
+    "x": 155,
     "y": 372,
     "w": 5,
     "h": 5
@@ -2610,14 +2650,14 @@
    },
    {
     "name": "fx_hit",
-    "from": 117,
-    "to": 121,
+    "from": 119,
+    "to": 123,
     "direction": "forward"
    },
    {
     "name": "fx_smoke",
-    "from": 122,
-    "to": 125,
+    "from": 124,
+    "to": 127,
     "direction": "forward"
    }
   ]
