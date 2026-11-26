@@ -1,0 +1,24 @@
+{
+  "name": "Starý trůn",
+  "short_name": "Starý trůn",
+  "description": "Hexová tahová 4X strategie v pixel artu, která běží přímo v prohlížeči. Osm národů, města, výzkum, kultura a války – proti počítači, s přáteli u jednoho počítače i po síti.",
+  "lang": "cs",
+  "start_url": ".",
+  "scope": ".",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
