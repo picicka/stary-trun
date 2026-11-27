@@ -435,3 +435,7 @@ table.keys kbd { margin-left: 0; font-size: 18px; padding: 1px 7px; }
 #chat input:focus { border-color: var(--gold); }
 #topbar .tbtn.unread { border-color: var(--gold); animation: pulse 1s infinite; }
 #topbar .tbtn.unread b { color: var(--gold); font-weight: 400; }
+.citylabel .hpb.wall { bottom: -7px; background: #223; }
+.citylabel .hpb.wall i { background: #c9ced9; }
+.citylabel .hpb.two { bottom: -13px; }
+.bar.wall i { background: #c9ced9; }

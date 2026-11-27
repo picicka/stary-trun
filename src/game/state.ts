@@ -1,5 +1,5 @@
 // Založení hry, průběh celého kola a ukládání.
-import { MAX_NATIONS, NATIONS, PLAYABLE, SCENARIOS, type Difficulty, type NationId, type ScenarioId, type TechId, DIFFICULTY } from './data.ts'
+import { MAX_NATIONS, NATIONS, unitFor, TUNE, PLAYABLE, SCENARIOS, type Difficulty, type NationId, type ScenarioId, type TechId, DIFFICULTY } from './data.ts'
 import { aiTurn, autoUnits, barbTurn } from './ai.ts'
 import { generateScenario, ISLANDS_SEEDS, tierOf, VALLEY_SEEDS, type MapOptions } from './mapgen.ts'
 import { rand, type RngHolder } from './rng.ts'
@@ -96,7 +96,7 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
   const s: GameState = {
     version: SAVE_VERSION, seed, scenario, rng: seed * 31 + 7, turn: 1, cur: 0, maxTurns: opts.maxTurns ?? MAX_TURNS, difficulty, W: sc.W, H: sc.H, tiles: sc.tiles,
     players, cities: [], units: [], nextId: 1, notes: [],
-    mission: { ruinsBy: -1, campsDestroyed: 0, questCities: false, questCamps: false, questRuins: false, wonderBy: -1 },
+    mission: { ruinsBy: -1, campsDestroyed: 0, questRuins: false, wonderBy: -1 },
     over: null, offers: [], deals: [], eraFirst: [0], popups: [], tutorial: [],
   }
   const freeNear = (x: number, y: number): [number, number] => {
@@ -107,10 +107,12 @@ export function createGame(nation: NationId, difficulty: Difficulty, scenario: S
     // Startovní místa se mezi hráči protáčejí: hráč `pid` dostane místo o `startSlot` dál.
     const [sx, sy] = sc.starts[(pid + startSlot) % sc.starts.length]
     makeUnit(s, pid, 'settler', sx, sy)
-    makeUnit(s, pid, 'warrior', sx, sy)
+    // Národ s vlastní obdobou jednotky začíná rovnou s ní (Lumenové s chrámovou stráží místo válečníka).
+    const nation = players[pid].nation
+    makeUnit(s, pid, unitFor(nation, 'warrior'), sx, sy)
     const a = freeNear(sx, sy)
-    makeUnit(s, pid, 'scout', a[0], a[1])
-    if (!players[pid].human) for (let k = 0; k < DIFFICULTY[difficulty].aiExtra; k++) { const b = freeNear(sx, sy); makeUnit(s, pid, 'warrior', b[0], b[1]) }
+    makeUnit(s, pid, unitFor(nation, 'scout'), a[0], a[1])
+    if (!players[pid].human) for (let k = 0; k < DIFFICULTY[difficulty].aiExtra; k++) { const b = freeNear(sx, sy); makeUnit(s, pid, unitFor(nation, 'warrior'), b[0], b[1]) }
   }
   for (const [cx, cy] of sc.camps) {
     const u = makeUnit(s, BARB, 'warrior', cx, cy)
@@ -306,10 +308,21 @@ export function deserialize(json: string): GameState | null {
     const s = JSON.parse(json) as GameState
     if (!s || s.version !== SAVE_VERSION || !Array.isArray(s.tiles) || s.tiles.length !== s.W * s.H) return null
     // Doplnění polí, která starší uložené hry neznají.
+    // Starší uložené hry vedly úkoly společně: připíšou se tomu, kdo je splnil (jinak prvnímu hráči).
+    if (s.mission.questCamps !== undefined || s.mission.questCities !== undefined) {
+      const h = s.players.find(p => p.human)
+      const pc = s.players[s.mission.campsBy ?? h?.id ?? 0], pt = s.players[s.mission.citiesBy ?? h?.id ?? 0]
+      if (s.mission.questCamps && pc) pc.questCamps = true
+      if (s.mission.questCities && pt) pt.questCities = true
+      if (h && h.camps === undefined) h.camps = s.mission.campsDestroyed
+      delete s.mission.questCamps; delete s.mission.questCities
+    }
     for (const c of s.cities) {
       c.queue ??= []
       // Starší hry rozšiřovaly hranice po okruzích: počet zabraných polí se dopočítá a nastřádaná kultura začíná od nuly.
       if (c.grown === undefined) { c.grown = Math.max(0, s.tiles.filter(t => t.city === c.id).length - 7); c.culture = 0 }
+      // Starší uložené hry měly hradby přičtené k životům města.
+      if (c.hp > TUNE.cityHp) c.hp = TUNE.cityHp
     }
     for (const u of s.units) { u.way ??= []; u.auto ??= false; u.todo ??= null; u.roadTo ??= null; u.xp ??= 0; u.promos ??= []; u.sea ??= false }
     // Pole vztahů mají jedno místo na každého hráče; starší hry je měly jako jedno číslo vůči hráči 0.

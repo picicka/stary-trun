@@ -56,6 +56,10 @@ export interface City {
   focus?: CityFocus
   /** Kolik polí už město zabralo kulturou (od toho se odvíjí cena dalšího). */
   grown?: number
+  /** O kolik bodů jsou hradby pobořené (0 nebo chybí = stojí celé). */
+  wallDmg?: number
+  /** Součet životů obránců a hradeb na konci majitelova tahu – podle něj se na začátku dalšího ohlásí ztráty. */
+  seen?: number
   /** Růst hranic: bez hodnoty vybírá pole město samo, 'manual' = vybírá hráč. */
   border?: 'manual'
   /** Pole, které si hráč vybral jako další k zabrání (index), nebo nic. */
@@ -90,6 +94,10 @@ export interface Unit {
   promos: PromoId[]
   /** Spojené jednotky: 2 = šik, 3 = voj. Bez hodnoty je jednotka samostatná. */
   size?: number
+  /** Jednotka se v tomto tahu přesunula (obléhací stroje pak nestřílejí). */
+  moved?: boolean
+  /** Opevnění začne platit až od příštího tahu: rozkaz přišel po útoku nebo bez zbylého pohybu. */
+  fortWait?: boolean
   /** Soupeř či barbar smí na vodu (výsadek, nájezd z moře). */
   sea: boolean
   workLeft: number
@@ -121,13 +129,17 @@ export interface Player {
   war: number[]
   met: number[]
   personality: PersonaId | 'human' | 'barbarian'
+  /** Vedlejší úkoly hráče: kolik barbarských táborů vypálil a které úkoly splnil. */
+  camps?: number
+  questCamps?: boolean
+  questCities?: boolean
   /** Síťová hra: hráč odešel a hraje za něj počítač (`human` je po tu dobu false). `sat` = tah, ve kterém ho počítač převzal, `back` = hráč je zpět a od příštího kola hraje sám. */
   away?: boolean
   sat?: number
   back?: boolean
   lastWarTurn: number
   /** Tažení počítače: na které město táhne, zda už vyrazil (jinak shromažďuje vojsko) a odkdy. `pre` = válka ještě nebyla vyhlášena. */
-  siege?: { city: number; go: boolean; since: number; pre?: boolean } | null
+  siege?: { city: number; go: boolean; since: number; pre?: boolean; /** `at` = odkdy se výprava řadí před městem (po úderu odkdy útočí), `hit` = už udeřila. */ at?: number; hit?: boolean } | null
   peaceUntil: number[]
   cityNames: number
   /** Vztah soupeře k jednotlivým hráčům (−100 až 100), index = id hráče. */
@@ -152,9 +164,11 @@ export interface Note { pid: number; turn: number; text: string; kind: 'info' | 
 
 export interface Mission {
   ruinsBy: number
+  /** Tábory vypálené všemi národy dohromady (jen pro přehledy). Úkoly táborů a měst si vede každý hráč zvlášť. */
   campsDestroyed: number
-  questCities: boolean
-  questCamps: boolean
+  /** Jen ve starších uložených hrách; nové hry mají úkoly u hráče. */
+  questCities?: boolean
+  questCamps?: boolean
   questRuins: boolean
   /** Kdo drží dostavěný Sluneční chrám (-1 = nestojí) a od kterého tahu. */
   wonderBy: number
@@ -214,7 +228,7 @@ export interface GameState {
 /** Události pro vykreslovací vrstvu (animace). Nejsou součástí uložené hry. */
 export type GameEvent =
   | { e: 'move'; unit: number; owner: number; path: [number, number][] }
-  | { e: 'attack'; unit: number; owner: number; from: [number, number]; to: [number, number]; ranged: boolean; dmgDef: number; dmgAtt: number; city: boolean }
+  | { e: 'attack'; unit: number; owner: number; from: [number, number]; to: [number, number]; ranged: boolean; dmgDef: number; dmgAtt: number; city: boolean; /** Střílí obléhací stroj (letí kámen, ne šípy). */ siege?: boolean }
   | { e: 'die'; unit: number; x: number; y: number }
   | { e: 'cityShot'; from: [number, number]; to: [number, number]; dmg: number }
   | { e: 'found'; city: number; x: number; y: number }

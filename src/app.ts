@@ -6,10 +6,11 @@ import type { PromoId, ScenarioId, TraditionId } from './game/data.ts'
 import { hexDist } from './game/hex.ts'
 import {
   atWar, availableTechs, canFoundCity, cityAt, cityById, citiesOf, cityWorkable, drainEvents, idx, isCivilian, isEmbarked,
-  cityTargets, captureNeedsWar, escortOf, inMap, isNaval, isWater, traditionReady, borderOptions, borderTarget, mergeTargets, splitBlock, unitSize, tileJobs, jobInfo, recommendJob, pillageBlock, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
+  cityTargets, captureNeedsWar, attackBlock, escortOf, inMap, isNaval, isWater, traditionReady, borderOptions, borderTarget, mergeTargets, splitBlock, unitSize, tileJobs, jobInfo, recommendJob, pillageBlock, upgradeBlock, pathMap, pathTo, pathTurns, previewAttack, reachable, tilesWithin, unitById, unitsAt, unitsOf,
   type PathMap,
 } from './game/rules.ts'
 import { actors, canAct, canResume, clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
+import { logClear, logEntries, logging, logOn, logRestore, logText, type LogEntry } from './game/log.ts'
 import { cleanCode, ClientSession, HostSession, roomCode, type Lobby, type NetEvents, type NetGame, type SavedSeat, type Session } from './net/session.ts'
 import { localTransport, NetError, peerTransport, type Transport } from './net/transport.ts'
 import type { BuildItem, City, CityFocus, GameState, JobId, Unit } from './game/types.ts'
@@ -33,6 +34,8 @@ const store = {
   set(k: string, v: unknown): void { try { localStorage.setItem(k, JSON.stringify(v)) } catch { /* bez úložiště */ } },
   del(k: string): void { try { localStorage.removeItem(k) } catch { /* nic */ } },
 }
+/** Ladicí záznam: zapnutí a posledních pár tisíc řádků si pamatuje prohlížeč, aby přežily obnovení stránky. */
+const LOG_ON_KEY = 'trun.log.on', LOG_BUF_KEY = 'trun.log.buf', LOG_KEEP = 4000
 /** Místo v cizí hře si pamatuje prohlížeč; při zkoušení mezi panely (?net=local) každý panel zvlášť. */
 const LOCAL_NET = new URLSearchParams(location.search).get('net') === 'local'
 const seatStore = {
@@ -80,6 +83,10 @@ export class App implements MapHost {
     this.hud = new Hud(this)
     scene.floater = (wx, wy, text, color) => this.hud.floater(wx, wy, text, color)
     window.addEventListener('keydown', e => this.onKey(e))
+    if (new URLSearchParams(location.search).get('log') === '1' || store.get<boolean>(LOG_ON_KEY)) {
+      this.setLog(true)
+      logRestore(store.get<LogEntry[]>(LOG_BUF_KEY) ?? [])
+    }
     window.addEventListener('pointerdown', () => unlockAudio(), { capture: true })
     this.hud.showTitle()
     const join = cleanCode(new URLSearchParams(location.search).get('hra') ?? '')
@@ -90,6 +97,7 @@ export class App implements MapHost {
 
   /** Nová hra; víc národů v `nations` = víc lidských hráčů, kteří se střídají u jednoho počítače. */
   newGame(nations: NationId[], difficulty: Difficulty, scenario: ScenarioId = 'valley', opts: GameOptions = {}, seed?: number): void {
+    logClear()
     this.leaveNet()
     store.del(NET_KEY)
     // Pokaždé jiné startovní místo.
@@ -130,7 +138,32 @@ export class App implements MapHost {
   }
 
   /** Uloží hru (v síťové hře ji ukládá jen hostitel). */
-  private save(): void { if (!this.net || this.net.role === 'host') saveGame(this.state) }
+  private save(): void {
+    if (!this.net || this.net.role === 'host') saveGame(this.state)
+    if (logging()) store.set(LOG_BUF_KEY, logEntries().slice(-LOG_KEEP))
+  }
+
+  // ------------------------------------------------------------ ladicí záznam
+
+  get logOn(): boolean { return logging() }
+  get logSize(): number { return logEntries().length }
+
+  /** Zapne nebo vypne ladicí záznam; volba platí i po obnovení stránky. */
+  setLog(on: boolean): void {
+    logOn(on)
+    if (on) store.set(LOG_ON_KEY, true)
+    else { store.del(LOG_ON_KEY); store.del(LOG_BUF_KEY); logClear() }
+  }
+
+  /** Stáhne záznam jako textový soubor – stránka nemá server, soubor vznikne přímo v prohlížeči. */
+  downloadLog(): void {
+    const blob = new Blob([logText(this.state)], { type: 'text/plain;charset=utf-8' })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `stary-trun-zaznam-tah${this.state.turn}.txt`
+    document.body.append(a); a.click(); a.remove()
+    window.setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  }
 
   /** Uloží hru a překreslí rozhraní po příkazu bez animace. */
   private commit(): void { this.save(); this.refresh() }
@@ -647,6 +680,9 @@ export class App implements MapHost {
     }
     if (u) {
       if (this.targets.has(i)) { this.orderAttack(u, x, y); return }
+      // Nepřítel na dosah, ale útok nejde: říct proč (málo pohybu, výhled, stroj po přesunu).
+      const blocked = this.player.visible[i] ? attackBlock(s, u, x, y) : null
+      if (blocked) { sfx('error'); this.hud.toast(blocked); return }
       // Civilisté národa, se kterým je mír: zajmout je znamená válku.
       const foe = this.player.visible[i] ? captureNeedsWar(s, u, x, y) : -1
       if (foe >= 0) {

@@ -306,3 +306,12 @@ sprite("an_deer_g", { w: 13, h: 12, outline: "k" }, `
   .l.b...lllll.
   .l.b...l.blL.
   .B.B...B.BlE.`)
+
+sprite("mk_fort", { w: 7, h: 7, outline: "k" }, `
+  WwwwwwW
+  WuwwwuW
+  WuwuwuW
+  WuwwwuW
+  .WuwuW.
+  ..WuW..
+  ...W...`)

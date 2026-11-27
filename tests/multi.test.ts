@@ -220,3 +220,25 @@ test('dobytí: bez vlastního sídla většina neplatí a zvítězit může i so
   assert.ok(over && !over.won)
   assert.equal(over.winner, 1)
 })
+
+test('vedlejší úkol s tábory si plní každý hráč sám', async () => {
+  const { createGame: cg } = await import('../src/game/state.ts')
+  const R = await import('../src/game/rules.ts')
+  const { exec: ex } = await import('../src/game/commands.ts')
+  const s = cg('aur', 'normal', 'valley', 5, 0, ['khar'])
+  const w = R.unitsOf(s, 0).find(u => !R.isCivilian(u) && u.type !== 'scout')!
+  const gold = s.players[0].gold
+  for (let k = 0; k < 2; k++) {
+    w.moves = 2
+    const [x, y] = R.neighbors(s, w.x, w.y).find(([a, b]) => { const t = s.tiles[R.idx(s, a, b)]; return !R.isWater(t) && t.t !== 'mountain' && !R.unitsAt(s, a, b).length && !R.cityAt(s, a, b) })!
+    const t = s.tiles[R.idx(s, x, y)]
+    t.t = 'grass'; t.forest = false; t.special = 'camp'
+    assert.ok(ex(s, 0, { t: 'move', unit: w.id, x, y }).ok)
+  }
+  assert.equal(s.players[0].camps, 2)
+  assert.equal(s.players[0].questCamps, true)
+  assert.equal(s.players[0].gold, gold + 35 * 2 + 60)
+  assert.equal(s.players[1].questCamps, undefined, 'druhému hráči se úkol nesplnil')
+  assert.equal(s.players[1].camps, undefined)
+  assert.ok(R.score(s, 0) - R.score(s, 1) >= 20)
+})

@@ -5,7 +5,7 @@ import { NATIONS, type PromoId, type ResourceId, type TechId, type TraditionId }
 import { adviseBuild, aiAcceptsPeace } from './ai.ts'
 import { answerAlly, askAlliance, buyResource, giveGold, sellResource } from './diplo.ts'
 import {
-  adoptTradition, atWar, attack, buy, captureNeedsWar, canFoundCity, canWork, cityAt, cityById, declareWar, dequeue, enqueue, foundCity, killUnit, makePeace, moveUnit, note, pathMap, pathTo,
+  adoptTradition, atWar, attack, buy, captureNeedsWar, isCivilian, PROMO_COST, PROMO_NO_MOVES, canFoundCity, canWork, cityAt, cityById, declareWar, dequeue, enqueue, foundCity, killUnit, makePeace, moveUnit, note, pathMap, pathTo,
   borderOptions, buyItem, growBorders, mergeBlock, mergeUnits, splitBlock, splitUnit, pillage, pillageBlock, planResearch, previewAttack, promote, promoteUnit, roadStep, startWork, stopUnit, unitById, unitsOf, updateVisibility, upgradeBlock, upgradeUnit,
   assignWorkers, cityShoot, cityTargets, escortBlock, follow, followAll,
 } from './rules.ts'
@@ -166,8 +166,13 @@ function run(s: GameState, pid: number, c: Command): Result {
         roadStep(s, u)
         followAll(s, pid)
         return OK
-      case 'promo':
-        return promoteUnit(s, u, c.id) ? OK : no()
+      case 'promo': {
+        // Povýšení stojí bod pohybu: jednotka, která už v tahu vyčerpala pohyb, počká na další.
+        if (u.moves <= 0) return no(PROMO_NO_MOVES)
+        if (!promoteUnit(s, u, c.id)) return no()
+        u.moves = Math.max(0, u.moves - PROMO_COST)
+        return OK
+      }
       case 'upgrade': {
         if (c.all) {
           let n = 0
@@ -182,7 +187,12 @@ function run(s: GameState, pid: number, c: Command): Result {
       }
       case 'order':
         if (c.o === 'auto') { stopUnit(u); u.auto = true; u.sleep = false; u.fortified = false }
-        else if (c.o === 'fortify') { u.fortified = true; stopUnit(u); u.sleep = false }
+        else if (c.o === 'fortify') {
+          if (isCivilian(u)) return no()
+          // Kdo v tahu útočil nebo už nemá pohyb, zakope se až do příštího tahu.
+          if (!u.fortified) { u.fortified = true; if (u.attacked || u.moves <= 0) u.fortWait = true; else delete u.fortWait }
+          stopUnit(u); u.sleep = false
+        }
         else if (c.o === 'sleep') { u.sleep = true; stopUnit(u) }
         else if (c.o === 'skip') u.skip = true
         else if (c.o === 'wake') { u.sleep = false; u.fortified = false; u.work = null; stopUnit(u); u.auto = false; u.skip = false }

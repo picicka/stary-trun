@@ -17,6 +17,19 @@ Věci, které jsou nasazené, ale nikdo je nevyzkoušel v podmínkách, pro kte
 - [ ] **Odehrát celou partii jako člověk.** Všechno ladění proběhlo počítač proti počítači. Zajímá nás hlavně 160 tahů, chrám za 800, obléhání se stroji a beranidlem a držení chrámu 15 tahů.
 - [ ] **Nalodění strojů u počítače.** Šlo ven bez testu. Změřit ostrovní mapy před a po.
 
+## K otestování
+
+Pravidla hradeb a boje mají automatické testy (`tests/combat.test.ts`) a prošla krátkou zkouškou v prohlížeči. Zbývá ověřit, co testy nepokryjí.
+
+- [ ] **Simulace 200 partií.** Srovnat s posledním měřením (chrám 120, dobytí 2, skóre 78) a pustit `scripts/strategy.mjs --base`: jak často počítač dobude město s hradbami a bez nich. Stroje po přesunu nestřílejí, útok stojí pohyb a léčení na nepřátelském území je pomalejší – počítač o tom při plánování výprav neví.
+- [ ] **Počítač a stroje.** Ověřit, že se stroji dojede, počká tah a pak pálí, a že na opevněná města vozí beranidlo.
+- [ ] **Dobyvatel začíná pozdě.** Tažení je přestavěné (pochod v míru, seřadiště před městem, větší výprava se stroji, výzkum a tradice směrem k vojsku) a dobyvatel teď získá 0,87 města na partii místo 0,60; polovina výprav končí dobytím. První výprava ale vyráží až kolem 109. tahu, protože v 50. tahu má jen 5 jednotek a 8 obyvatel. Bez rychlejšího raného hospodářství nebo menších raných výprav se dřív nedostane.
+- [ ] **Animace střelby.** Šípy obloukem ve třech, kámen ze stroje vysokým obloukem, totéž u střelby města. V prohlížeči střelba proběhla bez chyb, let střel jsme ale neviděli.
+- [ ] **Spánek ve skutečné partii.** Jednotka má spát, dokud ji neprobudí viditelný nepřítel do dvou polí; o probuzení přijde zpráva. Pokud se bude budit i bez zprávy, je příčina jinde.
+- [ ] **Zobrazení města.** Dva proužky nad městem a v okně města, náhled útoku „hradby −X, obránci −Y“, zpráva o ztrátách na začátku tahu – i ve hře po síti a u jednoho počítače.
+- [ ] **Starší uložené hry.** Město s více než 200 životy se má srovnat na 200.
+- [ ] **Jak se to hraje.** Jestli nejsou opevněná města proti pěchotě bez beranidla příliš tvrdá a jestli výhled střelců a cena útoku nejsou otravné.
+
 ## 2. Vyváženost
 
 - [ ] **Doladit čísla po velké přestavbě pravidel.** Pole, výzkum, kultura a šik šly ven najednou. Srovnání 200 partií před a po: chrám 137 → 124, dobytí 7 → 3, skóre 56 → 73, bez chyb za běhu. Na doladění:
@@ -45,7 +58,6 @@ Věci, které jsou nasazené, ale nikdo je nevyzkoušel v podmínkách, pro kte
 
 ## 4. Obsah
 
-- [ ] **Oddělené životy hradeb a města** podle vzoru Civilizace VI: hradby chrání před pěchotou a střelci, stroje je boří. Větší zásah do pravidel.
 - [ ] **Obléhací věž** jako pozdější obdoba beranidla.
 - [ ] **Další využití zlata a vědy na konci hry**, až je strom vyzkoumaný.
 
@@ -508,3 +520,5 @@ Dvě samostatné jednotky mají dva útoky a 200 životů. Šik má jeden útok
 - [x] Návrat k ukončenému tahu při souběžných tazích, dokud ostatní táhnou. Nejde to hráči, po kterém už ve skupině táhne někdo další, ani ve hře, kde se hráči střídají.
 - [x] Jeleni se pasou, otáčejí a přecházejí; nad horami občas sněží.
 - [x] Národ hráče, který ze síťové hry odešel, může hostitel předat počítači: ten dohraje tah a vede národ dál, dokud se hráč nevrátí. Vrácený hráč hraje od následujícího tahu.
+- [x] Hradby jako zvláštní vrstva města: Hradby a Bašty po 100 bodech, pěchota jim ubírá 20 % škody (s beranidlem plnou), střelci 50 %, stroje plnou. Dobytému městu zůstanou hradby pobořené a obráncům čtvrtina životů. Nad městem dva proužky a na začátku tahu zpráva o ztrátách.
+- [x] Ladicí záznam: války, mír, tažení počítače s důvody, boje, města, výzkum a stav národů každých 10 tahů. Ve hře se zapíná v nápovědě (nebo adresou s `?log=1`) a stahuje jako soubor; v simulaci `scripts/strategy.mjs --log složka`.

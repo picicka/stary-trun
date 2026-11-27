@@ -192,6 +192,8 @@ export interface UnitDef {
   replaces?: UnitId
   nation?: NationId
   antiMounted?: boolean
+  /** Těžká pěchota: bonus proti kopiníkům. */
+  antiSpear?: boolean
   siege?: boolean
   /** Beranidlo: samo neútočí, ale pěchotě útočící na město, u kterého stojí, přidává sílu. */
   ram?: boolean
@@ -214,10 +216,10 @@ export const UNITS: Record<UnitId, UnitDef> = {
   archer: { name: 'Lučištník', desc: 'Střílí na 2 pole, v boji zblízka slabý.', cost: 40, move: 2, str: 5, ranged: 8, range: 2, tech: 'archery', upgrade: ['crossbow'] },
   crossbow: { name: 'Kušník', desc: 'Těžký střelec: střílí na 2 pole a prorazí i zbroj.', cost: 68, move: 2, str: 8, ranged: 13, range: 2, tech: 'armory' },
   horseman: { name: 'Jezdec', desc: 'Rychlá jízda. Vyžaduje koně.', cost: 58, move: 4, str: 12, mounted: true, tech: 'riding', needs: 'horses', upgrade: ['knight'] },
-  swordsman: { name: 'Šermíř', desc: 'Těžká pěchota. Vyžaduje železo.', cost: 62, move: 2, str: 15, tech: 'iron', needs: 'iron', upgrade: ['manatarms'] },
+  swordsman: { name: 'Šermíř', desc: 'Těžká pěchota. Vyžaduje železo. +25 % proti kopiníkům.', cost: 62, move: 2, str: 15, tech: 'iron', needs: 'iron', upgrade: ['manatarms'], antiSpear: true },
   catapult: { name: 'Katapult', desc: 'Obléhací stroj: trojnásobný účinek proti městům, proti jednotkám poloviční.', cost: 72, move: 2, str: 4, ranged: 9, range: 2, tech: 'math', siege: true, upgrade: ['trebuchet'] },
   chariot: { name: 'Válečný vůz', desc: 'Rychlý střelecký vůz. Nepotřebuje koně.', cost: 54, move: 4, str: 7, ranged: 9, range: 2, mounted: true, tech: 'riding', replaces: 'horseman', nation: 'aur' },
-  axeman: { name: 'Sekerník', desc: 'Silnější než šermíř a nepotřebuje železo.', cost: 58, move: 2, str: 16, tech: 'iron', replaces: 'swordsman', nation: 'khar', upgrade: ['manatarms'] },
+  axeman: { name: 'Sekerník', desc: 'Silnější než šermíř a nepotřebuje železo. +25 % proti kopiníkům.', cost: 58, move: 2, str: 16, tech: 'iron', replaces: 'swordsman', nation: 'khar', upgrade: ['manatarms'], antiSpear: true },
   hoplite: { name: 'Hoplít', desc: 'Odolná falanga, +50 % proti jízdě; spojení v šik či voj se brání o 25 % lépe.', cost: 42, move: 2, str: 13, tech: 'bronze', antiMounted: true, replaces: 'spearman', nation: 'thal' },
   raider: { name: 'Nájezdník', desc: 'Lehká stepní jízda: levnější a silnější než jezdec. Vyžaduje koně.', cost: 50, move: 4, str: 13, mounted: true, tech: 'riding', needs: 'horses', replaces: 'horseman', nation: 'tark', upgrade: ['knight'] },
   camel: { name: 'Velbloudí střelec', desc: 'Střelec v sedle: rychlejší než lučištník, zblízka slabý.', cost: 42, move: 3, str: 6, ranged: 8, range: 2, mounted: true, tech: 'archery', replaces: 'archer', nation: 'zahi', upgrade: ['crossbow'] },
@@ -225,7 +227,7 @@ export const UNITS: Record<UnitId, UnitDef> = {
   templar: { name: 'Chrámová stráž', desc: 'Pěchota místo válečníka: na vlastním území se brání o 25 % lépe.', cost: 30, move: 2, str: 9, upgrade: ['swordsman', 'spearman'], replaces: 'warrior', nation: 'lume' },
   hunter: { name: 'Lovec', desc: 'Rychlý lučištník s delším rozhledem.', cost: 40, move: 3, str: 6, ranged: 9, range: 2, tech: 'archery', replaces: 'archer', nation: 'sylv', sight: 3, upgrade: ['crossbow'] },
   ram: { name: 'Beranidlo', desc: 'Samo neútočí. Stojí-li hned u nepřátelského města, má vaše pěchota při útoku na to město +50 % síly a vaše jednotky hned u města +50 % obrany proti odvetě i střelbě z hradeb.', cost: 40, move: 2, str: 4, tech: 'bronze', siege: true, ram: true },
-  manatarms: { name: 'Zbrojnoš', desc: 'Pěchota v plné zbroji, nejsilnější v boji zblízka. Vyžaduje železo.', cost: 84, move: 2, str: 20, tech: 'steel', needs: 'iron' },
+  manatarms: { name: 'Zbrojnoš', desc: 'Pěchota v plné zbroji, nejsilnější v boji zblízka. Vyžaduje železo. +25 % proti kopiníkům.', cost: 84, move: 2, str: 20, tech: 'steel', needs: 'iron', antiSpear: true },
   knight: { name: 'Rytíř', desc: 'Těžká jízda: rychlá a silná. Vyžaduje koně.', cost: 88, move: 4, str: 18, mounted: true, tech: 'chivalry', needs: 'horses' },
   trebuchet: { name: 'Trebuchet', desc: 'Těžký obléhací stroj s dostřelem 3 pole: trojnásobný účinek proti městům, proti jednotkám poloviční.', cost: 98, move: 2, str: 5, ranged: 13, range: 3, tech: 'siegecraft', siege: true },
   galley: { name: 'Galéra', desc: 'Válečná loď pro boj zblízka. Pluje jen po pobřežních vodách, útočí na lodě a naloděné jednotky.', cost: 46, move: 4, str: 11, tech: 'sailing', naval: true, upgrade: ['trireme'] },
@@ -239,14 +241,14 @@ export const BUILDINGS: Record<BuildingId, BuildingDef> = {
   workshop: { name: 'Dílna', desc: '+2 výroba.', cost: 60, tech: 'wheel', maint: 1 },
   market: { name: 'Tržiště', desc: '+2 zlato a +25 % zlata města.', cost: 66, tech: 'currency', maint: 0 },
   library: { name: 'Knihovna', desc: '+2 věda a +1 věda za každé 2 obyvatele.', cost: 58, tech: 'writing', maint: 1 },
-  walls: { name: 'Hradby', desc: '+40 % obrana města a +60 životů.', cost: 50, tech: 'masonry', maint: 0 },
+  walls: { name: 'Hradby', desc: 'Hradby se 100 body, které berou rány místo obránců, a +40 % obrana města, dokud stojí.', cost: 50, tech: 'masonry', maint: 0 },
   barracks: { name: 'Kasárna', desc: 'Nové jednotky jsou veteráni (+15 % síla).', cost: 52, tech: 'tactics', maint: 1 },
   temple: { name: 'Chrám', desc: '+3 kultura, +1 zlato.', cost: 56, tech: 'mysticism', maint: 0 },
   aqueduct: { name: 'Akvadukt', desc: 'Po růstu zůstane městu 40 % zásob jídla.', cost: 78, tech: 'construction', maint: 1 },
   academy: { name: 'Akademie', desc: '+3 věda a +25 % vědy města.', cost: 88, tech: 'philosophy', maint: 1 },
   court: { name: 'Soudní dvůr', desc: '+4 zlato.', cost: 70, tech: 'law', maint: 0 },
   harbor: { name: 'Přístav', desc: '+1 jídlo z každého obdělávaného vodního pole a +2 zlato. Jen v pobřežním městě.', cost: 54, tech: 'sailing', maint: 1 },
-  bastion: { name: 'Bašty', desc: 'Dalších +25 % obrana města a +40 životů. Vyžadují hradby.', cost: 84, tech: 'engineering', maint: 1 },
+  bastion: { name: 'Bašty', desc: 'Dalších 100 bodů hradeb a +25 % obrana města. Vyžadují hradby.', cost: 84, tech: 'engineering', maint: 1 },
   bank: { name: 'Banka', desc: '+3 zlato a +20 % zlata města.', cost: 92, tech: 'banking', maint: 0 },
   caravanserai: { name: 'Karavanseraj', desc: '+3 zlato, je-li město spojené cestou nebo přístavem s hlavním městem.', cost: 70, tech: 'commerce', maint: 0 },
   armory: { name: 'Zbrojnice', desc: 'Nové bojové jednotky začínají s 10 zkušenostmi.', cost: 80, tech: 'armory', maint: 1 },
@@ -336,6 +338,8 @@ export interface PersonaDef {
   label: string
   research: TechId[]
   build: BuildingId[]
+  /** Vlastní pořadí tradic; bez něj se volí podle toho, jestli je povaha válečná. */
+  traditions?: TraditionId[]
   /** Dává přednost bojovým tradicím a povýšením. */
   martial: boolean
   /** Kolik měst chce založit a do kterého tahu ještě posílá osadníky. */
@@ -367,7 +371,7 @@ export interface PersonaDef {
 }
 
 const R_BUILDER: TechId[] = ['agriculture', 'pottery', 'mining', 'husbandry', 'archery', 'writing', 'bronze', 'wheel', 'mysticism', 'masonry', 'currency', 'philosophy', 'math', 'construction', 'education', 'engineering', 'astronomy', 'architecture', 'calendar', 'sailing', 'forestry', 'law', 'commerce', 'irrigation', 'guilds', 'banking', 'iron', 'tactics', 'fishing', 'armory', 'steel', 'riding', 'navigation', 'shipbuilding', 'siegecraft', 'chivalry', 'empire']
-const R_WAR: TechId[] = ['mining', 'archery', 'agriculture', 'bronze', 'husbandry', 'pottery', 'wheel', 'writing', 'iron', 'tactics', 'riding', 'currency', 'math', 'armory', 'masonry', 'steel', 'construction', 'chivalry', 'engineering', 'siegecraft', 'sailing', 'forestry', 'fishing', 'navigation', 'mysticism', 'irrigation', 'philosophy', 'law', 'commerce', 'education', 'guilds', 'banking', 'shipbuilding', 'astronomy', 'architecture', 'calendar', 'empire']
+const R_WAR: TechId[] = ['mining', 'bronze', 'archery', 'agriculture', 'husbandry', 'wheel', 'iron', 'tactics', 'pottery', 'writing', 'currency', 'math', 'armory', 'riding', 'masonry', 'construction', 'steel', 'engineering', 'siegecraft', 'chivalry', 'sailing', 'forestry', 'fishing', 'navigation', 'mysticism', 'irrigation', 'philosophy', 'law', 'commerce', 'education', 'guilds', 'banking', 'shipbuilding', 'astronomy', 'architecture', 'calendar', 'empire']
 const B_BUILDER: BuildingId[] = ['monument', 'granary', 'library', 'workshop', 'temple', 'market', 'academy', 'harbor', 'aqueduct', 'university', 'court', 'caravanserai', 'guildhall', 'observatory', 'amphitheater', 'sewer', 'bank', 'walls', 'barracks', 'shipyard', 'armory', 'bastion']
 const B_WAR: BuildingId[] = ['monument', 'granary', 'barracks', 'workshop', 'library', 'walls', 'armory', 'market', 'temple', 'aqueduct', 'academy', 'guildhall', 'court', 'bastion', 'university', 'caravanserai', 'sewer', 'bank', 'observatory', 'amphitheater', 'harbor', 'shipyard']
 
@@ -375,7 +379,8 @@ export const PERSONAS: Record<PersonaId, PersonaDef> = {
   // Dobyvatel: brzy zbrojí a napadá slabší sousedy.
   aggressive: {
     name: 'Dobyvatel', desc: 'Výbojný národ: zbrojí od začátku a slabšího souseda napadne.', label: 'výbojný sok',
-    research: R_WAR, build: B_WAR, martial: true, cities: 4, settleUntil: 85, armyBase: 3, armyPace: 18, alwaysArm: true, wonderInWar: false, wallsAlways: true,
+    research: R_WAR, build: B_WAR, traditions: ['militia', 'warrior', 'raiders', 'campaign', 'stores', 'settlers', 'builders', 'craft'],
+    martial: true, cities: 4, settleUntil: 85, armyBase: 5, armyPace: 12, alwaysArm: true, wonderInWar: false, wallsAlways: true,
     reserve: 60, marchAt: 3, warFrom: 24, warMil: 4, warRatio: 1.3, warChance: 0.22, dogpile: 0, peaceRatio: 0.9, peaceAfter: 26,
   },
   // Stavitel: rozvíjí města a míří ke Slunečnímu chrámu; válčí jen s drtivou převahou.

@@ -10,7 +10,7 @@ import { generateScenario, ISLANDS_SEEDS, mapSize, TIERS, tierOf, VALLEY_SEEDS, 
 import { hexCenter } from '../game/hex.ts'
 import {
   CONQUEST_TURNS, WONDER_TURNS, SIEGE_UNITS, besieged, wonderCity, wonderLeft, seatCount,
-  atWar, availableBuilds, availableTechs, borderCost, borderOptions, borderTarget, popCap, openTraditions, branchDone, buyCost, buyItemBlock, buyItemCost, canBuy, canFoundCity, cityAt, cityMaxHp, citiesOf, cityStrength, cityYields, cultureSources, freeUnits, growthNeed, hasTech, idx,
+  atWar, availableBuilds, availableTechs, borderCost, borderOptions, borderTarget, popCap, openTraditions, branchDone, buyCost, buyItemBlock, buyItemCost, canBuy, canFoundCity, cityAt, attackBlock, PROMO_NO_MOVES, cityWalls, wallMax, WALL_MELEE, WALL_RANGED, cityMaxHp, citiesOf, cityStrength, cityYields, cultureSources, freeUnits, growthNeed, hasTech, idx,
   cityTargets, escortBlock, escortOf, wardOf, isCivilian, isEmbarked, isNaval, isWater, itemCost, itemName, maxMoves, militaryPower, sameItem, playerIncome, previewAttack, resourceVisible, score, tileYield, unitBlockReason, unitStrength,
   unitsAt, unitsOf, UNITS_PER_SOURCE, resourceReport, unitsNeeding, traditionAdvice, techPath, foundBlock, isCoastal, traditionReady, pendingPromos, techCost, unitSize, formationName, FORMATION, mergeTargets, splitBlock, tileJobs, jobInfo, recommendJob, pillageBlock, upgradeBlock, upgradeCost, upgradeTarget, xpLevel,
 } from '../game/rules.ts'
@@ -218,6 +218,8 @@ export class Hud {
       case 'mission': sfx('click'); this.showMission(); break
       case 'diplo': sfx('click'); this.showDiplo(); break
       case 'help': sfx('click'); this.showHelp(); break
+      case 'log-toggle': sfx('click'); app.setLog(!app.logOn); this.showHelp(); break
+      case 'log-save': sfx('click'); app.downloadLog(); break
       case 'pedia': sfx('click'); this.showPedia(arg); break
       case 'close': sfx('click'); this.closeModal(); break
       case 'seat': this.seatTaken(); break
@@ -670,7 +672,7 @@ export class Hud {
     }
     // Povýšení a přezbrojení.
     const pend = pendingPromos(u)
-    const promoRow = pend > 0 ? `<div class="promo"><b>${ic('xp', 's')}Povýšení${pend > 1 ? ` (${pend}×)` : ''} – vyberte:</b>${PROMO_IDS.filter(id => !u.promos.includes(id)).map(id => `<button class="btn small" data-a="unit" data-v="promo:${id}"${tip(`${PROMOS[id].name}|${PROMOS[id].desc}\nPovýšení navíc vyléčí 25 životů.`)}>${PROMOS[id].name}</button>`).join('')}</div>` : ''
+    const promoRow = pend > 0 ? `<div class="promo"><b>${ic('xp', 's')}Povýšení${pend > 1 ? ` (${pend}×)` : ''} – vyberte:</b>${PROMO_IDS.filter(id => !u.promos.includes(id)).map(id => `<button class="btn small" data-a="unit" data-v="promo:${id}" ${u.moves <= 0 ? 'disabled' : ''}${tip(`${PROMOS[id].name}|${PROMOS[id].desc}\nPovýšení vyléčí 25 životů a stojí 1 bod pohybu.${u.moves <= 0 ? `\nNelze: ${PROMO_NO_MOVES}` : ''}`)}>${PROMOS[id].name}</button>`).join('')}</div>` : ''
     const upT = civ ? null : upgradeTarget(s, u)
     if (upT) {
       const why = upgradeBlock(s, u)
@@ -685,7 +687,7 @@ export class Hud {
     else {
       if (u.type === 'worker') acts.push(btn('auto', 'Automaticky', 'E', 'work', false, 'Automatika|Dělníci budou sami chodit po vašem území a stavět vylepšení, která se zrovna hodí. Před nepřítelem utečou do města.'))
       else if (u.type === 'scout' || isNaval(u)) acts.push(btn('auto', 'Zkoumat', 'E', 'move', false, 'Automatický průzkum|Jednotka bude sama odkrývat neznámá pole, dokud je co zkoumat.'))
-      if (!civ && !emb) acts.push(btn('fortify', 'Opevnit', 'F', 'shield', false, '+25 % k obraně, jednotka čeká'))
+      if (!civ && !emb) acts.push(btn('fortify', 'Opevnit', 'F', 'shield', false, u.attacked || u.moves <= 0 ? '+25 % k obraně, jednotka čeká. Protože v tomto tahu útočila nebo už nemá pohyb, začne opevnění platit až od příštího tahu.' : '+25 % k obraně, jednotka čeká. Platí hned.'))
       // Spojení se sousední stejnou jednotkou a rozdělení zpět.
       if (!civ && mergeTargets(s, u).length) { const n = unitSize(u) + unitSize(mergeTargets(s, u)[0]); acts.push(btn('merge', n === 3 ? 'Spojit ve voj' : 'Spojit v šik', 'J', 'shield', false, `${formationName(n)}|Jednotka se připojí k sousední stejné jednotce. Vznikne jedna jednotka na jednom poli se silou +${Math.round(((FORMATION[n] ?? 1) - 1) * 100)} %. Životy se zprůměrují, zkušenosti se berou od zkušenější. Žold i suroviny se dál počítají za každou zvlášť. Stojí zbytek tahu.`)) }
       if (!civ && unitSize(u) > 1) { const why = splitBlock(s, u); acts.push(btn('split', 'Rozdělit', '', 'move', !!why, `Rozdělit ${formationName(unitSize(u)).toLowerCase()}|Jednotky se rozestoupí na volná sousední pole, každá se stejnými životy a zkušenostmi. Jde jen na vlastním území.${why ? `\nNelze: ${why}` : ''}`)) }
@@ -696,7 +698,7 @@ export class Hud {
     }
     acts.push(`<button class="btn small danger" data-a="unit" data-v="disband" data-tip="Rozpustit jednotku">✕</button>`)
     const eta = this.app.gotoEta
-    const status = [ward ? `doprovází: ${UNITS[ward.type].name}` : guard ? `chrání je: ${UNITS[guard.type].name}` : u.auto ? 'automatika' : u.roadTo ? 'staví cestu' : u.todo === 'found' ? 'jde založit město' : u.todo ? 'jde za prací' : u.work ? 'pracuje' : u.fortified ? 'opevněna' : u.sleep ? 'spí' : u.goto ? `na cestě${eta > 0 ? `, dorazí za ${eta} ${turnsWord(eta)}` : ''}${u.way.length ? `, pak ještě ${u.way.length} ${u.way.length === 1 ? 'bod' : u.way.length < 5 ? 'body' : 'bodů'}` : ''}` : u.moves <= 0 ? 'bez pohybu' : '', emb ? 'naloděna' : ''].filter(Boolean).join(', ')
+    const status = [ward ? `doprovází: ${UNITS[ward.type].name}` : guard ? `chrání je: ${UNITS[guard.type].name}` : u.auto ? 'automatika' : u.roadTo ? 'staví cestu' : u.todo === 'found' ? 'jde založit město' : u.todo ? 'jde za prací' : u.work ? 'pracuje' : u.fortified ? (u.fortWait ? 'opevňuje se – bonus od příštího tahu' : 'opevněna, +25 % obrana') : u.sleep ? 'spí' : u.goto ? `na cestě${eta > 0 ? `, dorazí za ${eta} ${turnsWord(eta)}` : ''}${u.way.length ? `, pak ještě ${u.way.length} ${u.way.length === 1 ? 'bod' : u.way.length < 5 ? 'body' : 'bodů'}` : ''}` : u.moves <= 0 ? 'bez pohybu' : '', emb ? 'naloděna' : '', !civ && d.siege && d.ranged && u.moved ? 'po přesunu, střílet může až příští tah' : ''].filter(Boolean).join(', ')
     // Šik a voj: síla se násobí, jméno to říká.
     const size = unitSize(u), fm = FORMATION[size] ?? 1
     const one = (v: number) => Math.round(v * fm * 10) / 10
@@ -776,7 +778,7 @@ export class Hud {
       return (!d.tech || hasTech(this.me, d.tech)) && !opts.some(o => o.kind === 'unit' && o.id === id)
     }).map(id => `<div class="build off"${tip(this.unitTip(id))}><img src="${this.unitIcon(id, this.my)}" alt=""><span class="n">${UNITS[id].name}<small>${esc(unitBlockReason(s, c, id) ?? '')}</small></span></div>`).join('')
     const built = c.buildings.length ? c.buildings.map(b => `<span${tip(this.buildingTip(b))}><img src="${UI}b_${b}.png" alt="">${BUILDINGS[b].name}</span>`).join('') : '<span style="border:none;color:var(--muted)">zatím žádné</span>'
-    const maxHp = cityMaxHp(c)
+    const maxHp = cityMaxHp(c), wMax = wallMax(c), wNow = cityWalls(c), wDmg = wMax - wNow
     this.cityPanel.classList.remove('hidden')
     this.notes.classList.add('hidden')
     this.cityPanel.innerHTML = `
@@ -789,10 +791,11 @@ export class Hud {
         <span${tip(`Zlato: ${y.gold} za tah|Hrubý výnos města před odečtením údržby budov a žoldu.`)}>${ic('gold')}${y.gold}</span>
         <span${tip(`Věda: ${y.sci} za tah|1 za obyvatele, navíc hlavní město, knihovna a akademie.`)}>${ic('sci')}${y.sci}</span>
         <span${tip(`Kultura: +${y.culture} za tah|${cs.map(([n, v]) => `${n}: +${v}`).join('\n')}\nNastřádáno ${c.culture}, další pole stojí ${bCost}. Kultura rozšiřuje hranice města pole po poli a sčítá se i národu na tradice.`)}>${ic('culture')}+${y.culture}</span>
-        <span${tip(`Obrana města: ${Math.round(cityStrength(s, c))}|Roste s počtem obyvatel a technologií, hradby dávají +40 %, bašty dalších +25 %, posádka přidá část své síly. Město samo střílí na nepřátele do 2 polí a každý tah si opraví 10 životů – ne však v obležení, tedy když u něj stojí aspoň ${SIEGE_UNITS} nepřátelské bojové jednotky.`)}>${ic('shield')}${Math.round(cityStrength(s, c))}</span>
+        <span${tip(`Obrana města: ${Math.round(cityStrength(s, c))}|Roste s počtem obyvatel a technologií, hradby dávají +40 %, bašty dalších +25 %, posádka přidá část své síly. Hradby a bašty násobí obranu, jen dokud stojí. Město samo střílí na nepřátele do 2 polí a každý tah si opraví 10 životů obránců i 10 bodů hradeb – ne však v obležení, tedy když u něj stojí aspoň ${SIEGE_UNITS} nepřátelské bojové jednotky.`)}>${ic('shield')}${Math.round(cityStrength(s, c))}</span>
       </div>
       <div class="sub">${ic('food', 's')}<div class="bar food"><i style="width:${Math.min(100, 100 * c.food / need)}%"></i></div>${c.pop >= cap ? `<span style="color:var(--bad)">strop ${cap}: chybí ${c.buildings.includes('aqueduct') ? 'kanalizace' : 'akvadukt'}</span>` : y.foodNet > 0 ? `růst za ${growT}${NB}${turnsWord(growT)}` : y.foodNet < 0 ? '<span style="color:var(--bad)">hladoví!</span>' : 'neroste'}</div>
-      ${c.hp < maxHp ? `<div class="sub">${ic('hp', 's')}<div class="bar hp low"><i style="width:${100 * c.hp / maxHp}%"></i></div>hradby ${c.hp}${NB}/${NB}${maxHp}${besieged(s, c) ? ' · <span style="color:var(--bad)">v obležení, neopravuje se</span>' : ''}</div>` : ''}
+      ${c.hp < maxHp || wDmg ? `<div class="sub">${ic('hp', 's')}<div class="bar hp low"><i style="width:${100 * c.hp / maxHp}%"></i></div>obránci ${c.hp}${NB}/${NB}${maxHp}${besieged(s, c) ? ' · <span style="color:var(--bad)">v obležení, neopravuje se</span>' : ''}</div>` : ''}
+      ${wMax ? `<div class="sub"${tip(`Hradby: ${wNow} / ${wMax}|Dokud stojí, berou rány místo obránců: od pěchoty jen ${Math.round(WALL_MELEE * 100)} % škody (s beranidlem plnou), od střelců ${Math.round(WALL_RANGED * 100)} %, od obléhacích strojů plnou. Stojící hradby navíc zvyšují obranu města.`)}>${ic('shield', 's')}<div class="bar wall"><i style="width:${100 * wNow / wMax}%"></i></div>hradby ${wNow}${NB}/${NB}${wMax}</div>` : ''}
       ${shots ? `<div class="sub" style="color:${c.fired ? 'var(--muted)' : 'var(--war)'}">${ic('rng', 's')}${c.fired ? 'Hradby v tomto tahu už střílely.' : esc(`Nepřátel v dostřelu hradeb: ${shots}. Klikněte na cíl v červeném rámu; jinak město vystřelí samo na konci tahu.`)}</div>` : ''}
       <div class="sub"${tip(`Kultura a hranice|Město střádá +${y.culture} kultury za tah (${cs.map(([n, v]) => `${n.toLowerCase()} ${v}`).join(', ')}). Za kulturu zabírá okolní pole po jednom, nejdál 3 pole od města; každé další je dražší. Obdělávat jde každé zabrané pole.`)}>${ic('culture', 's')}<div class="bar cult"><i style="width:${bOpts.length ? Math.min(100, 100 * c.culture / bCost) : 100}%"></i></div>${!bOpts.length ? 'hranice jsou největší možné' : c.culture >= bCost && bNext < 0 ? '<span style="color:var(--gold)">vyberte pole na mapě</span>' : `další pole za ${cultT}${NB}${turnsWord(cultT)} (${c.culture}${NB}/${NB}${bCost})`}
         <button class="btn small ${manual ? 'on' : ''}" data-a="border" data-v="${manual ? 'auto' : 'manual'}"${tip(manual ? 'Hranice: vybíráte sami|Fialově označená pole může město zabrat; kliknutím na mapě zvolíte, které bude další. Kliknutím sem vrátíte výběr městu.' : 'Hranice: vybírá město|Město si bere nejdřív pole se surovinami, pak pole u řeky a výnosná pole, bližší před vzdálenějšími. Fialový rám na mapě ukazuje, které přijde příště. Kliknutím sem si začnete pole vybírat sami.')}>${manual ? 'Ručně' : 'Samo'}</button></div>
@@ -888,7 +891,7 @@ export class Hud {
       ['tradition', traditionReady(me), 'Tradice',
         'Vaše města nastřádala dost kultury na první tradici. Tradice je trvalá výhoda pro celý národ – víc výroby, jídla, vědy, silnější vojsko a další. Klikněte na ukazatel kultury nahoře (klávesa C) a jednu si vyberte. Každá další stojí víc kultury.'],
       ['promo', units.some(u => pendingPromos(u) > 0), 'Povýšení',
-        'Jedna z vašich jednotek nasbírala v boji zkušenosti. Vyberte ji a v jejím panelu zvolte povýšení – třeba silnější útok, obranu nebo pohyb navíc. Povýšení také vyléčí 25 životů.'],
+        'Jedna z vašich jednotek nasbírala v boji zkušenosti. Vyberte ji a v jejím panelu zvolte povýšení – třeba silnější útok, obranu nebo pohyb navíc. Povýšení také vyléčí 25 životů a stojí jednotku 1 bod pohybu.'],
       ['pirates', s.units.some(u => u.owner === barbId(s) && UNITS[u.type].naval && me.visible[idx(s, u.x, u.y)]), 'Piráti',
         'U pobřeží se objevili piráti. Jejich galéra napadá lodě a čluny a blokuje vodní pole města, nájezdníci se vylodí a potáhnou na město. Lučištníci na ně dostřelí ze břehu, galéra je potopí na vodě.'],
       ['barb', s.units.some(u => u.owner === barbId(s) && me.visible[idx(s, u.x, u.y)]), 'Barbaři',
@@ -896,7 +899,7 @@ export class Hud {
       ['expand', cities.length === 1 && cities[0].pop >= 3 && s.turn > 10, 'Rozšiřujte říši',
         'Vaše město roste. Postavte osadníky a založte další města – víc měst znamená víc výroby, vědy i skóre. Hranice města rozšiřuje kultura (monument, chrám).'],
       ['war', me.war.length > 0, 'Válka',
-        'Jste ve válce. Města se brání sama a střílejí na 2 pole. K dobytí je třeba srazit hradby na nulu a pak do města vstoupit pěchotou. Bez obléhacích strojů to skoro nejde: beranidlo (Bronz) přidá pěchotě u města +50 % síly i obrany, katapulty (Matematika) hradby rozstřílejí. Město, u kterého stojí aspoň tři vaše bojové jednotky, se přestane opravovat. Mír lze nabídnout v okně Diplomacie.'],
+        'Jste ve válce. Města se brání sama a střílejí na 2 pole. K dobytí je třeba porazit obránce města (200 životů) a vstoupit do něj pěchotou; má-li město hradby, berou rány nejdřív ony a pěchota jim bez beranidla ubírá jen pětinu. Bez obléhacích strojů to skoro nejde: beranidlo (Bronz) přidá pěchotě u města +50 % síly i obrany, katapulty (Matematika) hradby rozstřílejí. Město, u kterého stojí aspoň tři vaše bojové jednotky, se přestane opravovat. Mír lze nabídnout v okně Diplomacie.'],
       ['thal', me.nation === 'thal' && s.turn <= 3, 'Vládci vln',
         'Thalassové jsou doma na moři: lodě mají rychlejší a zkušenější, pobřežní vody jim nesou zlato a plout umějí od začátku. Vyplatí se zakládat města přímo na pobřeží – klidně s osadníky dojděte k moři, než první město založíte.'],
       ['sail', hasTech(me, 'sailing') && s.turn > 3, 'Plavba',
@@ -947,7 +950,7 @@ export class Hud {
     if (u.todo === 'found') return ['jde založit město', false]
     if (u.todo) return [`jde za prací: ${u.todo === 'road' ? 'cesta' : jobInfo(u.todo).name.toLowerCase()}`, false]
     if (u.goto) { const c = cityAt(s, u.goto[0], u.goto[1]); return [`na cestě${c ? ` do města ${c.name}` : ''}${u.way.length ? ` (+${u.way.length} body)` : ''}`, false] }
-    if (u.fortified) { const c = cityAt(s, u.x, u.y); return [c ? `posádka: ${c.name}` : 'opevněna', false] }
+    if (u.fortified) { const c = cityAt(s, u.x, u.y); return [c ? `posádka: ${c.name}` : u.fortWait ? 'opevňuje se' : 'opevněna', false] }
     if (u.sleep) return ['spí', false]
     if (u.skip) return ['tento tah přeskočena', false]
     if (u.moves <= 0) return ['bez pohybu', false]
@@ -1032,8 +1035,8 @@ export class Hud {
         if (c.build) { const y = cityYields(s, c); const t = Math.max(1, Math.ceil((itemCost(c.build, this.me) - c.prod) / Math.max(1, y.prod))); extra = `<em>${esc(itemName(c.build))} · ${t} t.${c.queue.length ? ` → ${esc(itemName(c.queue[0]))}${c.queue.length > 1 ? '…' : ''}` : ''}</em>`; el.dataset.tip = typo(`${c.name}|Staví: ${itemName(c.build)}, hotovo za ${t} ${turnsWord(t)}.${c.queue.length ? `\nVe frontě potom: ${c.queue.map(q => itemName(q)).join(', ')}.` : '\nFronta je prázdná.'}\nKliknutím otevřete město.`) }
         else { extra = `<em style="color:var(--gold)">nečinné!</em>`; el.dataset.tip = typo(`${c.name}|Město nic nestaví, výroba se mění na zlato.\nKliknutím otevřete město a vyberete stavbu.`) }
       }
-      const maxHp = cityMaxHp(c)
-      const html = `<b>${vis || c.owner === this.my ? c.pop : '?'}</b><span>${c.capital ? '★ ' : ''}${esc(c.name)}</span>${extra}${vis && c.hp < maxHp ? `<div class="hpb"><i style="width:${100 * c.hp / maxHp}%"></i></div>` : ''}`
+      const maxHp = cityMaxHp(c), wm = wallMax(c), wn = cityWalls(c)
+      const html = `<b>${vis || c.owner === this.my ? c.pop : '?'}</b><span>${c.capital ? '★ ' : ''}${esc(c.name)}</span>${extra}${vis && wm && (c.hp < maxHp || wn < wm) ? `<div class="hpb wall"><i style="width:${100 * wn / wm}%"></i></div>` : ''}${vis && (c.hp < maxHp || wn < wm) ? `<div class="hpb${wm ? ' two' : ''}"><i style="width:${100 * c.hp / maxHp}%"></i></div>` : ''}`
       if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html }
     }
     for (const [id, el] of this.cityLabels) if (!seen.has(id)) { el.remove(); this.cityLabels.delete(id) }
@@ -1086,16 +1089,17 @@ export class Hud {
     if (t.owner >= 0) html += ` · <span style="color:${NATIONS[s.players[t.owner].nation].css}">${NATIONS[s.players[t.owner].nation].name}</span>`
     if (this.me.visible[i]) {
       const c = cityAt(s, x, y)
-      if (c) html += `<br>${ic('shield', 's')}Město ${esc(c.name)} – obrana ${Math.round(cityStrength(s, c))}, hradby ${c.hp}${NB}/${NB}${cityMaxHp(c)}${besieged(s, c) ? ' · v obležení' : ''}`
+      if (c) html += `<br>${ic('shield', 's')}Město ${esc(c.name)} – obrana ${Math.round(cityStrength(s, c))}, obránci ${c.hp}${NB}/${NB}${cityMaxHp(c)}${wallMax(c) ? `, hradby ${cityWalls(c)}${NB}/${NB}${wallMax(c)}` : ''}${besieged(s, c) ? ' · v obležení' : ''}`
       for (const u of unitsAt(s, x, y)) {
         const d = UNITS[u.type]
         const own = u.owner === 0 ? '' : ` <span style="color:${NATIONS[s.players[u.owner].nation].css}">(${NATIONS[s.players[u.owner].nation].name})</span>`
-        html += `<br>${d.name}${own} ${ic('hp', 's')}${u.hp}${d.str ? ` ${ic('str', 's')}${Math.round(unitStrength(s, u, { defending: true }) * 10) / 10}` : ''}${u.fortified ? ' · opevněn' : ''}`
+        html += `<br>${d.name}${own} ${ic('hp', 's')}${u.hp}${d.str ? ` ${ic('str', 's')}${Math.round(unitStrength(s, u, { defending: true }) * 10) / 10}` : ''}${u.fortified ? (u.fortWait ? ' · opevňuje se' : ' · opevněn') : ''}`
       }
       const sel = this.app.unit
       if (sel) {
         const pv = previewAttack(s, sel, x, y)
-        if (pv) html += `<br><span class="pv">${ic('war', 's')}Útok: nepřítel −${pv.dmgDef}${pv.dmgDef >= pv.defHp && !(pv.city && pv.ranged) ? ' (zničen)' : ''}${pv.ranged ? ', bez odvety' : `, vy −${pv.dmgAtt}${pv.dmgAtt >= pv.attHp ? ' (padnete!)' : ''}`}${pv.river ? ' · přes řeku −20 %' : ''}${pv.needWar >= 0 ? ' · znamená válku' : ''}</span>`
+        if (pv) html += `<br><span class="pv">${ic('war', 's')}Útok: ${pv.city ? `${pv.dmgWall ? `hradby −${pv.dmgWall}${pv.dmgDef ? ', ' : ''}` : ''}${pv.dmgDef || !pv.dmgWall ? `obránci −${pv.dmgDef}` : ''}${pv.dmgDef >= pv.defHp && !pv.ranged ? ' (město padne)' : ''}` : `nepřítel −${pv.dmgDef}${pv.dmgDef >= pv.defHp ? ' (zničen)' : ''}`}${pv.ranged ? ', bez odvety' : `, vy −${pv.dmgAtt}${pv.dmgAtt >= pv.attHp ? ' (padnete!)' : ''}`}${pv.river ? ' · přes řeku −20 %' : ''}${pv.needWar >= 0 ? ' · znamená válku' : ''}${pv.flank ? ` · obklíčení +${pv.flank * 10} %` : ''}${pv.support ? ` · obránce má podporu +${pv.support * 10} %` : ''}</span>`
+        else { const why = attackBlock(s, sel, x, y); if (why) html += `<br><span class="nojob">${ic('war', 's')}${esc(why)}</span>` }
       }
     }
     if (strat) {
@@ -1294,8 +1298,8 @@ export class Hud {
       ${goal(false, `Sláva: mějte po ${s.maxTurns} tazích nejvyšší skóre.`, 'turn')}
       <h4>Vedlejší úkoly</h4>
       ${goal(m.questRuins && m.ruinsBy === this.my, m.ruinsBy >= 0 && m.ruinsBy !== this.my ? `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} – bohužel vás někdo předběhl.` : `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} (odměna: zlato a technologie).`, 'flag')}
-      ${goal(m.questCities, `Vládněte třem městům (odměna 60 zlata). Nyní: ${citiesOf(s, this.my).length}.`, 'pop')}
-      ${goal(m.questCamps, `Vypalte dva barbarské tábory (odměna 60 zlata). Nyní: ${m.campsDestroyed}.`, 'str')}`
+      ${goal(!!this.me.questCities, `Vládněte třem městům (odměna 60 zlata). Nyní: ${citiesOf(s, this.my).length}.`, 'pop')}
+      ${goal(!!this.me.questCamps, `Vypalte dva barbarské tábory (odměna 60 zlata). Nyní: ${this.me.camps ?? 0}.`, 'str')}`
   }
 
   showMission(): void {
@@ -1460,16 +1464,18 @@ export class Hud {
       <h4>Kultura, tradice a věky</h4><p>${esc('Kultura měst se sčítá do společné pokladnice národa. Jakmile jí je dost, vyberete si tradici (klávesa C) – trvalou výhodu pro celý národ. První stojí 30 kultury, každá další víc. Zároveň každé město svou kulturou rozšiřuje hranice.')}</p>
       <p>${esc(`Výzkum vás posouvá věky: ${ERAS.slice(1).map(e => `${e.name} při ${e.techs} technologiích`).join(', ')}. Vstup do věku je milník s odměnou ve zlatě a kultuře; národ, který do věku vstoupí první, získá zlatý věk (+1 výroba, zlato a kultura v každém městě na ${GOLDEN_TURNS} tahů). Každý národ začíná s jednou technologií, kterou si přinesl z domoviny.`)}</p>
       <h4>Cesty a řeky</h4><p>${esc('Po objevu Kola stavějí dělníci cesty (2 tahy na pole, v lese a pahorkatině 3; rozkaz Cesta do… postaví celou trasu). Krok z cesty na cestu stojí půl bodu pohybu, města se počítají jako cesta. Řeky tečou po hranách polí: pole u řeky dává +1 zlato, přechod řeky stojí bod pohybu navíc a útok zblízka přes řeku je o 20 % slabší. Cesta sama řeku nepřeklene; most na ní vznikne, až národ, kterému některý břeh patří, objeví Stavitelství. Město spojené cestou s hlavním městem (nebo přístavem na přístav) má po objevu Kupectví z každé trhové vsi +1 zlato navíc.')}</p>
+      <h4>Ladicí záznam</h4><p>${esc('Zapisuje, co se ve hře děje a proč se počítač rozhodl, jak se rozhodl: války, mír, tažení, boje, města, výzkum. Hru neovlivňuje a nikam se neposílá – zůstává ve vašem prohlížeči a dá se stáhnout jako textový soubor.')}</p>
+      <p><button class="btn small" data-a="log-toggle">${this.app.logOn ? 'Vypnout záznam' : 'Zapnout záznam'}</button> <button class="btn small" data-a="log-save" ${this.app.logOn && this.app.logSize ? '' : 'disabled'}>Stáhnout záznam (${this.app.logSize} řádků)</button></p>
       <h4>Hra po síti</h4><p>${esc('Chat otevřete tlačítkem s bublinou nahoře (klávesa Y), zvonek vedle něj zazvoní všem ostatním hráčům. Když táhnete zároveň s ostatními a ukončíte tah dřív, hlavní tlačítko vás k tahu vrátí, dokud ostatní ještě táhnou. Útok na národ, se kterým máte mír, i zajetí jeho dělníků znamená válku – hra se nejdřív zeptá.')}</p>
-      <h4>Zkušenosti a přezbrojení</h4><p>${esc('Jednotky získávají bojem zkušenosti a při 10, 25 a 45 bodech si vyberou povýšení: Výcvik (+15 % útok), Zocelení (+20 % obrana), Ranhojič (rychlejší léčení) nebo Pochodník (+1 pohyb). Zastaralou jednotku lze na vlastním území za zlato přezbrojit (klávesa U): válečník → kopiník → šermíř, zvěd → jezdec, galéra → triéra. Na mapě má jednotka u nohou zlatý šíp za každé povýšení, nad jednotkou čekající na povýšení se pohupuje hvězda a šipka nahoru značí, že ji lze přezbrojit – bílá hned, šedá až na vlastním území nebo s dostatkem zlata.')}</p>
+      <h4>Zkušenosti a přezbrojení</h4><p>${esc('Výběr povýšení stojí 1 bod pohybu a vyléčí 25 životů; jednotka bez pohybu si ho vybere až v dalším tahu. Jednotky získávají bojem zkušenosti a při 10, 25 a 45 bodech si vyberou povýšení: Výcvik (+15 % útok), Zocelení (+20 % obrana), Ranhojič (rychlejší léčení) nebo Pochodník (+1 pohyb). Zastaralou jednotku lze na vlastním území za zlato přezbrojit (klávesa U): válečník → kopiník → šermíř, zvěd → jezdec, galéra → triéra. Na mapě má jednotka u nohou zlatý šíp za každé povýšení, nad jednotkou čekající na povýšení se pohupuje hvězda a šipka nahoru značí, že ji lze přezbrojit – bílá hned, šedá až na vlastním území nebo s dostatkem zlata.')}</p>
       <h4>Obchod a spojenectví</h4><p>${esc('V okně Diplomacie vidíte vztah každého soupeře k vám. Koně a železo můžete prodávat či kupovat za zlato za tah, darem vztah zlepšíte. Vstřícný soupeř přijme spojenectví proti třetímu národu a 25 tahů vás nenapadne; někdy o pomoc požádá sám.')}</p>
       <h4>Lodě a nalodění</h4><p>${esc('Technologie Plavba dovolí pozemním jednotkám vstoupit na pobřežní vody, Navigace i na oceán. Nalodění i vylodění ukončí tah; naloděná jednotka pluje 3 pole za tah (s Navigací 4), nemůže útočit a brání se silou 4. Pobřežní město staví galéry (boj zblízka proti lodím a člunům) a triéry (střelba na 2 pole, i na břeh a města) a přístav (+1 jídlo z vodních polí, +2 zlato).')}</p>
       <h4>Suroviny</h4><p>${esc('Obilí, zvěř, ryby, kámen a zlato zvyšují výnos pole. Koně a železo jsou strategické: teprve s ohradou (koně) či dolem (železo) na vašem území jdou stavět jezdci a šermíři, a každý takový zdroj uživí jen 2 jednotky. Kdo chce víc jezdců či šermířů, potřebuje víc ložisek nebo surovinu dokoupit; přijdete-li o zdroj, hotové jednotky vám zůstanou, ale nové nepostavíte. Železo se na mapě objeví až po objevu Bronzu. Stav obou surovin ukazují ikony v horní liště, všechny suroviny na vašem území najdete v Přehledu (L). Chybějící surovinu lze koupit v Diplomacii.')}</p>
       <h4>Pole a vylepšení</h4><p>${esc('Louky dávají jídlo, pláně jídlo i výrobu, pahorkatina výrobu, les výrobu. Na poli stojí vždy jen jedno vylepšení a na rovině si vybíráte: farma (jídlo), nebo trhová ves (zlato). Na pahorkatině se hloubí doly, v lese stojí pily – nebo les vymýtíte za jednorázovou výrobu pro město. Koně a zvěř chtějí ohradu, ryby loviště (staví ho nalodění dělníci). Zavlažování přidá jídlo jen farmám u řeky, pila u řeky dává výrobu navíc. Přestavba na jiné vylepšení trvá o 2 tahy déle. Rozpracovaná práce na poli zůstane, i když dělníci odejdou. Koně a železo je nutné vylepšit, aby šlo stavět jezdce a šermíře.')}</p>
       <h4>Plenění</h4><p>${esc('Bojová jednotka na poli národa, se kterým válčíte, může pole vyplenit (klávesa P): vylepšení, napodruhé i cesta, přestane fungovat, dokud je dělníci neopraví, a vy získáte zlato. Vypleněný důl či ohrada nedodává surovinu, vypleněná cesta přeruší spojení měst. Oprava trvá polovinu doby stavby. Plení i barbaři.')}</p>
       <h4>Šik a voj</h4><p>${esc('Dvě stejné jednotky stojící vedle sebe se po objevu Válečnictví spojí v šik (klávesa J), se Zbrojířstvím tři ve voj. Vznikne jedna jednotka na jednom poli se silou +50 %, respektive +90 %; hodí se tam, kde je málo místa, hlavně u hradeb. Životů má dál nejvýš 100 – při spojení dostane průměr spojovaných jednotek – a zkušenosti přebírá od zkušenější. Žold a suroviny se platí dál za každou jednotku. Rozdělit ji lze jen na vlastním území. Spojovat se smí pěchota, jízda a střelci.')}</p>
-      <h4>Boj</h4><p>${esc('Na jednom poli může stát jedna vojenská a jedna civilní jednotka. V boji zblízka utrpí ztráty obě strany, střelci (dostřel 2) odvetu nedostanou. Pahorkatina a les dávají obránci +25 %, opevnění dalších +25 %. Kopiníci mají +50 % proti jízdě, obléhací stroje trojnásobný účinek proti městům a poloviční proti jednotkám. Jednotka, která se celý tah nehýbe, se léčí (nejrychleji ve městě).')}</p>
-      <p>${esc(`Město se dobývá tak, že mu útoky srazíte hradby na nulu a vstoupíte do něj jednotkou pro boj zblízka. Města střílejí na nepřátele do 2 polí – jednou za tah, cíl můžete vybrat v otevřeném městě kliknutím na jednotku v červeném rámu, jinak město vystřelí samo na nejslabší – a každý tah si opraví 10 životů. Obléhejte proto se stroji: beranidlo samo neútočí, ale pěchotě útočící na město, u kterého stojí, přidá +50 % síly a jednotkám hned u města +50 % obrany proti odvetě i střelbě z hradeb; katapult, balista a trebuchet mají proti městům trojnásobný účinek, proti jednotkám jen poloviční. Stojí-li hned u města aspoň ${SIEGE_UNITS} vaše bojové jednotky, je v obležení a neopravuje se.`)}</p>
+      <h4>Boj</h4><p>${esc('Na jednom poli může stát jedna vojenská a jedna civilní jednotka. V boji zblízka utrpí ztráty obě strany, střelci (dostřel 2) odvetu nedostanou. Pahorkatina a les dávají obránci +25 %, opevnění dalších +25 %. Kopiníci mají +50 % proti jízdě, obléhací stroje trojnásobný účinek proti městům a poloviční proti jednotkám. Jednotka, která se celý tah nehýbe, se léčí (nejrychleji ve městě). Opevnění (+25 % k obraně) platí hned, jen když jednotka v tahu neútočila a zbyl jí pohyb; jinak až od příštího tahu. Opevněná jednotka má na mapě štít. Útok zblízka stojí tolik pohybu jako vstup na pole cíle – jednotka s plným pohybem smí zaútočit vždy. Střelci na dvě pole nevidí přes les, pahorkatinu ani hory; z pahorkatiny se střílí přes les i přes jiné pahorky. Obléhací stroje nestřílejí v tahu, kdy se přesunuly. Po objevu Válečnictví pomáhá obklíčení: útok zblízka je o 10 % silnější za každou další vaši jednotku pro boj zblízka u cíle a obránce o 10 % za každou svou jednotku vedle sebe. Šermíři, sekerníci a zbrojnoši mají +25 % proti kopiníkům, jízda +25 % proti střelcům a strojům. Zraněná jednotka ztrácí nejvýš 35 % síly. Na území národa, se kterým válčíte, se jednotky léčí jen o 5 životů za tah. Spící jednotku probudí jen nepřítel, kterého vidíte do dvou polí.')}</p>
+      <p>${esc(`Město má 200 životů obránců; dobudete ho, když je útoky srazíte na nulu a vstoupíte do něj jednotkou pro boj zblízka. Stavby Hradby a Bašty přidají po 100 bodech hradeb, které berou rány místo obránců: od pěchoty jen 20 % škody (s beranidlem u města plnou), od střelců 50 %, od obléhacích strojů plnou. Co hradby nepoberou, projde na obránce. Dobyté město si hradby nechá tak pobořené, jak jsou, a obráncům zbude čtvrtina životů. Města střílejí na nepřátele do 2 polí – jednou za tah, cíl můžete vybrat v otevřeném městě kliknutím na jednotku v červeném rámu, jinak město vystřelí samo na nejslabší – a každý tah si opraví 10 životů. Obléhejte proto se stroji: beranidlo samo neútočí, ale pěchotě útočící na město, u kterého stojí, přidá +50 % síly a jednotkám hned u města +50 % obrany proti odvetě i střelbě z hradeb; katapult, balista a trebuchet mají proti městům trojnásobný účinek, proti jednotkám jen poloviční. Stojí-li hned u města aspoň ${SIEGE_UNITS} vaše bojové jednotky, je v obležení a neopravuje se.`)}</p>
       <h4>Více hráčů</h4><p>${esc('Při zakládání hry zvolte, kolik národů se utká (2–8) a kolik z nich vedou lidé u tohoto počítače. Každý si vybere národ a pak táhnete jeden po druhém; mezi tahy mapu zakryje opona a počítač si předáte. Po posledním z vás táhnou soupeři vedení počítačem a barbaři. Zprávy, mlhu i rady má každý své. Mezi sebou si můžete vyhlásit válku, nabídnout mír (druhý hráč odpoví, až bude na tahu) a poslat dar; vše ostatní si domluvíte u stolu.')}</p>
       <h4>Pokladna</h4><p>${esc('Každá vojenská jednotka nad volný limit (3 + 2 za město) stojí 1 zlato za tah, některé budovy také. Prázdná pokladna brzdí výzkum.')}</p>`, `<button class="btn" data-a="pedia" data-v="units">Encyklopedie</button><button class="btn" data-a="guide" data-v="0">Návod krok za krokem</button><button class="btn" data-a="close">Zavřít</button>`, '820px')
   }

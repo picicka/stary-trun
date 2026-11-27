@@ -5,7 +5,7 @@ import {
   TERRAIN, TRADITIONS, TRADITION_IDS, TUNE, UNITS, UNIT_IDS, XP_LEVELS, traditionCost,
   type BuildingId, type ImprovementId, type NationId, type ResourceId, type TechId, type TerrainId, type UnitDef, type UnitId,
 } from '../game/data.ts'
-import { BORDER_BASE, BORDER_STEP, POP_CAP, CONQUEST_TURNS, RAM_BONUS, RAM_COVER, SIEGE_UNITS, SIEGE_VS_CITY, SIEGE_VS_UNIT, UNITS_PER_SOURCE, WONDER_TURNS } from '../game/rules.ts'
+import { BORDER_BASE, BORDER_STEP, POP_CAP, WALL_HP, WALL_MELEE, WALL_RANGED, CONQUEST_TURNS, RAM_BONUS, RAM_COVER, SIEGE_UNITS, SIEGE_VS_CITY, SIEGE_VS_UNIT, UNITS_PER_SOURCE, WONDER_TURNS } from '../game/rules.ts'
 import { unitIconUrl } from '../view/nationArt.ts'
 import { esc, ic, tip, UI } from './hud.ts'
 
@@ -198,6 +198,7 @@ function rulesTab(): string {
       <li>${esc('Skóre: po posledním tahu vyhrává národ s nejvyšším skóre.')}</li></ul>
     <h4>Obléhání měst</h4><ul>
       <li>${esc(`Město má ${TUNE.cityHp} životů, jednou za tah střílí na nepřítele do 2 polí (cíl vyberete v otevřeném městě kliknutím, jinak střílí samo na nejslabšího) a každý tah si ${TUNE.cityHeal} životů opraví. Dobudete ho tak, že mu životy srazíte na nulu a vstoupíte jednotkou pro boj zblízka.`)}</li>
+      <li>${esc(`Stavby Hradby a Bašty přidají městu po ${WALL_HP} bodech hradeb. Dokud hradby stojí, berou rány místo obránců: od pěchoty jen ${Math.round(WALL_MELEE * 100)} % škody (s beranidlem u města plnou), od střelců ${Math.round(WALL_RANGED * 100)} %, od obléhacích strojů plnou. Co hradby nepoberou, projde na obránce. Hradby se opravují stejně jako obránci, ${TUNE.cityHeal} bodů za tah mimo obležení. Dobytému městu zůstanou hradby tak pobořené, jak jsou, a obráncům čtvrtina životů.`)}</li>
       <li>${buildingLink('walls')}: ${esc(walls.desc)} ${buildingLink('bastion')}: ${esc(bastion.desc)}</li>
       <li>${esc(`Obklíčení: stojí-li hned u města aspoň ${SIEGE_UNITS} nepřátelské vojenské jednotky, město se neopravuje.`)}</li>
       <li>${engines}${esc(`: proti městům mají ${num(SIEGE_VS_CITY)}násobný účinek, proti jednotkám jen ${num(SIEGE_VS_UNIT)}násobný. Potřebují doprovod.`)}</li>
@@ -207,10 +208,18 @@ function rulesTab(): string {
       <li>${esc('V boji zblízka utrpí ztráty obě strany, střelci odvetu nedostanou.')}</li>
       <li>${esc('Obránce má v pahorkatině a v lese +25 %, opevněný dalších +25 %. Útok zblízka přes řeku je o 20 % slabší.')}</li>
       <li>${esc('Jednotka, která se celý tah nehýbe, se léčí; nejrychleji ve městě.')}</li>
+      <li>${esc('Opevnění (+25 % k obraně) platí hned, jen když jednotka v tahu neútočila a zbyl jí pohyb; jinak až od příštího tahu.')}</li>
+      <li>${esc('Útok zblízka stojí tolik pohybu jako vstup na pole cíle; jednotka s plným pohybem smí zaútočit vždy.')}</li>
+      <li>${esc('Střelci na dvě pole nevidí přes les, pahorkatinu ani hory. Z pahorkatiny se střílí přes les i přes jiné pahorky, ne však přes zalesněnou pahorkatinu a hory. Jednotky s dostřelem 3 střílejí přes překážky.')}</li>
+      <li>${esc('Obléhací stroje nestřílejí v tahu, kdy se přesunuly.')}</li>
+      <li>${esc('Po objevu Válečnictví: útok zblízka +10 % za každou další vaši jednotku pro boj zblízka u cíle, obránce +10 % za každou svou jednotku vedle sebe.')}</li>
+      <li>${esc('Šermíři, sekerníci a zbrojnoši mají +25 % proti kopiníkům, jízda +25 % proti střelcům a strojům.')}</li>
+      <li>${esc('Zraněná jednotka ztrácí nejvýš 35 % síly.')}</li>
+      <li>${esc('Na území národa, se kterým válčíte, se jednotky léčí jen o 5 životů za tah.')}</li>
       <li>${esc('Šik a voj: dvě stejné jednotky vedle sebe se s Válečnictvím spojí v šik (+50 % síly), se Zbrojířstvím tři ve voj (+90 %). Životy se zprůměrují a zůstává jich nejvýš 100; žold a suroviny se platí za každou jednotku. Rozdělit jde jen na vlastním území.')}</li>
       <li>${esc('Plenění: bojová jednotka na poli nepřítele vyřadí vylepšení, napodruhé cestu, a získá zlato. Vypleněné pole nefunguje, dokud ho dělníci neopraví.')}</li></ul>
     <h4>Povýšení</h4>
-    <p>${esc(`Jednotky sbírají bojem zkušenosti. Při ${list(XP_LEVELS.map(String))} bodech si vyberou jedno povýšení:`)}</p>
+    <p>${esc(`Jednotky sbírají bojem zkušenosti. Při ${list(XP_LEVELS.map(String))} bodech si vyberou jedno povýšení. Výběr stojí 1 bod pohybu a vyléčí 25 životů:`)}</p>
     <table class="scores ptab">${PROMO_IDS.map(id => `<tr><td><b>${esc(PROMOS[id].name)}</b></td><td>${esc(PROMOS[id].desc)}</td></tr>`).join('')}</table>
     <h4>Tradice</h4>
     <p>${esc(`Kultura měst se sčítá do pokladnice národa a platí se jí za tradice, trvalé výhody pro celý národ. První stojí ${traditionCost(0)} kultury, druhá ${traditionCost(1)}, třetí ${traditionCost(2)} a každá další víc, takže všechny se za hru stihnout nedají. Tradice jsou ve čtyřech větvích a v každé se postupuje odshora; kdo větev dokončí, získá zlatý věk na ${GOLDEN_TURNS} tahů.`)}</p>

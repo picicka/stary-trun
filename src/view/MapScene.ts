@@ -17,7 +17,7 @@ export interface MapHost {
   onCameraMove(): void
 }
 
-interface UnitView { rank?: Phaser.GameObjects.Image; promo?: Phaser.GameObjects.Image; up?: Phaser.GameObjects.Image; extra?: Phaser.GameObjects.Image[]; c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
+interface UnitView { fort?: Phaser.GameObjects.Image; rank?: Phaser.GameObjects.Image; promo?: Phaser.GameObjects.Image; up?: Phaser.GameObjects.Image; extra?: Phaser.GameObjects.Image[]; c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
 
 const A = 'atlas'
 const D_FOG = 100000
@@ -639,6 +639,34 @@ export class MapScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Střela po balistické křivce: `n` střel vyletí krátce po sobě, stoupají do výšky `arc` × vzdálenost a natáčejí se po směru letu.
+   * Vrátí se, až dopadne první.
+   */
+  private lob(fx: number, fy: number, tx: number, ty: number, frame: string, n: number, dur: number, arc: number): Promise<void> {
+    const dist = Math.hypot(tx - fx, ty - fy)
+    const h = Math.max(6, dist * arc)
+    return new Promise(done => {
+      for (let k = 0; k < n; k++) {
+        const ox = k ? (Math.random() - 0.5) * 6 : 0, oy = k ? (Math.random() - 0.5) * 4 : 0
+        const pr = this.add.image(fx, fy, A, frame).setDepth(D_FOG - 4).setVisible(false)
+        let px = fx, py = fy
+        this.tweens.addCounter({
+          from: 0, to: 1, duration: dur, delay: k * 55, ease: 'Linear',
+          onStart: () => pr.setVisible(true),
+          onUpdate: tw => {
+            const p = tw.getValue() ?? 0
+            const x = fx + (tx + ox - fx) * p, y = fy + (ty + oy - fy) * p - 4 * h * p * (1 - p)
+            pr.setPosition(x, y)
+            if (x !== px || y !== py) pr.setRotation(Math.atan2(y - py, x - px))
+            px = x; py = y
+          },
+          onComplete: () => { pr.destroy(); if (k === 0) done() },
+        })
+      }
+    })
+  }
+
   private unitVisible(u: Unit): boolean {
     const s = this.host.state
     return u.owner === this.host.me || !!s.players[this.host.me].visible[idx(s, u.x, u.y)]
@@ -704,6 +732,13 @@ export class MapScene extends Phaser.Scene {
       v.up.setTint(upgradeBlock(s, u) ? 0x8f96aa : 0xffffff)
     }
     v.up?.setVisible(up)
+    // Opevněná jednotka má u nohou štít; šedý, dokud se teprve zakopává.
+    const fort = !civ && u.fortified
+    if (fort) {
+      if (!v.fort) { v.fort = this.add.image(10, 8, A, 'mk_fort'); v.c.add(v.fort) }
+      v.fort.setTint(u.fortWait ? 0x8f96aa : 0xffffff)
+    }
+    v.fort?.setVisible(fort)
   }
 
   syncUnits(): void {
@@ -930,10 +965,9 @@ export class MapScene extends Phaser.Scene {
           if (v) v.spr.setFlipX(tx < fx)
           if (ev.ranged) {
             sfx('shoot')
-            const pr = this.add.image(fx, fy - 4, A, ev.city ? 'fx_rock' : 'fx_arrow').setDepth(D_FOG - 4)
-            pr.setRotation(Math.atan2(ty - fy, tx - fx))
-            await this.tween({ targets: pr, x: tx, y: ty - 4, duration: 170 * sp })
-            pr.destroy()
+            // Stroj vrhá jeden kámen vysokým obloukem, střelci salvu šípů.
+            if (ev.siege) await this.lob(fx, fy - 4, tx, ty - 4, 'fx_rock', 1, 420 * sp, 0.5)
+            else await this.lob(fx, fy - 4, tx, ty - 4, 'fx_arrow', 3, 300 * sp, 0.3)
           } else if (v) {
             const ox = v.c.x, oy = v.c.y
             await this.tween({ targets: v.c, x: ox + (tx - fx) * 0.55, y: oy + (ty - fy) * 0.55, duration: 90 * sp, ease: 'Quad.easeIn' })
@@ -950,9 +984,7 @@ export class MapScene extends Phaser.Scene {
           const [fx, fy] = hexCenter(ev.from[0], ev.from[1])
           const [tx, ty] = hexCenter(ev.to[0], ev.to[1])
           sfx('shoot')
-          const pr = this.add.image(fx, fy - 10, A, 'fx_arrow').setDepth(D_FOG - 4).setRotation(Math.atan2(ty - fy + 6, tx - fx))
-          await this.tween({ targets: pr, x: tx, y: ty - 4, duration: 180 * sp })
-          pr.destroy()
+          await this.lob(fx, fy - 10, tx, ty - 4, 'fx_arrow', 3, 320 * sp, 0.3)
           this.fx('hit', 'fx_hit_0', tx, ty - 3)
           this.floater?.(tx, ty - 10, `−${ev.dmg}`, '#ff6b5e')
           await this.wait(160 * sp)

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createGame } from '../src/game/state.ts'
 import type { GameOver } from '../src/game/types.ts'
 import { BUILDINGS, BUILDING_IDS, ERAS, PERSONAS, PERSONA_IDS, TECHS, TECH_IDS, UNITS, UNIT_IDS, type TechId } from '../src/game/data.ts'
-import { SIEGE_VS_CITY, SIEGE_VS_UNIT, unitStrength, RAM_BONUS, SIEGE_UNITS, besieged, previewAttack, idx, WONDER_TURNS, checkVictory, wonderLeft, canBuildBuilding, citiesOf, cityMaxHp, cityStrength, cityYields, foundCity, makeUnit, techPath, unitsOf, upgradeTarget, availableTechs, grantTech, techCost } from '../src/game/rules.ts'
+import { SIEGE_VS_CITY, SIEGE_VS_UNIT, unitStrength, RAM_BONUS, SIEGE_UNITS, besieged, previewAttack, idx, WONDER_TURNS, checkVictory, wonderLeft, canBuildBuilding, citiesOf, cityMaxHp, wallMax, cityStrength, cityYields, foundCity, makeUnit, techPath, unitsOf, upgradeTarget, availableTechs, grantTech, techCost } from '../src/game/rules.ts'
 
 const game = () => {
   const s = createGame('aur', 'normal', 'valley', 7)
@@ -76,10 +76,11 @@ test('bašty vyžadují hradby a zesilují město', () => {
   assert.equal(canBuildBuilding(s, c, 'bastion'), false)
   c.buildings.push('walls')
   assert.equal(canBuildBuilding(s, c, 'bastion'), true)
-  const before = cityStrength(s, c), hp = cityMaxHp(c)
+  const before = cityStrength(s, c), hp = cityMaxHp(c), walls = wallMax(c)
   c.buildings.push('bastion')
   assert.ok(cityStrength(s, c) > before * 1.15, 'bašty přidávají obranu (posádka se nenásobí)')
-  assert.equal(cityMaxHp(c), hp + 40)
+  assert.equal(cityMaxHp(c), hp, 'životy obránců se nemění')
+  assert.equal(wallMax(c), walls + 100, 'bašty přidají 100 bodů hradeb')
 })
 
 test('banka přidává zlato', () => {

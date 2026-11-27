@@ -6,6 +6,7 @@ import {
 } from './data.ts'
 import { hexDist, neighborXY } from './hex.ts'
 import { rand } from './rng.ts'
+import { log } from './log.ts'
 import { barbId, type BuildItem, type City, type GameEvent, type GameState, type JobId, type Note, type Player, type Tile, type Unit } from './types.ts'
 
 // ---------------------------------------------------------------- události
@@ -587,7 +588,7 @@ export function reachable(s: GameState, u: Unit): number[] {
   return out
 }
 
-function clearOrders(u: Unit): void { u.fortified = false; u.sleep = false; u.work = null; u.workLeft = 0 }
+function clearOrders(u: Unit): void { u.fortified = false; delete u.fortWait; u.sleep = false; u.work = null; u.workLeft = 0 }
 /** Zruší cestu i frontu průjezdních bodů. */
 export function stopUnit(u: Unit): void { u.goto = null; u.way = []; u.todo = null; u.roadTo = null }
 
@@ -673,6 +674,7 @@ export function moveUnit(s: GameState, u: Unit, tx: number, ty: number): boolean
   u.moves = Math.max(0, u.moves - spent)
   const [fx, fy] = walked[lastStop]
   u.x = fx; u.y = fy
+  if (lastStop > 0) u.moved = true
   u.goto = fx === tx && fy === ty ? null : [tx, ty]
   emit({ e: 'move', unit: u.id, owner: u.owner, path: walked })
   arrive(s, u)
@@ -727,10 +729,12 @@ function arrive(s: GameState, u: Unit): void {
       for (const b of s.units) if (b.owner === barbId(s) && b.home === idx(s, u.x, u.y)) b.home = -1
       note(s, u.owner, 'Barbarský tábor vypálen! Kořist: 35 zlata.', 'good', u.x, u.y)
       emit({ e: 'sound', id: 'camp' })
+      s.mission.campsDestroyed++
+      // Vedlejší úkol si plní každý hráč sám: počítají se jen tábory, které vypálil on.
+      pl.camps = (pl.camps ?? 0) + 1
       if (pl.human) {
-        s.mission.campsDestroyed++
-        if (s.mission.campsDestroyed >= 2 && !s.mission.questCamps) {
-          s.mission.questCamps = true; s.mission.campsBy = pl.id
+        if (pl.camps >= 2 && !pl.questCamps) {
+          pl.questCamps = true
           pl.gold += 60
           note(s, pl.id, 'Vedlejší úkol splněn: kraj je bezpečnější. Odměna 60 zlata.', 'good')
         }
@@ -767,6 +771,7 @@ function cheapestTech(p: Player): TechId | null {
 
 export function grantTech(s: GameState, p: Player, t: TechId): void {
   if (p.techs.includes(t)) return
+  log(s, p.id, 'výzkum', () => `${TECHS[t].name} (technologií ${p.techs.length + 1})`)
   if (TECHS[t].repeat) {
     // Opakovatelná technologie se mezi objevené nepočítá; jen zvedá úroveň a zůstává v nabídce.
     p.empire = (p.empire ?? 0) + 1
@@ -868,13 +873,15 @@ export function traditionAdvice(p: Player): TraditionId | null {
     : ['stores', 'settlers', 'scribes', 'builders', 'craft', 'feasts', 'trade', 'chroniclers', 'merchants', 'stargazers', 'militia', 'sea', 'fishers', 'warrior', 'raiders', 'campaign']
   // Přijmout jde jen tradice, která je ve své větvi na řadě.
   const open = openTraditions(p)
-  return pref.find(x => open.includes(x)) ?? null
+  const own = PERSONAS[p.personality as PersonaId]?.traditions
+  return (own ? [...own, ...pref] : pref).find(x => open.includes(x)) ?? null
 }
 
 export function adoptTradition(s: GameState, p: Player, id: TraditionId): boolean {
   if (!traditionReady(p) || !openTraditions(p).includes(id)) return false
   p.culture -= traditionCost(p.traditions.length)
   p.traditions.push(id)
+  log(s, p.id, 'tradice', () => `${TRADITIONS[id].name} (${p.traditions.length}.)`)
   // Dokončená větev spustí zlatý věk (běžící se prodlouží).
   const b = TRADITIONS[id].branch
   if (branchDone(p, b)) {
@@ -886,12 +893,45 @@ export function adoptTradition(s: GameState, p: Player, id: TraditionId): boolea
 
 // ---------------------------------------------------------------- města
 
-export function cityMaxHp(c: City): number { return TUNE.cityHp + (c.buildings.includes('walls') ? 60 : 0) + (c.buildings.includes('bastion') ? 40 : 0) }
+/** Životy obránců města. Hradby jsou zvláštní vrstva navíc (viz `wallMax`). */
+export function cityMaxHp(_c: City): number { return TUNE.cityHp }
+/** Body hradeb za stavbu Hradby a za Bašty. */
+export const WALL_HP = 100
+/** Jaký díl běžné škody berou stojící hradby: od pěchoty, od střelců a od obléhacích strojů. S beranidlem u města má pěchota plnou. */
+export const WALL_MELEE = 0.2
+export const WALL_RANGED = 0.5
+export const WALL_SIEGE = 1
+/** Kolik životů obránců zůstane městu po dobytí (díl plného stavu). */
+export const CAPTURE_HP = 0.25
+export function wallMax(c: City): number { return (c.buildings.includes('walls') ? WALL_HP : 0) + (c.buildings.includes('bastion') ? WALL_HP : 0) }
+/** Obránci a hradby dohromady: kolik městu zbývá a kolik má v plném stavu. */
+export function cityTotal(c: City): number { return c.hp + cityWalls(c) }
+export function cityFull(c: City): number { return cityMaxHp(c) + wallMax(c) }
+/** Kolik bodů hradeb městu právě zbývá. */
+export function cityWalls(c: City): number { return Math.max(0, wallMax(c) - (c.wallDmg ?? 0)) }
+/** Díl škody, kterou hradbám způsobí daný útok. */
+export function wallFactor(ranged: boolean, siege: boolean, ram: boolean): number {
+  return ranged ? (siege ? WALL_SIEGE : WALL_RANGED) : ram ? 1 : WALL_MELEE
+}
+/**
+ * Rozdělí škodu `raw` mezi hradby a obránce: dokud hradby stojí, berou ránu ony (zmenšenou podle útočníka);
+ * co hradby nepoberou, projde na obránce.
+ */
+export function cityHit(c: City, raw: number, factor: number): { wall: number; hp: number } {
+  const w = cityWalls(c)
+  if (w <= 0) return { wall: 0, hp: raw }
+  const wd = Math.round(raw * factor)
+  if (wd <= w) return { wall: wd, hp: 0 }
+  return { wall: w, hp: Math.round(raw * (wd - w) / Math.max(1, wd)) }
+}
 
 export function cityStrength(s: GameState, c: City): number {
   let v = 7 + c.pop * 0.9 + s.players[c.owner].techs.length * 0.15
-  if (c.buildings.includes('walls')) v *= 1.4
-  if (c.buildings.includes('bastion')) v *= 1.25
+  // Hradby a bašty násobí obranu, jen dokud aspoň zčásti stojí.
+  if (cityWalls(c) > 0) {
+    if (c.buildings.includes('walls')) v *= 1.4
+    if (c.buildings.includes('bastion')) v *= 1.25
+  }
   if (s.players[c.owner].traditions.includes('militia')) v *= 1.25
   if (s.players[c.owner].nation === 'morv') v *= 1.25
   const g = militaryAt(s, c.x, c.y)
@@ -928,6 +968,7 @@ export function foundCity(s: GameState, u: Unit): City | null {
   const t = s.tiles[idx(s, u.x, u.y)]
   t.forest = false; t.imp = null; t.owner = u.owner; t.city = c.id
   s.cities.push(c)
+  log(s, u.owner, 'město', () => `založeno ${c.name} na ${c.x},${c.y} (měst ${citiesOf(s, u.owner).length})`)
   s.units.splice(s.units.indexOf(u), 1)
   claimTiles(s, c)
   assignWorkers(s, c)
@@ -935,8 +976,8 @@ export function foundCity(s: GameState, u: Unit): City | null {
   emit({ e: 'found', city: c.id, x: c.x, y: c.y })
   if (p.human) {
     note(s, p.id, `Založili jste město ${c.name}.`, 'good', c.x, c.y)
-    if (!s.mission.questCities && citiesOf(s, p.id).length >= 3) {
-      s.mission.questCities = true; s.mission.citiesBy = p.id
+    if (!p.questCities && citiesOf(s, p.id).length >= 3) {
+      p.questCities = true
       p.gold += 60
       note(s, p.id, 'Vedlejší úkol splněn: tři města pod vaší vládou. Odměna 60 zlata.', 'good')
       emit({ e: 'sound', id: 'quest' })
@@ -1154,8 +1195,6 @@ function completeBuild(s: GameState, c: City): boolean {
     c.prod -= itemCost(it, s.players[c.owner])
     c.build = nextQueued(s, c)
     note(s, c.owner, `${c.name}: dokončena stavba ${BUILDINGS[it.id].name}.`, 'good', c.x, c.y)
-    if (it.id === 'walls') c.hp = Math.min(cityMaxHp(c), c.hp + 60)
-    if (it.id === 'bastion') c.hp = Math.min(cityMaxHp(c), c.hp + 40)
     if (it.id === 'wonder') {
       s.mission.wonderBy = c.owner
       s.mission.wonderSince = s.turn
@@ -1211,7 +1250,10 @@ function processCity(s: GameState, c: City): void {
     p.gold += Math.floor(y.prod / 2)
   }
   // Opravy a střelba z hradeb.
-  if (!besieged(s, c)) c.hp = Math.min(cityMaxHp(c), c.hp + TUNE.cityHeal)
+  if (!besieged(s, c)) {
+    c.hp = Math.min(cityMaxHp(c), c.hp + TUNE.cityHeal)
+    if (c.wallDmg) c.wallDmg = Math.max(0, c.wallDmg - TUNE.cityHeal)
+  }
   // Kdo si cíl nevybral sám, za toho město vystřelí na konci tahu.
   if (!c.fired) cityShoot(s, c)
   delete c.fired
@@ -1491,7 +1533,7 @@ export function roadStep(s: GameState, u: Unit): void {
 
 // ---------------------------------------------------------------- boj
 
-export interface StrengthCtx { defending?: boolean; ranged?: boolean; vs?: Unit | null; vsCity?: boolean; river?: boolean; /** U města stojí vlastní beranidlo. */ ram?: boolean }
+export interface StrengthCtx { defending?: boolean; ranged?: boolean; vs?: Unit | null; vsCity?: boolean; river?: boolean; /** U města stojí vlastní beranidlo. */ ram?: boolean ; /** Obklíčení nebo podpora (díl síly navíc). */ bonus?: number }
 
 /** Kolikrát beranidlo násobí sílu pěchoty při útoku na město. */
 export const RAM_BONUS = 1.5
@@ -1520,9 +1562,20 @@ export function besieged(s: GameState, c: City): boolean {
   return false
 }
 
+/** O kolik zranění sráží sílu: jednotka na pokraji sil bojuje na 65 %. */
+export const HURT_MIN = 0.65
+function hurt(u: Unit): number { return HURT_MIN + (1 - HURT_MIN) * u.hp / 100 }
+/** Opevnění: bonus k obraně. */
+export const FORTIFY = 0.25
+/** Obklíčení a podpora: bonus za každou další vlastní jednotku u cíle, resp. vedle obránce. Odemyká je Válečnictví. */
+export const FLANK = 0.1
+export const FLANK_TECH: TechId = 'tactics'
+/** Protiváhy: těžká pěchota proti kopiníkům, jízda proti střelcům a strojům. */
+export const COUNTER = 0.25
+
 export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): number {
   const d = UNITS[u.type]
-  if (isEmbarked(s, u)) return (s.players[u.owner].nation === 'thal' ? 8 : 4) * (0.5 + 0.5 * u.hp / 100)
+  if (isEmbarked(s, u)) return (s.players[u.owner].nation === 'thal' ? 8 : 4) * hurt(u)
   let base = ctx.ranged && d.ranged ? d.ranged : d.str
   let m = 1
   if (u.vet) m += 0.15
@@ -1533,7 +1586,8 @@ export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): numb
   if (ctx.defending) {
     m += TERRAIN[t.t].defense
     if (t.forest) m += nation === 'sylv' ? 0.5 : 0.25
-    if (u.fortified) m += 0.25
+    // Opevnění platí, až když se jednotka opravdu zakopala (viz rozkaz Opevnit).
+    if (u.fortified && !u.fortWait) m += FORTIFY
     // Chrámová stráž brání domov.
     if (u.type === 'templar' && t.owner === u.owner) m += 0.25
     // Spojení hoplíté jsou pověstná odolná falanga.
@@ -1545,13 +1599,16 @@ export function unitStrength(s: GameState, u: Unit, ctx: StrengthCtx = {}): numb
   // Útok zblízka přes řeku je těžší.
   if (ctx.river) m -= 0.2
   if (d.antiMounted && ctx.vs && UNITS[ctx.vs.type].mounted) m += 0.5
+  if (d.antiSpear && ctx.vs && UNITS[ctx.vs.type].antiMounted) m += COUNTER
+  if (d.mounted && !d.ranged && ctx.vs && UNITS[ctx.vs.type].ranged) m += COUNTER
+  if (ctx.bonus) m += ctx.bonus
   if (ctx.vsCity && ctx.ranged) m *= d.siege ? SIEGE_VS_CITY : 0.7
   // Stroje jsou stavěné na hradby; do pohyblivých jednotek se trefují špatně.
   if (!ctx.vsCity && ctx.ranged && d.siege && !ctx.defending) m *= SIEGE_VS_UNIT
   if (ctx.vsCity && d.mounted && !ctx.ranged) m *= 0.75
   if (ctx.vsCity && ctx.ram && !ctx.ranged) m *= RAM_BONUS
   if (base <= 0) base = 1
-  return base * m * formation * (0.5 + 0.5 * u.hp / 100)
+  return base * m * formation * hurt(u)
 }
 
 function damageExpected(a: number, d: number): number {
@@ -1561,7 +1618,7 @@ function damage(s: GameState, a: number, d: number): number {
   return Math.round(damageExpected(a, d) * (0.85 + rand(s) * 0.3))
 }
 
-export interface AttackPreview { ranged: boolean; city: City | null; target: Unit | null; dmgDef: number; dmgAtt: number; defHp: number; attHp: number; needWar: number; river: boolean }
+export interface AttackPreview { ranged: boolean; city: City | null; target: Unit | null; /** Kolik jednotek útočníkovi pomáhá obklíčením a kolik obránce podporuje. */ flank?: number; support?: number; dmgDef: number; /** Útok na město: kolik z rány vezmou hradby (`dmgDef` je pak škoda obráncům). */ dmgWall?: number; dmgAtt: number; defHp: number; attHp: number; needWar: number; river: boolean }
 
 /**
  * Stojí na sousedním poli civilní jednotka národa, se kterým je mír, a `u` by ji po vyhlášení války zajala?
@@ -1575,6 +1632,67 @@ export function captureNeedsWar(s: GameState, u: Unit, x: number, y: number): nu
   if (!o || atWar(s, u.owner, o.owner)) return -1
   return o.owner
 }
+
+/** Kolik dalších vlastních jednotek pro boj zblízka stojí u cíle (útočníka nepočítaje). Bez Válečnictví 0. */
+export function flankCount(s: GameState, u: Unit, t: Unit): number {
+  if (!hasTech(s.players[u.owner], FLANK_TECH)) return 0
+  return s.units.filter(o => o !== u && o.owner === u.owner && !isCivilian(o) && !UNITS[o.type].ranged && !UNITS[o.type].ram && !isEmbarked(s, o) && isNaval(o) === isNaval(u) && hexDist(o.x, o.y, t.x, t.y) === 1).length
+}
+/** Kolik vlastních bojových jednotek stojí vedle obránce. Bez Válečnictví 0. */
+export function supportCount(s: GameState, t: Unit): number {
+  if (t.owner === barbId(s) || !hasTech(s.players[t.owner], FLANK_TECH)) return 0
+  return s.units.filter(o => o !== t && o.owner === t.owner && !isCivilian(o) && !isEmbarked(s, o) && hexDist(o.x, o.y, t.x, t.y) === 1).length
+}
+
+/** Terén, přes který se nedá střílet: 0 rovina, 1 les nebo pahorkatina, 2 zalesněná pahorkatina a hory. */
+function sightLevel(t: Tile): number {
+  if (t.t === 'mountain') return 2
+  const hill = t.t === 'hills'
+  return hill && t.forest ? 2 : hill || t.forest ? 1 : 0
+}
+/**
+ * Vidí střelec z pole `a` na pole `b`? Na sousední pole vždy. Na dvě pole překáží les, pahorkatina a hory mezi nimi;
+ * střelec na pahorkatině střílí přes les i přes jiné pahorky, ne však přes zalesněnou pahorkatinu a hory.
+ * Vede-li spojnice mezi dvěma poli, stačí jedno volné.
+ */
+export function lineOfSight(s: GameState, ax: number, ay: number, bx: number, by: number): boolean {
+  if (hexDist(ax, ay, bx, by) <= 1) return true
+  const from = s.tiles[idx(s, ax, ay)]
+  const eye = from.t === 'hills' ? 1 : 0
+  const mid = neighbors(s, ax, ay).filter(([x, y]) => hexDist(x, y, bx, by) === 1)
+  return mid.some(([x, y]) => sightLevel(s.tiles[idx(s, x, y)]) <= eye && sightLevel(s.tiles[idx(s, x, y)]) < 2)
+}
+
+/** Proč jednotka na pole nemůže zaútočit, ač tam stojí nepřítel na dosah – hláška pro hráče, nebo null. */
+export function attackBlock(s: GameState, u: Unit, x: number, y: number): string | null {
+  const d = UNITS[u.type]
+  if (d.civilian || d.ram || isEmbarked(s, u)) return null
+  const city = cityAt(s, x, y), target = militaryAt(s, x, y)
+  if (!(city && city.owner !== u.owner) && !(target && target.owner !== u.owner)) return null
+  const dist = hexDist(u.x, u.y, x, y)
+  if (dist === 0 || dist > (d.ranged ? d.range! : 1)) return null
+  if (u.attacked) return 'Jednotka už v tomto tahu útočila.'
+  if (u.moves <= 0) return 'Jednotka už nemá pohyb.'
+  if (d.ranged) {
+    if (d.siege && u.moved) return 'Obléhací stroj se v tomto tahu přesouval – střílet může až v příštím.'
+    if (d.range! < 3 && !lineOfSight(s, u.x, u.y, x, y)) return 'Ve výhledu překáží les, pahorkatina nebo hory. Střílet jde ze sousedního pole, nebo z pahorkatiny.'
+    return null
+  }
+  if (!!d.naval !== isWater(s.tiles[idx(s, x, y)])) return null
+  if (!canCharge(s, u, x, y)) return `Jednotka nemá dost pohybu na útok: vstup na to pole stojí ${meleeCost(s, u, x, y)}, zbývá jí ${Math.round(u.moves * 10) / 10}.`
+  return null
+}
+
+/** Kolik pohybu stojí útok zblízka: tolik jako vstup na pole cíle. */
+export function meleeCost(s: GameState, u: Unit, x: number, y: number): number {
+  return moveCost(s, u, idx(s, u.x, u.y), idx(s, x, y))
+}
+/** Má jednotka na útok zblízka dost pohybu? Jednotka s plným pohybem smí zaútočit vždy. */
+export function canCharge(s: GameState, u: Unit, x: number, y: number): boolean {
+  return u.moves >= maxMoves(s, u) || u.moves >= meleeCost(s, u, x, y)
+}
+
+const lname = (s: GameState, pid: number): string => (pid === barbId(s) ? 'Barbaři' : `${NATIONS[s.players[pid].nation].name}#${pid}`)
 
 /** Lze zaútočit na pole? Vrací náhled (očekávané ztráty), nebo null. */
 export function previewAttack(s: GameState, u: Unit, x: number, y: number): AttackPreview | null {
@@ -1591,17 +1709,23 @@ export function previewAttack(s: GameState, u: Unit, x: number, y: number): Atta
   const foe = city && city.owner !== u.owner ? city.owner : target && target.owner !== u.owner ? target.owner : -1
   if (foe < 0) return null
   if (ranged && !s.players[u.owner].visible[idx(s, x, y)]) return null
+  // Stroje po přesunu nestřílejí; střelcům na dvě pole nesmí nic stát ve výhledu; útok zblízka stojí pohyb jako vstup na pole.
+  if (ranged && d.siege && u.moved) return null
+  if (ranged && d.range! < 3 && !lineOfSight(s, u.x, u.y, x, y)) return null
+  if (!ranged && !canCharge(s, u, x, y)) return null
   const needWar = atWar(s, u.owner, foe) ? -1 : foe
   const river = !ranged && riverBetween(s, idx(s, u.x, u.y), idx(s, x, y))
   if (city && city.owner !== u.owner) {
     const a = unitStrength(s, u, { ranged, vsCity: true, river, ram: !ranged && ramAt(s, city, u.owner) })
     const cs = cityStrength(s, city)
-    return { ranged, city, target: null, dmgDef: Math.round(damageExpected(a, cs)), dmgAtt: ranged ? 0 : Math.round(damageExpected(cs, unitStrength(s, u, {}) * ramCover(s, u, city))), defHp: city.hp, attHp: u.hp, needWar, river }
+    const hit = cityHit(city, Math.round(damageExpected(a, cs)), wallFactor(ranged, !!d.siege, !ranged && ramAt(s, city, u.owner)))
+    return { ranged, city, target: null, dmgDef: hit.hp, dmgWall: hit.wall, dmgAtt: ranged ? 0 : Math.round(damageExpected(cs, unitStrength(s, u, {}) * ramCover(s, u, city))), defHp: city.hp, attHp: u.hp, needWar, river }
   }
   if (!target) return null
-  const a = unitStrength(s, u, { ranged, vs: target, river })
-  const ds = unitStrength(s, target, { defending: true, vs: u })
-  return { ranged, city: null, target, dmgDef: Math.round(damageExpected(a, ds)), dmgAtt: ranged ? 0 : Math.round(damageExpected(ds, a)), defHp: target.hp, attHp: u.hp, needWar, river }
+  const flank = ranged ? 0 : flankCount(s, u, target), support = ranged ? 0 : supportCount(s, target)
+  const a = unitStrength(s, u, { ranged, vs: target, river, bonus: FLANK * flank })
+  const ds = unitStrength(s, target, { defending: true, vs: u, bonus: FLANK * support })
+  return { flank, support, ranged, city: null, target, dmgDef: Math.round(damageExpected(a, ds)), dmgAtt: ranged ? 0 : Math.round(damageExpected(ds, a)), defHp: target.hp, attHp: u.hp, needWar, river }
 }
 
 export function killUnit(s: GameState, u: Unit): void {
@@ -1624,10 +1748,15 @@ export function attack(s: GameState, u: Unit, x: number, y: number): boolean {
     const cs = cityStrength(s, c)
     let dmgDef = damage(s, a, cs)
     const dmgAtt = pv.ranged ? 0 : damage(s, cs, unitStrength(s, u, {}) * ramCover(s, u, c))
-    if (pv.ranged) dmgDef = Math.min(dmgDef, Math.max(0, c.hp - 1))
-    c.hp -= dmgDef
+    const hit = cityHit(c, dmgDef, wallFactor(pv.ranged, !!d.siege, !pv.ranged && ramAt(s, c, u.owner)))
+    // Střelba město nedorazí: poslední ránu musí dát jednotka zblízka.
+    if (pv.ranged) hit.hp = Math.min(hit.hp, Math.max(0, c.hp - 1))
+    if (hit.wall) c.wallDmg = (c.wallDmg ?? 0) + hit.wall
+    c.hp -= hit.hp
+    dmgDef = hit.wall + hit.hp
     u.hp -= dmgAtt
-    emit({ e: 'attack', unit: u.id, owner: u.owner, from, to: [x, y], ranged: pv.ranged, dmgDef, dmgAtt, city: true })
+    emit({ e: 'attack', unit: u.id, owner: u.owner, from, to: [x, y], ranged: pv.ranged, dmgDef, dmgAtt, city: true, siege: !!d.siege })
+    log(s, u.owner, 'boj', () => `${UNITS[u.type].name}${unitSize(u) > 1 ? ` ×${unitSize(u)}` : ''} (síla ${Math.round(a * 10) / 10}) → město ${c.name} (${lname(s, c.owner)}, obrana ${Math.round(cs * 10) / 10}): hradby −${hit.wall}, obránci −${hit.hp}; zbývá ${Math.max(0, c.hp)} + ${cityWalls(c)}; útočník −${dmgAtt}${u.hp <= 0 ? ' (padl)' : ''}`)
     gainXp(s, u, pv.ranged ? 2 : 4)
     if (u.hp <= 0) {
       note(s, u.owner, `${UNITS[u.type].name} padl při útoku na ${c.name}.`, 'bad', x, y)
@@ -1640,13 +1769,14 @@ export function attack(s: GameState, u: Unit, x: number, y: number): boolean {
     return true
   }
   const t = pv.target!
-  const a = unitStrength(s, u, { ranged: pv.ranged, vs: t, river: pv.river })
-  const ds = unitStrength(s, t, { defending: true, vs: u })
+  const a = unitStrength(s, u, { ranged: pv.ranged, vs: t, river: pv.river, bonus: FLANK * (pv.flank ?? 0) })
+  const ds = unitStrength(s, t, { defending: true, vs: u, bonus: FLANK * (pv.support ?? 0) })
   const dmgDef = damage(s, a, ds)
   const dmgAtt = pv.ranged ? 0 : damage(s, ds, a)
   t.hp -= dmgDef
   u.hp -= dmgAtt
-  emit({ e: 'attack', unit: u.id, owner: u.owner, from, to: [x, y], ranged: pv.ranged, dmgDef, dmgAtt, city: false })
+  emit({ e: 'attack', unit: u.id, owner: u.owner, from, to: [x, y], ranged: pv.ranged, dmgDef, dmgAtt, city: false, siege: !!d.siege })
+  log(s, u.owner, 'boj', () => `${UNITS[u.type].name}${unitSize(u) > 1 ? ` ×${unitSize(u)}` : ''} (síla ${Math.round(a * 10) / 10}) → ${UNITS[t.type].name} (${lname(s, t.owner)}, síla ${Math.round(ds * 10) / 10}${t.fortified && !t.fortWait ? ', opevněn' : ''})${pv.ranged ? ' střelbou' : ''}: obránce −${dmgDef}${t.hp <= 0 ? ' (zničen)' : `, zbývá ${t.hp}`}; útočník −${dmgAtt}${u.hp <= 0 ? ' (padl)' : ''}${pv.flank ? `; obklíčení ${pv.flank}` : ''}${pv.support ? `; podpora ${pv.support}` : ''}`)
   const an = NATIONS[s.players[u.owner].nation].name, tn = NATIONS[s.players[t.owner].nation].name
   // Oba nemohou padnout zároveň: přežije ten, kdo dopadl lépe.
   if (t.hp <= 0 && u.hp <= 0) { if (t.hp < u.hp) u.hp = 1; else t.hp = 1 }
@@ -1690,6 +1820,10 @@ function gainXp(s: GameState, u: Unit, n: number): void {
   const pref: PromoId[] = UNITS[u.type].ranged ? ['drill', 'march', 'guard', 'medic'] : PERSONAS[p.personality as PersonaId]?.martial ? ['drill', 'guard', 'medic', 'march'] : ['guard', 'drill', 'medic', 'march']
   while (pendingPromos(u) > 0) promoteUnit(s, u, pref.find(x => !u.promos.includes(x))!)
 }
+
+/** Kolik pohybu stojí hráče výběr povýšení. */
+export const PROMO_COST = 1
+export const PROMO_NO_MOVES = 'Povýšení stojí bod pohybu a jednotka už v tomto tahu žádný nemá.'
 
 export function promoteUnit(_s: GameState, u: Unit, id: PromoId): boolean {
   if (pendingPromos(u) <= 0 || u.promos.includes(id)) return false
@@ -1742,12 +1876,14 @@ function noteOnce(s: GameState, pid: number, text: string, kind: Note['kind'], x
 
 function captureCity(s: GameState, c: City, by: Unit): void {
   const old = c.owner
+  log(s, by.owner, 'město', () => `dobyto ${c.name} (${lname(s, old)}), obyvatel ${c.pop}${c.capital ? ', hlavní město' : ''}; dobyla jednotka ${UNITS[by.type].name}`)
   const oldP = s.players[old], newP = s.players[by.owner]
   // Posádka i civilisté ve městě padnou.
   for (const o of unitsAt(s, c.x, c.y)) if (o.owner === old) killUnit(s, o)
   if (by.owner === barbId(s)) {
     // Barbaři města nedrží – vyplení je.
     c.hp = Math.floor(cityMaxHp(c) / 2)
+    c.wallDmg = wallMax(c)
     c.pop = Math.max(1, c.pop - 1)
     const loot = Math.min(oldP.gold, 40)
     oldP.gold -= loot
@@ -1757,9 +1893,10 @@ function captureCity(s: GameState, c: City, by: Unit): void {
   }
   c.owner = by.owner
   if (!TUNE.softCapture) c.pop = Math.max(1, c.pop - 1)
-  c.hp = Math.floor(cityMaxHp(c) * (TUNE.softCapture ? 0.75 : 0.5))
+  // Obráncům zbude čtvrtina; hradby a bašty zůstávají stát tak pobořené, jak je útok nechal.
+  c.hp = Math.floor(cityMaxHp(c) * (TUNE.softCapture ? 0.5 : CAPTURE_HP))
   c.build = null; c.queue = []; c.prod = 0; c.food = 0
-  c.buildings = c.buildings.filter(b => b !== 'walls' && b !== 'bastion')
+  delete c.seen
   if (c.capital) {
     c.capital = false
     const next = citiesOf(s, old).sort((a, b) => b.pop - a.pop)[0]
@@ -1811,6 +1948,8 @@ function checkElimination(s: GameState, pid: number): void {
 export function declareWar(s: GameState, a: number, b: number): void {
   if (a === b || atWar(s, a, b)) return
   const pa = s.players[a], pb = s.players[b]
+  log(s, a, 'válka', () => `vyhlášena národu ${lname(s, b)}`)
+  log(s, b, 'válka', () => `vyhlásil ji národ ${lname(s, a)}`)
   pa.war.push(b); pb.war.push(a)
   pa.lastWarTurn = s.turn; pb.lastWarTurn = s.turn
   s.offers = s.offers.filter(o => !(o.from === a && o.to === b) && !(o.from === b && o.to === a))
@@ -1826,6 +1965,8 @@ export function declareWar(s: GameState, a: number, b: number): void {
 
 export function makePeace(s: GameState, a: number, b: number): void {
   const pa = s.players[a], pb = s.players[b]
+  log(s, a, 'mír', () => `uzavřen s národem ${lname(s, b)}`)
+  log(s, b, 'mír', () => `uzavřen s národem ${lname(s, a)} (na jeho návrh)`)
   pa.war = pa.war.filter(w => w !== b); pb.war = pb.war.filter(w => w !== a)
   pa.peaceUntil[b] = s.turn + 12; pb.peaceUntil[a] = s.turn + 12
   s.offers = s.offers.filter(o => !(o.kind !== 'ally' && ((o.from === a && o.to === b) || (o.from === b && o.to === a))))
@@ -1940,7 +2081,7 @@ export function score(s: GameState, pid: number): number {
   for (const c of citiesOf(s, pid)) v += 12 + c.pop * 4 + c.buildings.length * 3 + (c.buildings.includes('wonder') ? 60 : 0)
   for (const t of s.tiles) if (t.owner === pid) v += 0.5
   const m = s.mission
-  v += (m.questCamps && (m.campsBy ?? 0) === pid ? 20 : 0) + (m.questCities && (m.citiesBy ?? 0) === pid ? 20 : 0) + (m.questRuins && m.ruinsBy === pid ? 25 : 0)
+  v += (p.questCamps ? 20 : 0) + (p.questCities ? 20 : 0) + (m.questRuins && m.ruinsBy === pid ? 25 : 0)
   return Math.round(v)
 }
 
@@ -2040,13 +2181,23 @@ export function unitMaxMoves(u: Unit): number { return UNITS[u.type].move }
 
 /** Začátek tahu hráče: obnova pohybu, pokračování v cestě. */
 export function beginTurn(s: GameState, pid: number): void {
-  for (const u of unitsOf(s, pid)) { u.moves = maxMoves(s, u); u.attacked = false; u.skip = false }
+  for (const u of unitsOf(s, pid)) { u.moves = maxMoves(s, u); u.attacked = false; u.skip = false; delete u.moved; delete u.fortWait }
+  // Co města ztratila, zatímco táhli ostatní.
+  for (const c of citiesOf(s, pid)) {
+    const lost = (c.seen ?? 0) - cityTotal(c)
+    if (lost > 0 && s.players[pid].human) {
+      const w = cityWalls(c), wm = wallMax(c)
+      note(s, pid, `${c.name} bylo napadeno a ztratilo ${lost} bodů obrany. Obránci ${c.hp} / ${cityMaxHp(c)}${wm ? `, hradby ${w} / ${wm}` : ''}.`, 'bad', c.x, c.y)
+    }
+    delete c.seen
+  }
   updateLinks(s)
   updateVisibility(s, pid)
   if (s.players[pid].human) {
     for (const u of unitsOf(s, pid)) {
       // Spící jednotku probudí nepřítel na dohled.
-      if (u.sleep && enemyNear(s, u, 2)) u.sleep = false
+      // Budí jen nepřítel, kterého hráč opravdu vidí – a hráč se dozví proč.
+      if (u.sleep && enemySeen(s, u, 2)) { u.sleep = false; note(s, pid, `${UNITS[u.type].name} se probudil: nepřítel je na dohled.`, 'info', u.x, u.y) }
       if (!u.goto || u.escort !== undefined) continue
       // Nepřítel na dohled cestu přeruší, ať hráč rozhodne sám.
       if (enemyNear(s, u, 2)) { stopUnit(u); continue }
@@ -2061,6 +2212,15 @@ export function enemyNear(s: GameState, u: Unit, r: number): boolean {
   return s.units.some(o => o.owner !== u.owner && !isCivilian(o) && atWar(s, u.owner, o.owner) && hexDist(u.x, u.y, o.x, o.y) <= r)
 }
 
+/** Léčení za tah na území národa, se kterým jednotka válčí. */
+export const HEAL_ENEMY = 5
+
+/** Stojí do `r` polí od jednotky nepřátelská bojová jednotka, kterou její majitel vidí? */
+export function enemySeen(s: GameState, u: Unit, r: number): boolean {
+  const vis = s.players[u.owner].visible
+  return s.units.some(o => o.owner !== u.owner && !isCivilian(o) && atWar(s, u.owner, o.owner) && hexDist(u.x, u.y, o.x, o.y) <= r && !!vis[idx(s, o.x, o.y)])
+}
+
 /** Konec tahu hráče: léčení, práce dělníků, města, výzkum, pokladna. */
 export function endPlayerTurn(s: GameState, pid: number): void {
   const p = s.players[pid]
@@ -2070,7 +2230,7 @@ export function endPlayerTurn(s: GameState, pid: number): void {
     if (rested && u.hp < 100) {
       const t = s.tiles[idx(s, u.x, u.y)]
       const inCity = !!cityAt(s, u.x, u.y)
-      u.hp = Math.min(100, u.hp + (inCity ? 25 : t.owner === pid ? 15 : 10) + (u.promos.includes('medic') ? 10 : 0) + (t.owner !== pid && p.traditions.includes('campaign') ? 10 : 0))
+      u.hp = Math.min(100, u.hp + (inCity ? 25 : t.owner === pid ? 15 : t.owner >= 0 && t.owner !== barbId(s) && atWar(s, pid, t.owner) ? HEAL_ENEMY : 10) + (u.promos.includes('medic') ? 10 : 0) + (t.owner !== pid && p.traditions.includes('campaign') ? 10 : 0))
     }
     if (u.work) {
       const t = s.tiles[idx(s, u.x, u.y)]
@@ -2079,6 +2239,8 @@ export function endPlayerTurn(s: GameState, pid: number): void {
       if (u.workLeft <= 0) { const job = u.work; u.work = null; finishWork(s, u, job) }
     }
   }
+  for (const c of citiesOf(s, pid)) c.seen = cityTotal(c)
+  if (s.turn % 10 === 0 && pid !== barbId(s)) log(s, pid, 'stav', () => { const cs = citiesOf(s, pid), mil = unitsOf(s, pid).filter(u => !isCivilian(u)); return `měst ${cs.length}, obyvatel ${cs.reduce((n, c) => n + c.pop, 0)}, vojsko ${headcount(mil)} (strojů ${mil.filter(u => UNITS[u.type].siege).length}), zlato ${p.gold}, technologií ${p.techs.length}, tradic ${p.traditions.length}, skóre ${score(s, pid)}${p.war.filter(w => w !== barbId(s)).length ? `, válčí s: ${p.war.filter(w => w !== barbId(s)).map(w => lname(s, w)).join(', ')}` : ''}` })
   if (pid === barbId(s)) return
   // Obchodní smlouvy: vyprší časem, nebo když prodávající o surovinu přijde.
   s.deals = s.deals.filter(d => {
