@@ -439,3 +439,9 @@ table.keys kbd { margin-left: 0; font-size: 18px; padding: 1px 7px; }
 .citylabel .hpb.wall i { background: #c9ced9; }
 .citylabel .hpb.two { bottom: -13px; }
 .bar.wall i { background: #c9ced9; }
+.note.act { border-left-color: var(--gold); background: #2a2410f2; }
+.note.act .ic { margin-right: 6px; vertical-align: -3px; }
+.volrow { display: flex; align-items: center; gap: 12px; margin: 8px 0; font-size: 21px; }
+.volrow span { width: 70px; }
+.volrow input[type=range] { flex: 1; accent-color: var(--gold); height: 22px; }
+.volrow .btn { min-width: 130px; }

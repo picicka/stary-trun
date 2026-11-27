@@ -18,7 +18,7 @@ import { actors, canAct, hasSave, START_TECH } from '../game/state.ts'
 import { CHAT_MAX, cleanCode } from '../net/session.ts'
 import { tipKey } from '../game/commands.ts'
 import { barbId, type BuildItem, type City, type CityFocus, type Note, type Unit } from '../game/types.ts'
-import { isMusicOn, isMuted, setMusic, setMuted, sfx } from '../audio.ts'
+import { isMusicOn, isMuted, musicVolume, nowPlaying, setMusic, setMusicMood, setMusicVolume, setMuted, setSfxVolume, sfx, sfxVolume } from '../audio.ts'
 import type { App } from '../app.ts'
 import { cityIconUrl, unitIconUrl } from '../view/nationArt.ts'
 import { pediaHtml, PEDIA_TABS, techArtUrl, type PediaTab } from './pedia.ts'
@@ -118,6 +118,8 @@ export class Hud {
     this.root.addEventListener('click', e => this.onClick(e))
     this.root.addEventListener('input', e => { const el = e.target as HTMLInputElement; if (el.id === 'seed') this.pickSeed = el.value.replace(/\D/g, '').slice(0, 6)
       else if (el.id === 'netname') this.app.playerName = el.value
+      else if (el.id === 'vol-music') { setMusicVolume(Number(el.value) / 100); if (!isMusicOn()) setMusic(true) }
+      else if (el.id === 'vol-sfx') setSfxVolume(Number(el.value) / 100)
       else if (el.id === 'netcode') { this.netCode = cleanCode(el.value); if (el.value !== this.netCode) el.value = this.netCode }
     })
     this.root.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.target as HTMLElement).id === 'netcode') { sfx('click'); void this.app.joinGame(this.netCode) } })
@@ -241,8 +243,9 @@ export class Hud {
       case 'advise': if (app.city) app.advise(app.city); break
       case 'focus': if (app.city) app.focusCity(app.city, (arg || null) as CityFocus | null); break
       case 'border': if (app.city) app.borderMode(app.city, arg as 'auto' | 'manual'); break
-      case 'mute': setMuted(!isMuted()); this.render(); break
-      case 'music': setMusic(!isMusicOn()); sfx('click'); this.render(); break
+      case 'mute': setMuted(!isMuted()); this.render(); if (this.modalKind === 'sound') this.showSound(); break
+      case 'music': setMusic(!isMusicOn()); sfx('click'); this.render(); if (this.modalKind === 'sound') this.showSound(); break
+      case 'sound': sfx('click'); this.showSound(); break
       case 'zoom': app.scene.zoomBy(Number(arg)); break
       case 'menu': this.confirm('Odejít do hlavního menu?', !app.net ? 'Hra je průběžně ukládána, můžete v ní později pokračovat.' : app.net.role === 'host' ? 'Hru po síti tím přerušíte všem. Zůstane uložená: až zvolíte Pokračovat, místnost se otevře znovu a spoluhráči se vrátí stejným kódem.' : 'Ze hry odejdete. Dokud ji hostitel má otevřenou, můžete se z hlavního menu vrátit na své místo.', 'Odejít', () => app.quitToMenu()); break
       case 'tip-ok': this.tipOpen = false; sfx('click'); this.app.tipRead(arg); break
@@ -322,7 +325,18 @@ export class Hud {
 
   // ------------------------------------------------------------ menu
 
+  /** Okno se zvukem: hlasitost hudby a zvuků, vypnutí hudby, ztlumení všeho a název hrané skladby. */
+  showSound(): void {
+    const track = nowPlaying()
+    this.open('sound', `${ic('sound')}Zvuk a hudba`, `
+      <div class="volrow"><span>Hudba</span><input id="vol-music" type="range" min="0" max="100" step="5" value="${Math.round(musicVolume() * 100)}"><button class="btn small" data-a="music">${isMusicOn() ? 'Vypnout' : 'Zapnout'}</button></div>
+      <div class="volrow"><span>Zvuky</span><input id="vol-sfx" type="range" min="0" max="100" step="5" value="${Math.round(sfxVolume() * 100)}"><button class="btn small" data-a="mute">${isMuted() ? 'Zapnout vše' : 'Ztlumit vše'}</button></div>
+      <p class="sub">${esc(!isMusicOn() || isMuted() ? 'Hudba je vypnutá.' : track ? `Právě hraje: ${track}.` : 'Mezi skladbami je chvíle ticha.')}</p>
+      <p class="sub">${esc('Hudba se mění podle hry: jiná v míru a ve válce, jiná v každém věku. Mezi skladbami je krátká pauza.')}</p>`, undefined, '440px')
+  }
+
   showTitle(): void {
+    setMusicMood('menu')
     this.setGameUi(false)
     this.modal.classList.add('hidden')
     this.menu.className = ''
@@ -588,8 +602,7 @@ export class Hud {
       <button class="tbtn" data-a="help" data-tip="Nápověda (H)">${ic('help', 's')}</button>
       <button class="tbtn" data-a="zoom" data-v="-1" data-tip="Oddálit (−)">−</button>
       <button class="tbtn" data-a="zoom" data-v="1" data-tip="Přiblížit (+)">+</button>
-      <button class="tbtn" data-a="music" data-tip="Hudba">${isMusicOn() ? '♪' : '<s>♪</s>'}</button>
-      <button class="tbtn" data-a="mute" data-tip="Zvuk">${ic(isMuted() ? 'mute' : 'sound', 's')}</button>
+      <button class="tbtn" data-a="sound"${tip('Zvuk a hudba|Hlasitost hudby a zvuků, vypnutí hudby a ztlumení.')}>${ic(isMuted() ? 'mute' : 'sound', 's')}${isMusicOn() && !isMuted() ? '♪' : ''}</button>
       <button class="tbtn" data-a="menu"${tip('Hlavní menu|Hra se ukládá sama, můžete v ní později pokračovat.')}>Menu</button>`
   }
 
@@ -634,8 +647,12 @@ export class Hud {
 
   private renderNotes(): void {
     const all = this.s.notes
-    const fresh = all.map((n, i) => ({ n, i })).filter(o => o.n.pid === this.my && !this.read.has(o.n)).slice(-7)
-    this.notes.innerHTML = fresh.map(o => `<div class="note ${o.n.kind}" data-a="note" data-v="${o.i}"${o.n.x !== undefined ? tip('Kliknutím ukážete místo na mapě.') : ''}>${esc(o.n.text)}</div>`).join('')
+    // Zprávy čekající na rozhodnutí se nevytlačí: zbylá místa (do sedmi) dostanou nejnovější ostatní.
+    const unread = all.map((n, i) => ({ n, i })).filter(o => o.n.pid === this.my && !this.read.has(o.n))
+    const acts = unread.filter(o => o.n.act).slice(-5)
+    const rest = unread.filter(o => !o.n.act).slice(-Math.max(2, 7 - acts.length))
+    const fresh = [...acts, ...rest].sort((a, b) => a.i - b.i)
+    this.notes.innerHTML = fresh.map(o => `<div class="note ${o.n.kind}${o.n.act ? ' act' : ''}" data-a="note" data-v="${o.i}"${tip(`${o.n.act ? 'Čeká na vaše rozhodnutí. ' : ''}${o.n.x !== undefined ? 'Kliknutím ukážete místo na mapě.' : ''}`.trim() || 'Zpráva')}>${o.n.act ? ic('warn', 's') : ''}${esc(o.n.text)}</div>`).join('')
   }
 
   toast(text: string): void {

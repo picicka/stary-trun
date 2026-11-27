@@ -14,7 +14,7 @@ import { logClear, logEntries, logging, logOn, logRestore, logText, type LogEntr
 import { cleanCode, ClientSession, HostSession, roomCode, type Lobby, type NetEvents, type NetGame, type SavedSeat, type Session } from './net/session.ts'
 import { localTransport, NetError, peerTransport, type Transport } from './net/transport.ts'
 import type { BuildItem, City, CityFocus, GameState, JobId, Unit } from './game/types.ts'
-import { sfx, unlockAudio } from './audio.ts'
+import { setMusicMood, sfx, unlockAudio } from './audio.ts'
 import { Hud } from './ui/hud.ts'
 import type { MapHost, MapScene } from './view/MapScene.ts'
 import type { CursorKind } from './view/cursor.ts'
@@ -596,6 +596,9 @@ export class App implements MapHost {
 
   refresh(): void {
     if (!this.inGame) return
+    // Hudba podle hry: válka s jiným národem, jinak mír podle věku.
+    const me = this.player
+    if (me) setMusicMood(me.war.some(w => w !== this.state.players.length - 1) ? 'war' : 'peace', me.era)
     this.computeSelection()
     this.hud.render()
     this.scene.setCursor(this.intent(...this.scene.lastHover))

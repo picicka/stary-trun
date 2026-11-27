@@ -839,23 +839,36 @@ export function autoUnits(s: GameState, pid = 0): void {
   followAll(s, pid)
 }
 
-/** Pošle jednotku k nejbližší hranici poznaného světa; false = není kam. */
+/**
+ * Pošle jednotku k nejbližší hranici poznaného světa; false = není kam.
+ * Pěší průzkumník zkoumá nejdřív pevninu, na kterou dojde (i přes vodu, zná-li cestu). Když na souši nic nezbývá
+ * a národ umí plout, nalodí se a zkoumá po moři, dokud nenarazí na další břeh.
+ */
 function explore(s: GameState, p: Player, u: Unit): boolean {
   if (u.hp < 50) return true
   stopUnit(u)
   const naval = isNaval(u)
-  const pm = pathMap(s, u)
-  let best = -1, bv = Infinity
-  for (let i = 0; i < s.tiles.length; i++) {
-    if (pm.dist[i] === Infinity || !pm.stop[i] || p.explored[i] === 0) continue
-    const x = i % s.W, y = (i / s.W) | 0
-    // Hranice poznaného světa: sousedí s neprozkoumaným polem.
-    if (!neighbors(s, x, y).some(n => !p.explored[idx(s, n[0], n[1])])) continue
-    if (threatNear(s, p.id, x, y, 2) > 0) continue
-    // Pěší průzkumníci se sami nenaloďují.
-    if (!naval && isWater(s.tiles[i])) continue
-    const v = pm.dist[i] + ((i * 7 + u.id) % 5) * 0.3
-    if (v < bv) { bv = v; best = i }
+  const pick = (water: boolean): number => {
+    const pm = pathMap(s, u)
+    let best = -1, bv = Infinity
+    for (let i = 0; i < s.tiles.length; i++) {
+      if (pm.dist[i] === Infinity || !pm.stop[i] || p.explored[i] === 0) continue
+      const x = i % s.W, y = (i / s.W) | 0
+      // Hranice poznaného světa: sousedí s neprozkoumaným polem.
+      if (!neighbors(s, x, y).some(n => !p.explored[idx(s, n[0], n[1])])) continue
+      if (threatNear(s, p.id, x, y, 2) > 0) continue
+      if (!naval && !water && isWater(s.tiles[i])) continue
+      const v = pm.dist[i] + ((i * 7 + u.id) % 5) * 0.3
+      if (v < bv) { bv = v; best = i }
+    }
+    return best
+  }
+  let best = pick(naval)
+  if (best < 0 && !naval && hasTech(p, 'sailing')) {
+    // Na souši není co zkoumat: po moři dál. Jednotky počítače se jinak samy nenaloďují.
+    if (!p.human) u.sea = true
+    best = pick(true)
+    if (best < 0 && !p.human && !isWater(s.tiles[idx(s, u.x, u.y)])) u.sea = false
   }
   if (best >= 0) { moveUnit(s, u, best % s.W, (best / s.W) | 0); u.goto = null; return true }
   u.fortified = true

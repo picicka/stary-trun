@@ -27,6 +27,17 @@ export function note(s: GameState, pid: number, text: string, kind: Note['kind']
   for (let i = 0; n > 60 && i < s.notes.length; i++) if (s.notes[i].pid === pid) { s.notes.splice(i--, 1); n-- }
 }
 
+/**
+ * Zpráva, která čeká na hráčovo rozhodnutí: ve výpisu má výstražný trojúhelník.
+ * Stejná zpráva se neopakuje častěji než jednou za `every` tahů.
+ */
+export function noteAct(s: GameState, pid: number, text: string, x?: number, y?: number, every = 1, kind: Note['kind'] = 'info'): void {
+  if (s.notes.some(n => n.pid === pid && n.text === text && s.turn - n.turn < every)) return
+  note(s, pid, text, kind, x, y)
+  const n = s.notes[s.notes.length - 1]
+  if (n && n.pid === pid && n.text === text) n.act = true
+}
+
 /** Zpráva všem lidským hráčům. `own` přepíše text pro jednotlivé hráče (null = tomuto hráči nic), `only` omezí příjemce. */
 export function noteAll(s: GameState, text: string | null, kind: Note['kind'] = 'info', x?: number, y?: number, own: Record<number, string | null> = {}, only?: (p: Player) => boolean): void {
   for (const h of humans(s)) {
@@ -141,16 +152,19 @@ export function resourceCap(s: GameState, pid: number, r: ResourceId): number {
   return Math.max(0, n) * UNITS_PER_SOURCE
 }
 
-/** Kolik kapacity už je zabrané: existující jednotky a rozestavěné v ostatních městech (město `exceptCity` se nepočítá). */
-export function resourceUsed(s: GameState, pid: number, r: ResourceId, exceptCity = -1): number {
+/** Kolik kapacity už je zabrané: existující jednotky a všechny, které má hráč ve výrobě nebo ve frontě kteréhokoli města. */
+export function resourceUsed(s: GameState, pid: number, r: ResourceId): number {
   let n = 0
   for (const u of s.units) if (u.owner === pid && UNITS[u.type].needs === r) n += unitSize(u)
-  for (const c of s.cities) if (c.owner === pid && c.id !== exceptCity && c.build?.kind === 'unit' && UNITS[c.build.id].needs === r) n++
+  for (const c of s.cities) {
+    if (c.owner !== pid) continue
+    for (const it of [c.build, ...c.queue]) if (it?.kind === 'unit' && UNITS[it.id].needs === r) n++
+  }
   return n
 }
 
-export function resourceFree(s: GameState, pid: number, r: ResourceId, exceptCity = -1): number {
-  return resourceCap(s, pid, r) - resourceUsed(s, pid, r, exceptCity)
+export function resourceFree(s: GameState, pid: number, r: ResourceId): number {
+  return resourceCap(s, pid, r) - resourceUsed(s, pid, r)
 }
 
 /** Má hráč k surovině vůbec nějaký přístup (vlastní zdroj nebo koupi)? */
@@ -357,7 +371,7 @@ export function growBorders(s: GameState, c: City): void {
     if (c.culture < cost) return
     const i = borderTarget(s, c)
     if (i < 0) {
-      if (c.border === 'manual' && s.players[c.owner].human && borderOptions(s, c).length) noteOnce(s, c.owner, `${c.name} má dost kultury na další pole. Otevřete město a vyberte, které zabrat.`, 'info', c.x, c.y)
+      if (c.border === 'manual' && s.players[c.owner].human && borderOptions(s, c).length) noteAct(s, c.owner, `${c.name} má dost kultury na další pole. Otevřete město a vyberte, které zabrat.`, c.x, c.y)
       return
     }
     c.culture -= cost
@@ -691,7 +705,7 @@ function doTodo(s: GameState, u: Unit): void {
   u.todo = null
   if (job === 'found') {
     // Osadníci došli na vybrané místo a usadí se.
-    if (!foundCity(s, u)) note(s, u.owner, 'Osadníci dorazili, ale město tu už založit nejde. Vyberte jim jiné místo.', 'bad', u.x, u.y)
+    if (!foundCity(s, u)) noteAct(s, u.owner, 'Osadníci dorazili, ale město tu už založit nejde. Vyberte jim jiné místo.', u.x, u.y, 1, 'bad')
     return
   }
   if (!startWork(s, u, job)) note(s, u.owner, 'Dělníci dorazili, ale naplánovanou práci už tu provést nejde.', 'info', u.x, u.y)
@@ -995,14 +1009,18 @@ export function itemCost(it: BuildItem, p?: Player): number {
 }
 export function itemName(it: BuildItem): string { return it.kind === 'unit' ? UNITS[it.id].name : BUILDINGS[it.id].name }
 
-export function canBuildUnit(s: GameState, c: City, id: UnitId): boolean {
+/**
+ * Může město jednotku stavět? `held` = položka už ve výrobě či frontě je, takže si surovinu drží sama
+ * (ptáme se, jestli smí pokračovat); jinak jde o novou položku a surovina na ni musí být volná.
+ */
+export function canBuildUnit(s: GameState, c: City, id: UnitId, held = false): boolean {
   const d = UNITS[id]
   const p = s.players[c.owner]
   if (d.nation && d.nation !== p.nation) return false
   // Běžná jednotka, kterou národ nahrazuje unikátní, není dostupná.
   if (UNIT_IDS.some(o => UNITS[o].replaces === id && UNITS[o].nation === p.nation)) return false
   if (d.tech && !hasTech(p, d.tech)) return false
-  if (d.needs && resourceFree(s, c.owner, d.needs, c.id) <= 0) return false
+  if (d.needs && resourceFree(s, c.owner, d.needs) < (held ? 0 : 1)) return false
   if (id === 'settler' && c.pop < 2) return false
   if (d.naval && !isCoastal(s, c.x, c.y)) return false
   return true
@@ -1037,7 +1055,7 @@ export function unitBlockReason(s: GameState, c: City, id: UnitId): string | nul
   const p = s.players[c.owner]
   if (d.tech && !hasTech(p, d.tech)) return `Vyžaduje technologii ${TECHS[d.tech].name}`
   if (d.needs && !hasResource(s, c.owner, d.needs)) return `Vyžaduje surovinu ${RESOURCES[d.needs].name} (s vylepšením ve vašem území)`
-  if (d.needs && resourceFree(s, c.owner, d.needs, c.id) <= 0) return `Zdroje suroviny ${RESOURCES[d.needs].name.toLowerCase()} jsou vytížené (${resourceUsed(s, c.owner, d.needs, c.id)} / ${resourceCap(s, c.owner, d.needs)} jednotek). Každý zdroj uživí ${UNITS_PER_SOURCE} jednotky – získejte další ložisko`
+  if (d.needs && resourceFree(s, c.owner, d.needs) <= 0) return `Zdroje suroviny ${RESOURCES[d.needs].name.toLowerCase()} jsou vytížené (${resourceUsed(s, c.owner, d.needs)} / ${resourceCap(s, c.owner, d.needs)} jednotek včetně rozestavěných a zařazených ve frontě). Každý zdroj uživí ${UNITS_PER_SOURCE} jednotky – získejte další ložisko`
   if (id === 'settler' && c.pop < 2) return 'Město musí mít alespoň 2 obyvatele'
   if (d.naval && !isCoastal(s, c.x, c.y)) return 'Lodě lze stavět jen v pobřežním městě'
   return null
@@ -1050,8 +1068,8 @@ export function setBuild(_s: GameState, c: City, it: BuildItem | null): void {
 export const sameItem = (a: BuildItem | null, b: BuildItem | null): boolean => !!a && !!b && a.kind === b.kind && a.id === b.id
 export const QUEUE_MAX = 8
 
-function stillValid(s: GameState, c: City, it: BuildItem): boolean {
-  return it.kind === 'unit' ? canBuildUnit(s, c, it.id) || it.id === 'settler' : canBuildBuilding(s, c, it.id)
+function stillValid(s: GameState, c: City, it: BuildItem, held = false): boolean {
+  return it.kind === 'unit' ? canBuildUnit(s, c, it.id, held) || it.id === 'settler' : canBuildBuilding(s, c, it.id)
 }
 
 /** Zařadí položku do výroby: na konec fronty, nebo (front) hned na řadu. Vrací důvod odmítnutí, nebo null. */
@@ -1222,14 +1240,15 @@ function processCity(s: GameState, c: City): void {
   if (c.food >= need && c.pop >= popCap(c)) {
     // Město narazilo na strop: zásoby zůstanou plné a čeká se na akvadukt či kanalizaci.
     c.food = need
-    if (p.human) noteOnce(s, c.owner, `${c.name} dál neporoste: s ${c.pop} obyvateli potřebuje ${c.buildings.includes('aqueduct') ? 'kanalizaci' : 'akvadukt'}.`, 'info', c.x, c.y)
+    // Připomíná se jednou za pět tahů, dokud stavba chybí.
+    if (p.human) noteAct(s, c.owner, `${c.name} dál neporoste: s ${c.pop} obyvateli potřebuje ${c.buildings.includes('aqueduct') ? 'kanalizaci' : 'akvadukt'}.`, c.x, c.y, 5)
   } else if (c.food >= need) {
     c.pop += 1
     c.food = c.buildings.includes('aqueduct') ? Math.floor(need * 0.4) : 0
     assignWorkers(s, c)
     if (c.pop % 3 === 0) note(s, c.owner, `${c.name} roste – už má ${c.pop} obyvatel.`, 'info', c.x, c.y)
   } else if (c.food < 0) {
-    if (c.pop > 1) { c.pop -= 1; note(s, c.owner, `${c.name} hladoví, obyvatel ubylo.`, 'bad', c.x, c.y); assignWorkers(s, c) }
+    if (c.pop > 1) { c.pop -= 1; noteAct(s, c.owner, `${c.name} hladoví, obyvatel ubylo.`, c.x, c.y, 1, 'bad'); assignWorkers(s, c) }
     c.food = 0
   }
   // Kultura a hranice.
@@ -1238,7 +1257,15 @@ function processCity(s: GameState, c: City): void {
   // Výroba.
   if (c.build) {
     // Položka mohla mezitím přestat být dostupná (div dokončil někdo jiný).
-    if (!stillValid(s, c, c.build)) c.build = nextQueued(s, c)
+    if (!stillValid(s, c, c.build, true)) {
+      // Hráč se dozví, že výroba skončila a proč (třeba vypleněný důl nebo konec obchodu se surovinou).
+      const it = c.build
+      if (s.players[c.owner].human && it.kind === 'unit') {
+        const d = UNITS[it.id]
+        noteAct(s, c.owner, `${c.name}: výroba jednotky ${d.name} se zastavila${d.needs ? ` – chybí ${RESOURCES[d.needs].name.toLowerCase()}` : ''}. Rozpracovaná výroba přejde na další položku.`, c.x, c.y, 1, 'bad')
+      }
+      c.build = nextQueued(s, c)
+    }
   }
   if (c.build) {
     // Loděnice staví lodě o polovinu rychleji.
@@ -1815,7 +1842,7 @@ function gainXp(s: GameState, u: Unit, n: number): void {
   u.xp += n
   if (pendingPromos(u) <= before) return
   const p = s.players[u.owner]
-  if (p.human) { note(s, p.id, `${UNITS[u.type].name} získal zkušenosti a čeká na povýšení.`, 'good', u.x, u.y); return }
+  if (p.human) { noteAct(s, p.id, `${UNITS[u.type].name} získal zkušenosti a čeká na povýšení.`, u.x, u.y, 1, 'good'); return }
   // Soupeři a barbaři volí sami.
   const pref: PromoId[] = UNITS[u.type].ranged ? ['drill', 'march', 'guard', 'medic'] : PERSONAS[p.personality as PersonaId]?.martial ? ['drill', 'guard', 'medic', 'march'] : ['guard', 'drill', 'medic', 'march']
   while (pendingPromos(u) > 0) promoteUnit(s, u, pref.find(x => !u.promos.includes(x))!)
@@ -2259,7 +2286,7 @@ export function endPlayerTurn(s: GameState, pid: number): void {
   for (const c of citiesOf(s, pid)) { processCity(s, c); p.culture += cityYields(s, c).culture }
   if (!p.human) {
     while (traditionReady(p)) adoptTradition(s, p, traditionAdvice(p)!)
-  } else if (traditionReady(p)) noteOnce(s, pid, 'Nastřádali jste dost kultury na novou tradici.', 'good')
+  } else if (traditionReady(p)) noteAct(s, pid, 'Nastřádali jste dost kultury na novou tradici.', undefined, undefined, 1, 'good')
   const inc = playerIncome(s, pid)
   p.gold += inc.gold
   let sci = inc.sci
@@ -2267,7 +2294,7 @@ export function endPlayerTurn(s: GameState, pid: number): void {
     // Prázdná pokladna brzdí vědu.
     sci = Math.max(0, sci + p.gold)
     p.gold = 0
-    noteOnce(s, pid, 'Pokladna je prázdná! Schodek brzdí výzkum – stavte tržiště nebo rozpusťte část vojska.', 'bad')
+    noteAct(s, pid, 'Pokladna je prázdná! Schodek brzdí výzkum – stavte tržiště nebo rozpusťte část vojska.', undefined, undefined, 1, 'bad')
   }
   if (p.research) {
     p.progress += sci

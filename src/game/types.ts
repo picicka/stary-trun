@@ -160,7 +160,7 @@ export interface Player {
 export interface Deal { seller: number; buyer: number; res: ResourceId; gpt: number; until: number }
 
 /** Zpráva pro hráče `pid`. */
-export interface Note { pid: number; turn: number; text: string; kind: 'info' | 'good' | 'bad' | 'war'; x?: number; y?: number }
+export interface Note { pid: number; turn: number; text: string; kind: 'info' | 'good' | 'bad' | 'war'; x?: number; y?: number; /** Zpráva čeká na hráčovo rozhodnutí (ve výpisu má výstražný trojúhelník). */ act?: boolean }
 
 export interface Mission {
   ruinsBy: number

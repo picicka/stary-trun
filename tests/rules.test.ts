@@ -730,3 +730,55 @@ test('zajetí dělníků národa, se kterým je mír, jde jen s vědomým vyhlá
   assert.equal(atWar(s, 0, foe), true)
   assert.equal(worker.owner, 0, 'dělníci jsou zajati')
 })
+
+test('automatický průzkum: zvěd po prozkoumání ostrova pokračuje po moři', async () => {
+  const { autoUnits } = await import('../src/game/ai.ts')
+  const R = await import('../src/game/rules.ts')
+  const s = createGame('thal', 'normal', 'islands', 3)
+  const p = s.players[0]
+  assert.ok(p.techs.includes('sailing'))
+  const scout = unitsOf(s, 0).find(u => u.type === 'scout')!
+  // Celá pevnina, na kterou zvěd dojde suchou nohou, je už prozkoumaná.
+  const seen = new Set([idx(s, scout.x, scout.y)]), todo = [[scout.x, scout.y]]
+  while (todo.length) { const [x, y] = todo.pop()!; for (const [a, b] of R.neighbors(s, x, y)) { const i = idx(s, a, b); if (!seen.has(i) && !R.isWater(s.tiles[i]) && s.tiles[i].t !== 'mountain') { seen.add(i); todo.push([a, b]) } } }
+  for (const i of seen) { p.explored[i] = 1; for (const [a, b] of R.neighbors(s, i % s.W, (i / s.W) | 0)) p.explored[idx(s, a, b)] = 1 }
+  const before = p.explored.filter(Boolean).length
+  scout.auto = true
+  let sailed = false
+  for (let k = 0; k < 12; k++) {
+    scout.moves = R.maxMoves(s, scout)
+    autoUnits(s, 0); R.drainEvents()
+    R.updateVisibility(s, 0)
+    if (R.isWater(s.tiles[idx(s, scout.x, scout.y)])) sailed = true
+  }
+  assert.ok(sailed, 'zvěd se nalodil')
+  assert.equal(scout.auto, true, 'průzkum neskončil')
+  assert.ok(p.explored.filter(Boolean).length > before + 10, 'odkrývá další mapu')
+})
+
+test('surovina se rezervuje i pro jednotky ve frontě; když dojde, výroba se zastaví se zprávou', async () => {
+  const R = await import('../src/game/rules.ts')
+  const s = createGame('aur', 'normal')
+  const c = foundCity(s, unitsOf(s, 0).find(u => u.type === 'settler')!)!
+  const p = s.players[0]
+  p.techs.push('mining', 'bronze', 'iron')
+  // Jedno ložisko železa s dolem na území města.
+  const i = s.tiles.findIndex((t, k) => t.city === c.id && k !== idx(s, c.x, c.y) && !R.isWater(t) && t.t !== 'mountain')
+  s.tiles[i].res = 'iron'; s.tiles[i].imp = 'mine'; s.tiles[i].t = 'hills'; s.tiles[i].forest = false
+  const cap = R.resourceCap(s, 0, 'iron')
+  assert.equal(cap, R.UNITS_PER_SOURCE)
+  c.build = null; c.queue = []
+  // Do fronty jde jen tolik šermířů, kolik ložisko uživí – dřív šlo zařadit libovolný počet.
+  for (let k = 0; k < cap; k++) assert.equal(R.enqueue(s, c, { kind: 'unit', id: 'swordsman' }), null, `šermíř ${k + 1}`)
+  assert.equal(R.resourceFree(s, 0, 'iron'), 0)
+  assert.notEqual(R.enqueue(s, c, { kind: 'unit', id: 'swordsman' }), null, 'další už ne')
+  assert.equal(R.canBuildUnit(s, c, 'swordsman'), false)
+  assert.match(R.unitBlockReason(s, c, 'swordsman') ?? '', /vytížené/)
+  assert.equal(R.canBuildUnit(s, c, 'swordsman', true), true, 'rozestavěný šermíř pokračuje')
+  // Důl je vypleněn: rozestavěná jednotka se zastaví a hráč se to dozví.
+  s.tiles[i].ruin = true
+  s.notes = []
+  R.endPlayerTurn(s, 0)
+  assert.ok(s.notes.some(n => n.pid === 0 && n.act && n.text.includes('zastavila') && n.text.includes('železo')), JSON.stringify(s.notes.map(n => n.text)))
+  assert.notEqual(JSON.stringify(c.build), JSON.stringify({ kind: 'unit', id: 'swordsman' }))
+})
