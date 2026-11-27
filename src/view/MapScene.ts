@@ -3,7 +3,7 @@ import Phaser from 'phaser'
 import { NATIONS, TERRAIN, UNITS } from '../game/data.ts'
 import { ROW_H, TILE_W, hexCenter, hexDist, neighborXY, pixelToHex } from '../game/hex.ts'
 import { atWar, hasRoad, idx, inMap, isCivilian, resourceVisible, isEmbarked, pendingPromos, upgradeBlock, upgradeTarget } from '../game/rules.ts'
-import type { GameEvent, GameState, Unit } from '../game/types.ts'
+import { barbId, type GameEvent, type GameState, type Unit } from '../game/types.ts'
 import { sfx } from '../audio.ts'
 import { addNationFrames } from './nationArt.ts'
 import { cursorCss, type CursorKind } from './cursor.ts'
@@ -17,10 +17,22 @@ export interface MapHost {
   onCameraMove(): void
 }
 
-interface UnitView { fort?: Phaser.GameObjects.Image; rank?: Phaser.GameObjects.Image; promo?: Phaser.GameObjects.Image; up?: Phaser.GameObjects.Image; extra?: Phaser.GameObjects.Image[]; c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
+interface UnitView { foe?: Phaser.GameObjects.Ellipse; fort?: Phaser.GameObjects.Image; rank?: Phaser.GameObjects.Image; promo?: Phaser.GameObjects.Image; up?: Phaser.GameObjects.Image; extra?: Phaser.GameObjects.Image[]; c: Phaser.GameObjects.Container; spr: Phaser.GameObjects.Image; bar: Phaser.GameObjects.Rectangle; barBg: Phaser.GameObjects.Rectangle; key: string; work?: Phaser.Tweens.Tween; tool?: Phaser.GameObjects.Image; job?: string }
 
 const A = 'atlas'
 const D_FOG = 100000
+
+/**
+ * Barva hranice na vodě: národ, jehož barva s mořem splývá (modrá, tyrkysová), tam má hranici výrazně zesvětlenou.
+ */
+function seaBorder(col: number): number {
+  const rgb = (c: number) => [(c >> 16) & 255, (c >> 8) & 255, c & 255]
+  const [r, g, b] = rgb(col)
+  const near = [0x3d7bd0, 0x4cc0cc, 0x2c5fb4].some(w => { const [wr, wg, wb] = rgb(w); return Math.hypot(r - wr, g - wg, b - wb) < 80 })
+  if (!near) return col
+  const up = (v: number) => Math.round(v + (255 - v) * 0.72)
+  return (up(r) << 16) | (up(g) << 8) | up(b)
+}
 
 export class MapScene extends Phaser.Scene {
   host!: MapHost
@@ -47,6 +59,8 @@ export class MapScene extends Phaser.Scene {
   /** Zvěř na polích se surovinou: `home` = výchozí poloha, `busy` = do kterého kroku oživení se nerozhoduje znovu. */
   private deer = new Map<number, { img: Phaser.GameObjects.Image; home: number; busy: number }>()
   /** Hory, nad kterými právě sněží, a kolik kroků ještě bude. */
+  private wheat = new Map<number, { img: Phaser.GameObjects.Image; on: boolean }>()
+  private fish = new Map<number, { img: Phaser.GameObjects.Image; water: Phaser.GameObjects.Image; busy: number }>()
   private snowing = new Map<number, number>()
   private snowAt = 30
   private ambientAcc = 0
@@ -254,7 +268,7 @@ export class MapScene extends Phaser.Scene {
     this.borders = []
     this.borderSig = ''
     this.units.clear()
-    this.swaying.clear(); this.deer.clear(); this.snowing.clear()
+    this.swaying.clear(); this.deer.clear(); this.fish.clear(); this.wheat.clear(); this.snowing.clear()
     this.placeClouds()
     this.selRing.setVisible(false)
     this.cameras.main.setZoom(this.defaultZoom())
@@ -315,6 +329,8 @@ export class MapScene extends Phaser.Scene {
     for (const o of this.tileDyn[i]) o.destroy()
     this.swaying.delete(i)
     this.deer.delete(i)
+    this.fish.delete(i)
+    this.wheat.delete(i)
     const objs: Phaser.GameObjects.GameObject[] = []
     const d = y * 10
     const tall = (frame: string, dd = 3) => { const img = this.add.image(px, py - 16, A, frame).setOrigin(0, 0).setDepth(d + dd); objs.push(img); return img }
@@ -325,7 +341,7 @@ export class MapScene extends Phaser.Scene {
       for (let dir = 0; dir < 6; dir++) if (roads & (1 << dir)) objs.push(this.add.image(px, py, A, `road_${dir}`).setOrigin(0, 0).setDepth(d + 1.5))
     }
     if (city) {
-      tall(`city_${size}_${s.players[city.owner].nation}`, 4)
+      tall(`city_${size}_${city.state ? 'free' : s.players[city.owner].nation}`, 4)
     } else {
       // Vypleněné vylepšení je ztmavlé a kouří se z něj.
       const ruined = (img: Phaser.GameObjects.Image) => { if (t.ruin) img.setTint(0x6a5a55) }
@@ -335,6 +351,15 @@ export class MapScene extends Phaser.Scene {
         // Jelen je samostatný obrázek: pase se a přechází (viz ambient).
         const img = this.add.image(px + 9.5, py + 19, A, 'an_deer').setDepth(d + 4).setFlipX((x * 7 + y * 3) % 2 === 0)
         objs.push(img); this.deer.set(i, { img, home: px + 9.5, busy: 0 })
+      } else if (res === 'fish') {
+        // Ryba je samostatný obrázek nad čeřící se hladinou: občas vyskočí (viz ambient).
+        const water = this.add.image(px + 9.5, py + 19, A, 'an_ripple').setDepth(d + 4)
+        const img = this.add.image(px + 9.5, py + 19, A, 'an_fish').setDepth(d + 4)
+        objs.push(water, img); this.fish.set(i, { img, water, busy: 0 })
+      } else if (res === 'wheat') {
+        // Klasy se v poryvech větru naklánějí (viz ambient).
+        const img = this.add.image(px, py, A, 'r_wheat').setOrigin(0, 0).setDepth(d + 4)
+        objs.push(img); this.wheat.set(i, { img, on: false })
       } else if (res) objs.push(this.add.image(px, py, A, `r_${res}`).setOrigin(0, 0).setDepth(d + 4))
       if (t.imp && t.imp !== 'farm') ruined(tall(`i_${t.imp}`, 4))
       if (t.imp && t.ruin) tall('i_ruin', 4.5)
@@ -407,12 +432,13 @@ export class MapScene extends Phaser.Scene {
       const t = s.tiles[i]
       if (t.owner < 0 || !me.explored[i]) continue
       const [x, y, px, py] = this.tilePos(i)
-      const col = NATIONS[s.players[t.owner].nation].color
+      // Území městského státu (formálně barbarské) má vlastní neutrální barvu.
+      const col = NATIONS[t.owner === barbId(s) ? 'free' : s.players[t.owner].nation].color
       for (let dir = 0; dir < 6; dir++) {
         const [nx, ny] = neighborXY(x, y, dir)
         const o = inMap(s, nx, ny) ? s.tiles[idx(s, nx, ny)].owner : -1
         if (o === t.owner) continue
-        this.borders.push(this.add.image(px, py, A, `border_${dir}`).setOrigin(0, 0).setTint(col).setAlpha(0.9).setDepth(y * 10 + 2))
+        this.borders.push(this.add.image(px, py, A, `border_${dir}`).setOrigin(0, 0).setTint(t.t === 'coast' || t.t === 'ocean' ? seaBorder(col) : col).setAlpha(0.9).setDepth(y * 10 + 2))
       }
     }
   }
@@ -473,6 +499,35 @@ export class MapScene extends Phaser.Scene {
       const x = i % s.W, y = (i / s.W) | 0
       const on = f.frame === 'f_camp' ? Math.random() < 0.5 : Math.sin(x * 0.5 + y * 0.28 - tick * 0.22) + Math.sin(x * 1.7 - y * 1.3 + tick * 0.6) * 0.35 > 0.72
       if (on !== f.on) { f.on = on; f.img.setFrame(on ? `${f.frame}_w` : f.frame) }
+    }
+    // Obilí se vlní ve stejných poryvech jako lesy, jen o něco ochotněji.
+    for (const [i, w] of this.wheat) {
+      const x = i % s.W, y = (i / s.W) | 0
+      const on = Math.sin(x * 0.5 + y * 0.28 - tick * 0.22) + Math.sin(x * 1.7 - y * 1.3 + tick * 0.6) * 0.35 > 0.55
+      if (on !== w.on) { w.on = on; w.img.setFrame(on ? 'r_wheat_w' : 'r_wheat') }
+    }
+    // Ryby: jednou za čas vyskočí, ve vzduchu udělají salto, žbluňknou pod hladinu a po chvíli se zase vynoří.
+    for (const [, f] of this.fish) {
+      if (tick < f.busy || !view.contains(f.img.x, f.img.y) || Math.random() > 0.012) continue
+      f.busy = tick + 24
+      const img = f.img, y0 = img.y, turn = img.flipX ? 360 : -360
+      const alive = () => img.active && f.water.active
+      this.tweens.add({ targets: img, angle: turn, duration: 560, ease: 'Sine.easeInOut' })
+      this.tweens.add({
+        targets: img, y: y0 - 8, duration: 280, ease: 'Quad.easeOut', yoyo: true,
+        onComplete: () => {
+          if (!alive()) return
+          // Žbluňk: ryba zmizí pod hladinou, zůstane po ní cákanec.
+          img.setVisible(false).setAngle(0); img.y = y0
+          f.water.setFrame('an_splash')
+          this.time.delayedCall(300, () => { if (alive()) f.water.setFrame('an_ripple') })
+          this.time.delayedCall(1100, () => {
+            if (!alive()) return
+            img.setVisible(true).setAlpha(0); img.y = y0 + 2
+            this.tweens.add({ targets: img, y: y0, alpha: 1, duration: 320, ease: 'Quad.easeOut' })
+          })
+        },
+      })
     }
     // Zvěř: většinu času stojí, občas skloní hlavu k pastvě, otočí se nebo popojde.
     for (const [, dr] of this.deer) {
@@ -732,6 +787,14 @@ export class MapScene extends Phaser.Scene {
       v.up.setTint(upgradeBlock(s, u) ? 0x8f96aa : 0xffffff)
     }
     v.up?.setVisible(up)
+    // Nepřítel, se kterým hráč válčí (i barbaři a piráti), má pod sebou červený pulzující kruh, ať nezapadne do krajiny.
+    const foe = !mine && atWar(s, this.host.me, u.owner)
+    if (foe && !v.foe) {
+      v.foe = this.add.ellipse(0, 9, 20, 8).setStrokeStyle(1.5, 0xff3b30, 1).setFillStyle(0xff3b30, 0.28)
+      v.c.addAt(v.foe, 0)
+      this.tweens.add({ targets: v.foe, alpha: 0.45, duration: 620, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })
+    }
+    v.foe?.setVisible(foe)
     // Opevněná jednotka má u nohou štít; šedý, dokud se teprve zakopává.
     const fort = !civ && u.fortified
     if (fort) {
@@ -885,21 +948,25 @@ export class MapScene extends Phaser.Scene {
   }
 
   /** Návrh na mapě: šedobílý obrázek, který pomalu bliká, aby nešel splést s hotovou stavbou. */
-  private ghost(frame: string, x: number, y: number, scale: number): void {
+  private ghost(frame: string, x: number, y: number, scale: number, blink = true, alpha = 0.95): void {
     const has = this.textures.get('ghost').has(frame)
-    const img = this.add.image(x, y, has ? 'ghost' : A, frame).setScale(scale).setAlpha(0.95).setDepth(D_FOG - 11)
+    const img = this.add.image(x, y, has ? 'ghost' : A, frame).setScale(scale).setAlpha(alpha).setDepth(D_FOG - 11)
     this.marks.push(img)
-    this.markTweens.push(this.tweens.add({ targets: img, alpha: 0.3, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }))
+    if (blink) this.markTweens.push(this.tweens.add({ targets: img, alpha: 0.3, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' }))
   }
 
-  /** Návrhy pro dělníky: světlý rám a blikající šedobílé vylepšení. */
+  /**
+   * Návrhy pro dělníky: na každém poli malý, tlumený obrázek toho, co se tam hodí. Jen nejlepší návrh je větší,
+   * bliká, má rám a žárovku – ostatní mapu nezahlcují.
+   */
   showJobs(jobs: { i: number; job: string }[], best = -1): void {
     if (best >= 0) this.tipIcon(best)
     for (const { i, job } of jobs) {
       const [, y, px, py] = this.tilePos(i)
-      this.marks.push(this.add.image(px, py, A, 'hex_move').setOrigin(0, 0).setTint(0xe8ecf5).setAlpha(0.7).setDepth(y * 10 + 5))
+      const top = i === best
+      if (top) this.marks.push(this.add.image(px, py, A, 'hex_move').setOrigin(0, 0).setTint(0xe8ecf5).setAlpha(0.7).setDepth(y * 10 + 5))
       const imp = this.host.state.tiles[i].imp
-      this.ghost(job === 'repair' ? (imp ? `i_${imp}` : 'road_c') : `i_${job}`, px + 16, py + 12, 0.5)
+      this.ghost(job === 'repair' ? (imp ? `i_${imp}` : 'road_c') : `i_${job}`, px + 16, py + 13, top ? 0.5 : 0.36, top, top ? 0.95 : 0.5)
     }
   }
 

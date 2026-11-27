@@ -5,7 +5,7 @@ import {
   TERRAIN, TRADITIONS, TRADITION_IDS, TUNE, UNITS, UNIT_IDS, XP_LEVELS, traditionCost,
   type BuildingId, type ImprovementId, type NationId, type ResourceId, type TechId, type TerrainId, type UnitDef, type UnitId,
 } from '../game/data.ts'
-import { BORDER_BASE, BORDER_STEP, POP_CAP, WALL_HP, WALL_MELEE, WALL_RANGED, CONQUEST_TURNS, RAM_BONUS, RAM_COVER, SIEGE_UNITS, SIEGE_VS_CITY, SIEGE_VS_UNIT, UNITS_PER_SOURCE, WONDER_TURNS } from '../game/rules.ts'
+import { REPAIR_COST, BORDER_BASE, BORDER_STEP, POP_CAP, WALL_HP, WALL_MELEE, WALL_RANGED, CONQUEST_TURNS, RAM_BONUS, RAM_COVER, SIEGE_UNITS, SIEGE_VS_CITY, SIEGE_VS_UNIT, UNITS_PER_SOURCE, WONDER_TURNS } from '../game/rules.ts'
 import { unitIconUrl } from '../view/nationArt.ts'
 import { esc, ic, tip, UI } from './hud.ts'
 
@@ -198,7 +198,7 @@ function rulesTab(): string {
       <li>${esc('Skóre: po posledním tahu vyhrává národ s nejvyšším skóre.')}</li></ul>
     <h4>Obléhání měst</h4><ul>
       <li>${esc(`Město má ${TUNE.cityHp} životů, jednou za tah střílí na nepřítele do 2 polí (cíl vyberete v otevřeném městě kliknutím, jinak střílí samo na nejslabšího) a každý tah si ${TUNE.cityHeal} životů opraví. Dobudete ho tak, že mu životy srazíte na nulu a vstoupíte jednotkou pro boj zblízka.`)}</li>
-      <li>${esc(`Stavby Hradby a Bašty přidají městu po ${WALL_HP} bodech hradeb. Dokud hradby stojí, berou rány místo obránců: od pěchoty jen ${Math.round(WALL_MELEE * 100)} % škody (s beranidlem u města plnou), od střelců ${Math.round(WALL_RANGED * 100)} %, od obléhacích strojů plnou. Co hradby nepoberou, projde na obránce. Hradby se opravují stejně jako obránci, ${TUNE.cityHeal} bodů za tah mimo obležení. Dobytému městu zůstanou hradby tak pobořené, jak jsou, a obráncům čtvrtina životů.`)}</li>
+      <li>${esc(`Stavby Hradby a Bašty přidají městu po ${WALL_HP} bodech hradeb. Dokud hradby stojí, berou rány místo obránců: od pěchoty jen ${Math.round(WALL_MELEE * 100)} % škody (s beranidlem u města plnou), od střelců ${Math.round(WALL_RANGED * 100)} %, od obléhacích strojů plnou. Co hradby nepoberou, projde na obránce. Hradby se opravují stejně jako obránci, ${TUNE.cityHeal} bodů za tah mimo obležení. Dobytému městu zůstanou hradby tak pobořené, jak jsou, a obráncům čtvrtina životů. Zhruba polovina ostatních staveb se při dobývání poškodí: nefungují, dokud je ve výrobě města neopravíte za ${Math.round(REPAIR_COST * 100)} % ceny.`)}</li>
       <li>${buildingLink('walls')}: ${esc(walls.desc)} ${buildingLink('bastion')}: ${esc(bastion.desc)}</li>
       <li>${esc(`Obklíčení: stojí-li hned u města aspoň ${SIEGE_UNITS} nepřátelské vojenské jednotky, město se neopravuje.`)}</li>
       <li>${engines}${esc(`: proti městům mají ${num(SIEGE_VS_CITY)}násobný účinek, proti jednotkám jen ${num(SIEGE_VS_UNIT)}násobný. Potřebují doprovod.`)}</li>

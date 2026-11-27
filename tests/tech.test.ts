@@ -164,3 +164,12 @@ test('obléhací stroj: proti městu trojnásobná síla, proti jednotkám polov
   assert.ok(Math.abs(unitStrength(s, cat, { ranged: true, vsCity: true }) / base - SIEGE_VS_CITY) < 0.001)
   assert.ok(Math.abs(unitStrength(s, cat, { ranged: true }) / base - SIEGE_VS_UNIT) < 0.001)
 })
+
+test('zbývá-li jen opakovatelná technologie, zkoumá se dál sama', () => {
+  const { s, p } = game()
+  for (const t of TECH_IDS) if (!TECHS[t].repeat) grantTech(s, p, t)
+  assert.equal(p.research, 'empire', 'po posledním objevu se rovnou pokračuje Správou říše')
+  grantTech(s, p, 'empire')
+  assert.equal(p.empire, 1)
+  assert.equal(p.research, 'empire', 'a po jejím dokončení znovu, bez výběru')
+})

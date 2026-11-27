@@ -445,3 +445,12 @@ table.keys kbd { margin-left: 0; font-size: 18px; padding: 1px 7px; }
 .volrow span { width: 70px; }
 .volrow input[type=range] { flex: 1; accent-color: var(--gold); height: 22px; }
 .volrow .btn { min-width: 130px; }
+.build .fix { color: var(--gold); font-style: normal; }
+.ruined { opacity: .55; filter: grayscale(1); text-decoration: line-through; }
+
+/* městské státy */
+.camplabel { position: absolute; transform: translate(-50%, -100%); display: flex; align-items: center; gap: 2px; padding: 0 4px; white-space: nowrap; pointer-events: auto; font-family: var(--head); color: #f3e3c0; background: #10152bd8; border: 1px solid #c0566a; box-shadow: 0 2px 0 #0008; }
+.camplabel .ic { width: 12px; height: 12px; }
+.citylabel em .ic { vertical-align: -2px; margin-right: 2px; }
+.goal.clickable { cursor: pointer; }
+.goal.clickable:hover { filter: brightness(1.2); }

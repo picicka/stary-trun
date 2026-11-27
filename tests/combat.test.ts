@@ -213,3 +213,28 @@ test('povýšení stojí bod pohybu: s pohybem 2 jdou dvě za tah, bez pohybu ž
   beginTurn(s, 0)
   assert.ok(exec(s, 0, { t: 'promo', unit: a.id, id: 'medic' }).ok, 'další tah už ano')
 })
+
+test('při dobytí se část staveb poškodí a jde levně opravit', async () => {
+  const R = await import('../src/game/rules.ts')
+  const { s, c, foe, ring } = field()
+  c.buildings = ['monument', 'granary', 'library', 'workshop', 'market', 'temple', 'walls']
+  c.wallDmg = 100; c.hp = 1
+  const u = put(s, foe, 'swordsman', ring(1)[0])
+  beginTurn(s, foe)
+  assert.ok(attack(s, u, c.x, c.y))
+  assert.equal(c.owner, foe)
+  const ruined = c.ruined ?? []
+  assert.ok(ruined.length >= 1 && ruined.length <= 5, `poškozeno ${ruined.length} ze 6`)
+  assert.ok(c.buildings.includes('walls') && !ruined.includes('walls'), 'hradby se neruší')
+  assert.equal(c.buildings.length + ruined.length, 7, 'žádná stavba nezmizela')
+  const b = ruined[0], it = { kind: 'building' as const, id: b }
+  const p = s.players[foe]
+  assert.equal(R.itemCost(it, p, c), Math.ceil(R.itemCost(it, p) * R.REPAIR_COST))
+  p.techs = []
+  assert.ok(R.canBuildBuilding(s, c, b), 'opravit jde i bez technologie')
+  assert.equal(R.enqueue(s, c, it), null)
+  c.prod = R.itemCost(it, p, c)
+  R.endPlayerTurn(s, foe)
+  assert.ok(c.buildings.includes(b))
+  assert.ok(!(c.ruined ?? []).includes(b))
+})

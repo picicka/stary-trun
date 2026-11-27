@@ -5,13 +5,14 @@ import { generateScenario, ISLANDS_SEEDS, tierOf, VALLEY_SEEDS, type MapOptions 
 import { rand, type RngHolder } from './rng.ts'
 import { eraOf, beginTurn, checkVictory, endPlayerTurn, idx, makeUnit, neighbors, note, noteAll, unitsAt, updateVisibility } from './rules.ts'
 import { TERRAIN } from './data.ts'
+import { tickStates } from './states.ts'
 import { barbId, type GameState, type Player } from './types.ts'
 
 export const SAVE_VERSION = 3
 export const MAX_TURNS = 160
 const SAVE_KEY = 'hex4x-save-v' + SAVE_VERSION
 
-export const START_TECH: Record<NationId, TechId> = { aur: 'agriculture', khar: 'mining', thal: 'agriculture', sylv: 'archery', tark: 'husbandry', zahi: 'agriculture', morv: 'mining', lume: 'agriculture', barb: 'mining' }
+export const START_TECH: Record<NationId, TechId> = { aur: 'agriculture', khar: 'mining', thal: 'agriculture', sylv: 'archery', tark: 'husbandry', zahi: 'agriculture', morv: 'mining', lume: 'agriculture', barb: 'mining', free: 'mining' }
 
 /** `slots` = počet hráčů včetně barbarů (délka polí vztahů). */
 function makePlayer(id: number, nation: NationId, human: boolean, personality: Player['personality'], slots: number): Player {
@@ -138,6 +139,7 @@ export function aiRound(s: GameState): void {
     checkVictory(s)
   }
   if (!s.over) {
+    tickStates(s)
     beginTurn(s, barbId(s))
     barbTurn(s)
     endPlayerTurn(s, barbId(s))

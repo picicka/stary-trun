@@ -1,5 +1,5 @@
 // Ovladač hry: drží stav, výběr a propojuje pravidla, mapu a rozhraní.
-import { IMPROVEMENTS, NATIONS, UNITS, type Difficulty, type ImprovementId, type NationId, type TechId } from './game/data.ts'
+import { RESOURCES, IMPROVEMENTS, NATIONS, UNITS, type Difficulty, type ImprovementId, type NationId, type TechId } from './game/data.ts'
 import { siteScore } from './game/ai.ts'
 import { exec, type Command, type Result } from './game/commands.ts'
 import type { PromoId, ScenarioId, TraditionId } from './game/data.ts'
@@ -10,6 +10,7 @@ import {
   type PathMap,
 } from './game/rules.ts'
 import { actors, canAct, canResume, clearSave, createGame, deserialize, loadGame, saveGame, serialize, stateHash, type GameOptions } from './game/state.ts'
+import { giftUnitTarget, isState, QUEST_POINTS } from './game/states.ts'
 import { logClear, logEntries, logging, logOn, logRestore, logText, type LogEntry } from './game/log.ts'
 import { cleanCode, ClientSession, HostSession, roomCode, type Lobby, type NetEvents, type NetGame, type SavedSeat, type Session } from './net/session.ts'
 import { localTransport, NetError, peerTransport, type Transport } from './net/transport.ts'
@@ -66,6 +67,9 @@ export class App implements MapHost {
   roadMode = false
   /** Pole, kde mohou vybraní dělníci stavět vylepšení (index → práce). */
   jobs = new Map<number, string>()
+  /** Pole, které rádce dělníkům doporučuje nejvíc (žárovka), a proč. */
+  jobBest = -1
+  jobWhy = ''
   /** Pole, která může otevřené město zabrat (jen v ručním režimu růstu hranic). */
   borderPick = new Set<number>()
   /** Doporučená místa pro město pro vybrané osadníky (index pole → hodnocení). */
@@ -525,6 +529,7 @@ export class App implements MapHost {
   }
 
   private computeSelection(): void {
+    this.jobBest = -1
     this.reach.clear(); this.targets.clear(); this.pm = null; this.gotoEta = -1; this.jobs.clear(); this.sites.clear()
     if (!this.unit || this.unit.type !== 'worker') this.roadMode = false
     const u = this.unit
@@ -562,9 +567,14 @@ export class App implements MapHost {
         if (!j || this.pm.dist[i] === Infinity) continue
         this.jobs.set(i, j.job)
         // Nejvíc se vyplatí surovina a pole, které město už obdělává; blízkost rozhoduje při shodě.
-        const v = (s.tiles[i].res ? 6 : 0) + (s.cities.some(c => c.owner === this.me && c.worked.includes(i)) ? 4 : 0) - this.pm.dist[i] * 1.2
-        if (v > bv) { bv = v; best = i }
+        const worked = s.cities.find(c => c.owner === this.me && c.worked.includes(i))
+        const v = (s.tiles[i].res ? 6 : 0) + (worked ? 4 : 0) - this.pm.dist[i] * 1.2
+        if (v > bv) {
+          bv = v; best = i
+          this.jobWhy = s.tiles[i].res ? `je tu surovina ${RESOURCES[s.tiles[i].res!].name.toLowerCase()}` : worked ? `pole už obdělává město ${worked.name}, vylepšení se projeví hned` : 'z vhodných polí je dělníkům nejblíž'
+        }
       }
+      this.jobBest = best
       this.scene.showJobs([...this.jobs].map(([i, job]) => ({ i, job })), best)
     }
     if (this.hints && u.type === 'settler') {
@@ -753,7 +763,9 @@ export class App implements MapHost {
     const pv = previewAttack(s, u, x, y)
     if (!pv) return
     const go = (war = false) => void this.run(() => { this.cmd({ t: 'attack', unit: u.id, x, y, war }) }).then(() => { const v = this.unit; if (!v || v.moves <= 0) this.autoAdvance() })
-    if (pv.needWar >= 0) {
+    if (pv.needWar >= 0 && pv.city?.state) {
+      this.hud.confirm('Napadnout městský stát?', `Útokem na ${pv.city.name} přijdete o všechny body vztahu a jeho výhody, hradby po vás začnou střílet. Dobytí vám zazlí i ostatní městské státy.`, 'Zaútočit', () => { go(true) })
+    } else if (pv.needWar >= 0) {
       const n = NATIONS[s.players[pv.needWar].nation]
       this.hud.confirm(`Vyhlásit válku?`, `Útok na národ ${n.name} znamená válku. ${n.leader} vám to jen tak nezapomene.`, 'Vyhlásit válku', () => {
         go(true)
@@ -836,11 +848,28 @@ export class App implements MapHost {
     })
   }
 
+  /** Dar ve zlatě městskému státu podle jeho úkolu. */
+  stateGift(city: number): void {
+    if (this.busy || !this.myTurn) return
+    void this.run(() => {
+      const r = this.cmd({ t: 'stateGift', state: city })
+      if (!r.ok) { sfx('error'); if (r.text) this.hud.toast(r.text) }
+    }).then(() => { const c = cityById(this.state, city); if (isState(c)) this.hud.showState(c) })
+  }
+
   unitAction(a: string): void {
     const u = this.unit
     if (!u || this.busy || !this.myTurn) return
     const s = this.state
     const unit = u.id
+    if (a === 'stategive') {
+      const c = giftUnitTarget(s, u)
+      if (!c) return
+      this.hud.confirm('Darovat jednotku?', `${UNITS[u.type].name} přejde do služeb městského státu ${c.name}. O jednotku přijdete, vztah vzroste o ${QUEST_POINTS.unit}.`, 'Darovat', () => {
+        void this.run(() => { const r = this.cmd({ t: 'stateUnit', unit, state: c.id }); if (!r.ok) { sfx('error'); if (r.text) this.hud.toast(r.text) } else this.selUnit = -1 })
+      })
+      return
+    }
     if (a === 'found') {
       const err = canFoundCity(s, u)
       if (err) { sfx('error'); this.hud.toast(err); return }

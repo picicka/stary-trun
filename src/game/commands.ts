@@ -9,6 +9,7 @@ import {
   borderOptions, buyItem, growBorders, mergeBlock, mergeUnits, splitBlock, splitUnit, pillage, pillageBlock, planResearch, previewAttack, promote, promoteUnit, roadStep, startWork, stopUnit, unitById, unitsOf, updateVisibility, upgradeBlock, upgradeUnit,
   assignWorkers, cityShoot, cityTargets, escortBlock, follow, followAll,
 } from './rules.ts'
+import { giftGold, giftUnit, stateAttacked } from './states.ts'
 import { canAct, comeBack, endTurn, resumeTurn, settle, takeOver } from './state.ts'
 import { barbId, type BuildItem, type CityFocus, type GameState, type JobId } from './types.ts'
 
@@ -55,6 +56,9 @@ export type Command =
   | { t: 'answer'; from: number; accept: boolean }
   /** Rada rádce přečtena. */
   | { t: 'tip'; id: string }
+  /** Městský stát (`state` = id jeho města): dar ve zlatě podle úkolu a předání bojové jednotky, která stojí u města. */
+  | { t: 'stateGift'; state: number }
+  | { t: 'stateUnit'; unit: number; state: number }
   | { t: 'endTurn' }
   /** Návrat k ukončenému tahu (souběžné tahy, dokud ostatní táhnou). */
   | { t: 'resume' }
@@ -132,9 +136,11 @@ function run(s: GameState, pid: number, c: Command): Result {
       case 'attack': {
         const pv = previewAttack(s, u, c.x, c.y)
         if (!pv) return no()
-        if (pv.needWar >= 0) { if (!c.war) return no('Útok by znamenal válku.'); declareWar(s, pid, pv.needWar) }
+        // Útok na městský stát válku s nikým nevyhlašuje; nepřátelství si stát vyřídí sám (viz stateAttacked).
+        if (pv.needWar >= 0) { if (!c.war) return no(pv.city?.state ? 'Útok by si městský stát znepřátelil.' : 'Útok by znamenal válku.'); if (!pv.city?.state) declareWar(s, pid, pv.needWar); else stateAttacked(s, pv.city, pid) }
         return { ok: attack(s, u, c.x, c.y) }
       }
+      case 'stateUnit': { const err = giftUnit(s, u, cityById(s, c.state)); return err ? no(err) : OK }
       case 'found': {
         const err = canFoundCity(s, u)
         if (err) return no(err)
@@ -240,6 +246,7 @@ function run(s: GameState, pid: number, c: Command): Result {
   }
 
   switch (c.t) {
+    case 'stateGift': { const err = giftGold(s, pid, cityById(s, c.state)); return err ? no(err) : OK }
     case 'tradition': return adoptTradition(s, me, c.id) ? OK : no()
     case 'research': return planResearch(me, c.tech, !!c.append) ? OK : no()
     case 'tip': { const k = tipKey(pid, c.id); if (!s.tutorial.includes(k)) s.tutorial.push(k); return OK }

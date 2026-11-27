@@ -29,6 +29,8 @@ Pravidla hradeb a boje mají automatické testy (`tests/combat.test.ts`) a pro
 - [ ] **Zobrazení města.** Dva proužky nad městem a v okně města, náhled útoku „hradby −X, obránci −Y“, zpráva o ztrátách na začátku tahu – i ve hře po síti a u jednoho počítače.
 - [ ] **Starší uložené hry.** Město s více než 200 životy se má srovnat na 200.
 - [ ] **Jak se to hraje.** Jestli nejsou opevněná města proti pěchotě bez beranidla příliš tvrdá a jestli výhled střelců a cena útoku nejsou otravné.
+- [ ] **Městské státy ve skutečné partii.** Pravidla mají testy (`tests/states.test.ts`) a v prohlížeči jsme viděli město státu, odpočet u tábora a okno s darem ve zlatě. Zbývá ověřit: jestli první státy kolem 60. tahu nepřicházejí pozdě nebo brzy, jestli jsou úkoly splnitelné a výhody (+2 a +4) stojí za námahu, darování jednotky u města, útok s potvrzením a chování ve hře po síti.
+- [ ] **Městské státy a vyváženost.** Krátká zkouška šesti partií počítačů proběhla bez chyb (vznikly vždy čtyři státy, jeden až dva padly). Dlouhá simulace 200 partií s nimi ještě neběžela – tábory, které se usadí, přestanou posílat nájezdníky, a výbojný počítač státy občas dobývá.
 
 ## 2. Vyváženost
 
@@ -58,6 +60,8 @@ Pravidla hradeb a boje mají automatické testy (`tests/combat.test.ts`) a pro
 
 ## 4. Obsah
 
+- [x] **Městské státy.** Barbarský tábor, který přežije do svého tahu dozrání (60.–84. tah) a neleží blízko města ani na něčím území, se usadí; za hru vzniknou nejvýš čtyři. Stát má jedno z pěti zaměření (výroba, zlato, jídlo, věda, kultura), zadává úkoly a za body vztahu dává přátelům +2 a jedinému spojenci +4. Jde dobýt jako běžné město.
+- [ ] **Městské státy – co zbývá.** Úkol „propojit se cestou“ (chce cesty přes cizí území), zapojení spojeneckého státu do války (zatím záměrně ne), vlastní heslo v encyklopedii.
 - [ ] **Obléhací věž** jako pozdější obdoba beranidla.
 - [ ] **Další využití zlata a vědy na konci hry**, až je strom vyzkoumaný.
 

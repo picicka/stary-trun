@@ -10,13 +10,14 @@ import { generateScenario, ISLANDS_SEEDS, mapSize, TIERS, tierOf, VALLEY_SEEDS, 
 import { hexCenter } from '../game/hex.ts'
 import {
   CONQUEST_TURNS, WONDER_TURNS, SIEGE_UNITS, besieged, wonderCity, wonderLeft, seatCount,
-  atWar, availableBuilds, availableTechs, borderCost, borderOptions, borderTarget, popCap, openTraditions, branchDone, buyCost, buyItemBlock, buyItemCost, canBuy, canFoundCity, cityAt, attackBlock, PROMO_NO_MOVES, cityWalls, wallMax, WALL_MELEE, WALL_RANGED, cityMaxHp, citiesOf, cityStrength, cityYields, cultureSources, freeUnits, growthNeed, hasTech, idx,
+  atWar, availableBuilds, availableTechs, borderCost, borderOptions, borderTarget, popCap, openTraditions, branchDone, buyCost, buyItemBlock, buyItemCost, canBuy, canFoundCity, cityAt, isRuined, REPAIR_COST, attackBlock, PROMO_NO_MOVES, cityWalls, wallMax, WALL_MELEE, WALL_RANGED, cityMaxHp, citiesOf, cityStrength, cityYields, cultureSources, freeUnits, growthNeed, hasTech, idx,
   cityTargets, escortBlock, escortOf, wardOf, isCivilian, isEmbarked, isNaval, isWater, itemCost, itemName, maxMoves, militaryPower, sameItem, playerIncome, previewAttack, resourceVisible, score, tileYield, unitBlockReason, unitStrength,
   unitsAt, unitsOf, UNITS_PER_SOURCE, resourceReport, unitsNeeding, traditionAdvice, techPath, foundBlock, isCoastal, traditionReady, pendingPromos, techCost, unitSize, formationName, FORMATION, mergeTargets, splitBlock, tileJobs, jobInfo, recommendJob, pillageBlock, upgradeBlock, upgradeCost, upgradeTarget, xpLevel,
 } from '../game/rules.ts'
 import { actors, canAct, hasSave, START_TECH } from '../game/state.ts'
 import { CHAT_MAX, cleanCode } from '../net/session.ts'
 import { tipKey } from '../game/commands.ts'
+import { ALLY, STATE_BONUS, STATE_FROM, STATE_MAX, bonusText, campOutlook, FOE_TURNS, FRIEND, giftUnitTarget, isState, QUEST_POINTS, questText, STATE_KINDS, stateBonus, stateCities, stateHostile, stateLevel, type StateCity } from '../game/states.ts'
 import { barbId, type BuildItem, type City, type CityFocus, type Note, type Unit } from '../game/types.ts'
 import { isMusicOn, isMuted, musicVolume, nowPlaying, setMusic, setMusicMood, setMusicVolume, setMuted, setSfxVolume, sfx, sfxVolume } from '../audio.ts'
 import type { App } from '../app.ts'
@@ -78,6 +79,7 @@ export class Hud {
   private overviewOn = (() => { try { return localStorage.getItem('hex4x-overview') === '1' } catch { return false } })()
   private tipFor: HTMLElement | null = null
   private cityLabels = new Map<number, HTMLElement>()
+  private campLabels = new Map<number, HTMLElement>()
   private read = new WeakSet<Note>()
   private hoverXY: [number, number] = [-1, -1]
   private toastTimer = 0
@@ -260,8 +262,12 @@ export class Hud {
       case 'citylabel': {
         const c = this.s.cities.find(o => o.id === Number(arg))
         if (c && c.owner === this.my && !app.busy) { sfx('select'); app.openCity(c) }
+        else if (isState(c)) { sfx('click'); this.showState(c) }
         break
       }
+      case 'state-open': { const c = this.s.cities.find(o => o.id === Number(arg)); if (isState(c)) { this.showState(c); app.scene.centerOn(c.x, c.y) } break }
+      case 'state-gift': app.stateGift(Number(arg)); break
+      case 'state-camp': { const i = Number(arg); this.closeModal(); app.scene.centerOn(i % this.s.W, (i / this.s.W) | 0); app.scene.ping(i % this.s.W, (i / this.s.W) | 0); break }
       case 'war': this.confirm('Vyhlásit válku?', `Opravdu chcete vyhlásit válku národu ${NATIONS[this.s.players[Number(arg)].nation].name}?`, 'Vyhlásit válku', () => { app.declare(Number(arg)); this.showDiplo() }); break
       case 'peace': { const msg = app.proposePeace(Number(arg)); this.showDiplo(msg) ; break }
       case 'offer-yes': app.answerOffer(Number(arg), true); this.closeModal(); this.checkOffers(); break
@@ -697,6 +703,9 @@ export class Hud {
       const same = unitsOf(s, this.my).filter(o => o.type === u.type && !upgradeBlock(s, o))
       if (same.length > 1) acts.push(`<button class="btn small" data-a="unit" data-v="upgradeall"${tip(`Přezbrojit všechny|Přezbrojí všech ${same.length} jednotek tohoto druhu, které stojí na vašem území a mají pohyb – dokud stačí zlato (${upgradeCost(s, u)} za kus).`)}>${ic('up', 's')}Všechny (${same.length})</button>`)
     }
+    // Dar jednotky městskému státu, který o ni stojí a u kterého jednotka stojí.
+    const gift = civ ? null : giftUnitTarget(s, u)
+    if (gift) acts.push(btn('stategive', 'Darovat státu', '', 'peace', false, `Darovat městskému státu ${gift.name}|Jednotka přejde do služeb státu (přijdete o ni) a váš vztah vzroste o ${QUEST_POINTS.unit}.`))
     const ward = wardOf(s, u)
     const guard = civ ? escortOf(s, u) : undefined
     const resting = u.fortified || u.sleep || u.work || u.goto || u.auto || u.roadTo || ward
@@ -744,7 +753,7 @@ export class Hud {
     const y = cityYields(s, c)
     const need = growthNeed(s, c)
     const growT = y.foodNet > 0 ? Math.ceil((need - c.food) / y.foodNet) : 0
-    const turns = (it: BuildItem) => Math.max(1, Math.ceil((itemCost(it, this.me) - c.prod) / Math.max(1, y.prod)))
+    const turns = (it: BuildItem) => Math.max(1, Math.ceil((itemCost(it, this.me, c) - c.prod) / Math.max(1, y.prod)))
     const scroll = this.cityPanel.querySelector('.inner')?.scrollTop ?? 0
     const shots = cityTargets(s, c).filter(t => this.me.visible[idx(s, t.x, t.y)]).length
     const rec = this.app.hints ? recommendBuild(s, c) : null
@@ -762,7 +771,7 @@ export class Hud {
     }
     let acc = c.build ? turns(c.build) : 0
     const queue = c.queue.map((it, i) => {
-      acc += Math.max(1, Math.ceil(itemCost(it, this.me) / Math.max(1, y.prod)))
+      acc += Math.max(1, Math.ceil(itemCost(it, this.me, c) / Math.max(1, y.prod)))
       return `<div class="qitem"><b>${i + 2}.</b><img src="${this.itemIcon(it, this.my)}" alt=""><span class="n">${itemName(it)}</span><span class="c">za ${acc} t.</span>
         ${buyBtn(it)}
         <button class="btn small" data-a="q-up" data-v="${i}"${tip('Stavět hned|Položka přeskočí na začátek, dosavadní výroba se zařadí za ni.')}>▲</button>
@@ -770,7 +779,7 @@ export class Hud {
     }).join('')
     let cur = `<div class="current"><div class="n">Město nic nestaví – výroba se mění na zlato.<br><b style="color:var(--gold)">Vyberte, co stavět.</b></div></div>`
     if (c.build) {
-      const cost = itemCost(c.build, this.me), t = turns(c.build), bc = buyCost(s, c)
+      const cost = itemCost(c.build, this.me, c), t = turns(c.build), bc = buyCost(s, c)
       const wonder = c.build.kind === 'building' && c.build.id === 'wonder'
       cur = `<div class="current"><img src="${this.itemIcon(c.build, this.my)}" alt=""><div class="n"><b>${itemName(c.build)}</b>
         <div class="sub"><div class="bar prod"><i style="width:${Math.min(100, 100 * c.prod / cost)}%"></i></div>${c.prod}${NB}/${NB}${cost} · ${t}${NB}${turnsWord(t)}</div></div>
@@ -785,7 +794,7 @@ export class Hud {
       const tt = (it.kind === 'unit' ? this.unitTip(it.id) : this.buildingTip(it.id)) + '\nKlik: zařadit do fronty · Shift + klik: stavět hned'
       const extra = it.kind === 'unit' ? [UNITS[it.id].str ? `síla ${UNITS[it.id].str}` : '', UNITS[it.id].ranged ? `střelba ${UNITS[it.id].ranged}` : '', `pohyb ${UNITS[it.id].move}`].filter(Boolean).join(', ') + '. ' : ''
       return `<div class="buildrow"><button class="build ${isCur ? 'cur' : ''} ${isRec ? 'rec' : ''}" data-a="build" data-v="${it.kind}:${it.id}"${tip(tt + (isRec ? '\nTip rádce: tohle se městu teď hodí nejvíc.' : ''))}>${isRec ? REC : ''}<img src="${this.itemIcon(it, this.my)}" alt="">
-        <span class="n">${def.name}${inQ ? ` <em class="inq">ve frontě${inQ > 1 ? ` ${inQ}×` : ''}</em>` : ''}<small>${esc(extra + def.desc)}</small></span><span class="c">${ic('prod', 's')}${itemCost(it, this.me)}<br>${turns(it)}${NB}${turnsWord(turns(it))}</span></button>${isCur ? '' : buyBtn(it)}</div>`
+        <span class="n">${isRuined(c, it) ? `<em class="fix">Opravit:</em> ` : ''}${def.name}${inQ ? ` <em class="inq">ve frontě${inQ > 1 ? ` ${inQ}×` : ''}</em>` : ''}<small>${esc(extra + def.desc)}</small></span><span class="c">${ic('prod', 's')}${itemCost(it, this.me, c)}<br>${turns(it)}${NB}${turnsWord(turns(it))}</span></button>${isCur ? '' : buyBtn(it)}</div>`
     }
     const opts = availableBuilds(s, c)
     const blocked = UNIT_IDS.filter(id => {
@@ -794,7 +803,8 @@ export class Hud {
       if (UNIT_IDS.some(o => UNITS[o].replaces === id && UNITS[o].nation === this.me.nation)) return false
       return (!d.tech || hasTech(this.me, d.tech)) && !opts.some(o => o.kind === 'unit' && o.id === id)
     }).map(id => `<div class="build off"${tip(this.unitTip(id))}><img src="${this.unitIcon(id, this.my)}" alt=""><span class="n">${UNITS[id].name}<small>${esc(unitBlockReason(s, c, id) ?? '')}</small></span></div>`).join('')
-    const built = c.buildings.length ? c.buildings.map(b => `<span${tip(this.buildingTip(b))}><img src="${UI}b_${b}.png" alt="">${BUILDINGS[b].name}</span>`).join('') : '<span style="border:none;color:var(--muted)">zatím žádné</span>'
+    const ruins = (c.ruined ?? []).map(b => `<span class="ruined"${tip(`${BUILDINGS[b].name} – poškozeno|Stavba byla poškozena při dobytí města a nefunguje. Opravíte ji ve výrobě města za ${Math.round(REPAIR_COST * 100)} % ceny.`)}><img src="${UI}b_${b}.png" alt="">${BUILDINGS[b].name}</span>`).join('')
+    const built = c.buildings.length || ruins ? c.buildings.map(b => `<span${tip(this.buildingTip(b))}><img src="${UI}b_${b}.png" alt="">${BUILDINGS[b].name}</span>`).join('') + ruins : '<span style="border:none;color:var(--muted)">zatím žádné</span>'
     const maxHp = cityMaxHp(c), wMax = wallMax(c), wNow = cityWalls(c), wDmg = wMax - wNow
     this.cityPanel.classList.remove('hidden')
     this.notes.classList.add('hidden')
@@ -987,7 +997,7 @@ export class Hud {
       const grow = y.foodNet > 0 ? `růst za ${Math.ceil((need - c.food) / y.foodNet)} t.` : y.foodNet < 0 ? '<span style="color:var(--bad)">hladoví</span>' : 'neroste'
       let what = '<b style="color:var(--gold)">nic nestaví!</b>'
       if (c.build) {
-        const t = Math.max(1, Math.ceil((itemCost(c.build, this.me) - c.prod) / Math.max(1, y.prod)))
+        const t = Math.max(1, Math.ceil((itemCost(c.build, this.me, c) - c.prod) / Math.max(1, y.prod)))
         what = `${esc(itemName(c.build))} <small>${t} ${turnsWord(t)}</small>${c.queue.length ? ` <small>· pak ${c.queue.map(q => esc(itemName(q))).join(', ')}</small>` : ''}`
       }
       return `<div class="ov" data-a="ov-city" data-v="${c.id}">${c.build ? `<img src="${this.itemIcon(c.build, this.my)}" alt="">` : `<img src="${UI}ic_prod.png" alt="" style="opacity:.4">`}<div><b>${c.capital ? '★ ' : ''}${esc(c.name)}</b> <small>${ic('pop', 's')}${c.pop} · ${grow}${c.hp < cityMaxHp(c) ? ` · <span style="color:var(--bad)">hradby ${c.hp}</span>` : ''}</small><br>${what}</div></div>`
@@ -1044,19 +1054,38 @@ export class Hud {
       seen.add(c.id)
       let el = this.cityLabels.get(c.id)
       if (!el) { el = h('div', { class: 'citylabel', 'data-a': 'citylabel', 'data-v': String(c.id) }); this.labels.append(el); this.cityLabels.set(c.id, el) }
-      const n = NATIONS[s.players[c.owner].nation]
+      const n = NATIONS[c.state ? 'free' : s.players[c.owner].nation]
       el.style.setProperty('--c', n.css)
       const vis = this.me.visible[idx(s, c.x, c.y)]
       let extra = ''
       if (c.owner === this.my) {
-        if (c.build) { const y = cityYields(s, c); const t = Math.max(1, Math.ceil((itemCost(c.build, this.me) - c.prod) / Math.max(1, y.prod))); extra = `<em>${esc(itemName(c.build))} · ${t} t.${c.queue.length ? ` → ${esc(itemName(c.queue[0]))}${c.queue.length > 1 ? '…' : ''}` : ''}</em>`; el.dataset.tip = typo(`${c.name}|Staví: ${itemName(c.build)}, hotovo za ${t} ${turnsWord(t)}.${c.queue.length ? `\nVe frontě potom: ${c.queue.map(q => itemName(q)).join(', ')}.` : '\nFronta je prázdná.'}\nKliknutím otevřete město.`) }
+        if (c.build) { const y = cityYields(s, c); const t = Math.max(1, Math.ceil((itemCost(c.build, this.me, c) - c.prod) / Math.max(1, y.prod))); extra = `<em>${esc(itemName(c.build))} · ${t} t.${c.queue.length ? ` → ${esc(itemName(c.queue[0]))}${c.queue.length > 1 ? '…' : ''}` : ''}</em>`; el.dataset.tip = typo(`${c.name}|Staví: ${itemName(c.build)}, hotovo za ${t} ${turnsWord(t)}.${c.queue.length ? `\nVe frontě potom: ${c.queue.map(q => itemName(q)).join(', ')}.` : '\nFronta je prázdná.'}\nKliknutím otevřete město.`) }
         else { extra = `<em style="color:var(--gold)">nečinné!</em>`; el.dataset.tip = typo(`${c.name}|Město nic nestaví, výroba se mění na zlato.\nKliknutím otevřete město a vyberete stavbu.`) }
+      }
+      if (isState(c)) {
+        // Městský stát: zaměření, body vztahu a stupeň; kliknutím se otevře jeho okno.
+        const st = c.state, lv = stateLevel(s, c, this.my), foe = stateHostile(s, c, this.my)
+        extra = `<em>${ic(STATE_KINDS[st.kind].icon, 's')}${foe ? '<span style="color:var(--bad);padding:0">nepřátelský</span>' : `${st.rel[this.my] ?? 0}${lv === 2 ? ' · spojenec' : lv === 1 ? ' · přítel' : ''}`}</em>`
+        el.dataset.tip = typo(`Městský stát ${c.name} (${STATE_KINDS[st.kind].name})|${this.stateStanding(c)}\nKliknutím otevřete podrobnosti a úkol.`)
       }
       const maxHp = cityMaxHp(c), wm = wallMax(c), wn = cityWalls(c)
       const html = `<b>${vis || c.owner === this.my ? c.pop : '?'}</b><span>${c.capital ? '★ ' : ''}${esc(c.name)}</span>${extra}${vis && wm && (c.hp < maxHp || wn < wm) ? `<div class="hpb wall"><i style="width:${100 * wn / wm}%"></i></div>` : ''}${vis && (c.hp < maxHp || wn < wm) ? `<div class="hpb${wm ? ' two' : ''}"><i style="width:${100 * c.hp / maxHp}%"></i></div>` : ''}`
       if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html }
     }
     for (const [id, el] of this.cityLabels) if (!seen.has(id)) { el.remove(); this.cityLabels.delete(id) }
+    // Odpočet u barbarských táborů, ze kterých se stane městský stát.
+    const camps = new Set<number>()
+    for (let i = 0; i < s.tiles.length; i++) {
+      if (s.tiles[i].special !== 'camp' || !this.me.explored[i]) continue
+      const left = campOutlook(s, i)
+      if (left === null) continue
+      camps.add(i)
+      let el = this.campLabels.get(i)
+      if (!el) { el = h('div', { class: 'camplabel' }); this.labels.append(el); this.campLabels.set(i, el) }
+      const html = `${ic('turn', 's')}${left}`
+      if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; el.dataset.tip = typo(`Barbarský tábor|Za ${left} ${turnsWord(left)} se tu barbaři usadí a vznikne městský stát. Kdo tábor do té doby vypálí, získá kořist, ale stát tu nevznikne.`) }
+    }
+    for (const [i, el] of this.campLabels) if (!camps.has(i)) { el.remove(); this.campLabels.delete(i) }
     this.positionLabels()
   }
 
@@ -1070,6 +1099,12 @@ export class Hud {
       const [x, y] = sc.worldToScreen(wx, wy + 13)
       el.style.left = `${Math.round(x)}px`; el.style.top = `${Math.round(y)}px`
       el.style.fontSize = sc.zoom <= 1 ? '12px' : sc.zoom === 2 ? '14px' : '16px'
+    }
+    for (const [i, el] of this.campLabels) {
+      const [wx, wy] = hexCenter(i % s.W, (i / s.W) | 0)
+      const [x, y] = sc.worldToScreen(wx, wy - 15)
+      el.style.left = `${Math.round(x)}px`; el.style.top = `${Math.round(y)}px`
+      el.style.fontSize = sc.zoom <= 1 ? '11px' : sc.zoom === 2 ? '13px' : '15px'
     }
   }
 
@@ -1092,7 +1127,7 @@ export class Hud {
     const t = s.tiles[i]
     const parts: string[] = [TERRAIN[t.t].name + (t.forest ? ', les' : '')]
     if (t.special === 'ruins') parts.push('<b style="color:var(--gold)">Ruiny Starého trůnu</b>')
-    if (t.special === 'camp') parts.push('<b style="color:var(--bad)">Barbarský tábor</b>')
+    if (t.special === 'camp') { const left = campOutlook(s, i); parts.push(`<b style="color:var(--bad)">Barbarský tábor</b>${left === null ? '' : ` (za ${left}${NB}${turnsWord(left)} městský stát)`}`) }
     if (t.res && resourceVisible(this.me, t.res)) parts.push(`<b>${RESOURCES[t.res].name}</b>`)
     const strat = t.res && resourceVisible(this.me, t.res) && RESOURCES[t.res].strategic ? t.res : null
     if (t.imp) parts.push(IMPROVEMENTS[t.imp].name)
@@ -1103,9 +1138,11 @@ export class Hud {
     let html = parts.join(' · ') + (ys ? ` &nbsp; ${ys}` : '')
     const mc = t.t === 'mountain' ? 'neprůchodné' : isWater(t) ? (hasTech(this.me, t.t === 'coast' ? 'sailing' : 'navigation') ? 'splavné' : t.t === 'coast' ? 'voda (vyžaduje Plavbu)' : 'voda (vyžaduje Navigaci)') : ''
     if (mc) html += ` · ${mc}`
-    if (t.owner >= 0) html += ` · <span style="color:${NATIONS[s.players[t.owner].nation].css}">${NATIONS[s.players[t.owner].nation].name}</span>`
+    if (t.owner === barbId(s)) html += ` · <span style="color:${NATIONS.free.css}">městský stát</span>`
+    else if (t.owner >= 0) html += ` · <span style="color:${NATIONS[s.players[t.owner].nation].css}">${NATIONS[s.players[t.owner].nation].name}</span>`
     if (this.me.visible[i]) {
       const c = cityAt(s, x, y)
+      if (isState(c)) html += `<br>${ic(STATE_KINDS[c.state.kind].icon, 's')}${esc(`Městský stát (${STATE_KINDS[c.state.kind].name}) – ${this.stateStanding(c)}`)}`
       if (c) html += `<br>${ic('shield', 's')}Město ${esc(c.name)} – obrana ${Math.round(cityStrength(s, c))}, obránci ${c.hp}${NB}/${NB}${cityMaxHp(c)}${wallMax(c) ? `, hradby ${cityWalls(c)}${NB}/${NB}${wallMax(c)}` : ''}${besieged(s, c) ? ' · v obležení' : ''}`
       for (const u of unitsAt(s, x, y)) {
         const d = UNITS[u.type]
@@ -1153,6 +1190,7 @@ export class Hud {
       const lines = jobs.filter(j => j.ok || j.why !== 'už stojí').map(j => `<span class="${j.ok ? 'job' : 'nojob'}">${ic(j.job === 'road' ? 'road' : 'work', 's')}${j.name}${j.ok ? `: ${j.job === 'road' ? 'rychlejší pohyb' : j.effect}, ${j.turns} ${turnsWord(j.turns)}` : ` – nelze, ${j.why}`}</span>`)
       if (lines.length) html += `<br>${lines.join(' · ')}`
       else if (TERRAIN[t.t].passable && !t.special) html += '<br><span class="nojob">Dělníci tu nemají co stavět</span>'
+      if (i === this.app.jobBest) html += `<br><span class="job">${ic('tip', 's')}Tip rádce: ${esc(this.app.jobWhy)}.</span>`
       if (this.app.jobs.has(i) && !here) html += '<br><span class="job">Klikněte: dělníci sem dojdou a začnou stavět</span>'
     }
     if (sel && eta >= 0) {
@@ -1183,14 +1221,14 @@ export class Hud {
       const px = 4 + x * cw + (y & 1) * cw / 2, py = 3 + y * ch
       g.fillStyle = t.forest ? '#2f7a3a' : Hud.MINI[t.t]
       g.fillRect(px, py, cw, ch)
-      if (t.owner >= 0) { g.globalAlpha = 0.55; g.fillStyle = NATIONS[s.players[t.owner].nation].css; g.fillRect(px, py, cw, ch); g.globalAlpha = 1 }
+      if (t.owner >= 0) { g.globalAlpha = 0.55; g.fillStyle = NATIONS[t.owner === barbId(s) ? 'free' : s.players[t.owner].nation].css; g.fillRect(px, py, cw, ch); g.globalAlpha = 1 }
       if (!this.me.visible[i]) { g.fillStyle = '#0b102066'; g.fillRect(px, py, cw, ch) }
     }
     for (const c of s.cities) {
       if (!this.me.explored[idx(s, c.x, c.y)]) continue
       const px = 4 + c.x * cw + (c.y & 1) * cw / 2, py = 3 + c.y * ch
       g.fillStyle = '#fff'; g.fillRect(px - 1, py - 1, cw + 2, ch + 2)
-      g.fillStyle = NATIONS[s.players[c.owner].nation].css; g.fillRect(px, py, cw, ch)
+      g.fillStyle = NATIONS[c.state ? 'free' : s.players[c.owner].nation].css; g.fillRect(px, py, cw, ch)
     }
     for (const u of s.units) {
       if (!this.me.visible[idx(s, u.x, u.y)]) continue
@@ -1316,7 +1354,51 @@ export class Hud {
       <h4>Vedlejší úkoly</h4>
       ${goal(m.questRuins && m.ruinsBy === this.my, m.ruinsBy >= 0 && m.ruinsBy !== this.my ? `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} – bohužel vás někdo předběhl.` : `Prozkoumejte ruiny Starého trůnu ${SCENARIOS[s.scenario].ruinsWhere} (odměna: zlato a technologie).`, 'flag')}
       ${goal(!!this.me.questCities, `Vládněte třem městům (odměna 60 zlata). Nyní: ${citiesOf(s, this.my).length}.`, 'pop')}
-      ${goal(!!this.me.questCamps, `Vypalte dva barbarské tábory (odměna 60 zlata). Nyní: ${this.me.camps ?? 0}.`, 'str')}`
+      ${goal(!!this.me.questCamps, `Vypalte dva barbarské tábory (odměna 60 zlata). Nyní: ${this.me.camps ?? 0}.`, 'str')}
+      ${this.statesHtml()}`
+  }
+
+  /** Jednou větou, jak na tom hráč u městského státu je. */
+  private stateStanding(c: StateCity): string {
+    const s = this.s, st = c.state, rel = st.rel[this.my] ?? 0, lv = stateLevel(s, c, this.my)
+    if (stateHostile(s, c, this.my)) return `Jste v nepřátelství; uklidní se ${Math.max(1, (st.foe[this.my] ?? 0) - s.turn)} ${turnsWord(Math.max(1, (st.foe[this.my] ?? 0) - s.turn))} po posledním útoku.`
+    const ally = st.ally >= 0 && st.ally !== this.my ? ` Spojencem je ${this.me.met.includes(st.ally) ? NATIONS[s.players[st.ally].nation].name : 'neznámý národ'} (${st.rel[st.ally]} bodů).` : ''
+    if (lv === 2) return `Vztah ${rel} – jste spojenec: ${bonusText(st.kind, 2)}.`
+    if (lv === 1) return `Vztah ${rel} – jste přítel: ${bonusText(st.kind, 1)}. Spojenectví (${bonusText(st.kind, 2)}) chce aspoň ${ALLY} bodů a víc než kdokoli jiný.${ally}`
+    return `Vztah ${rel} z ${FRIEND} potřebných k přátelství (${bonusText(st.kind, 1)}).${ally}`
+  }
+
+  /** Přehled městských států, které hráč zná, s jejich úkoly (do okna Cíle). */
+  private statesHtml(): string {
+    const s = this.s
+    const known = stateCities(s).filter(c => c.state.met.includes(this.my))
+    if (!known.length) return s.turn < 60 ? '' : `<h4>Městské státy</h4><p class="sub">${esc('Žádný zatím neznáte. Vznikají z barbarských táborů, které přežijí dost dlouho.')}</p>`
+    const b = stateBonus(s, this.my)
+    const sum = (Object.keys(b) as (keyof typeof b)[]).filter(k => b[k]).map(k => `+${b[k]} ${STATE_KINDS[k].gives}`).join(', ')
+    return `<h4>Městské státy</h4>${sum ? `<p class="sub">${esc(`Dohromady vám dávají: ${sum}.`)}</p>` : ''}` + known.map(c => {
+      const q = c.state.quest[this.my], lv = stateLevel(s, c, this.my)
+      return `<div class="goal clickable ${lv ? 'done' : ''}" data-a="state-open" data-v="${c.id}">${ic(STATE_KINDS[c.state.kind].icon)}<div><b>${esc(c.name)}</b> – ${esc(this.stateStanding(c))}${q ? `<br>${esc(`Úkol: ${questText(q)} (vztah +${QUEST_POINTS[q.k]})`)}` : ''}</div></div>`
+    }).join('')
+  }
+
+  /** Okno městského státu: vztah, výhody, úkol a pořadí národů. */
+  showState(c: StateCity): void {
+    const s = this.s, st = c.state, k = STATE_KINDS[st.kind]
+    const foe = stateHostile(s, c, this.my)
+    const q = foe ? null : st.quest[this.my]
+    let quest = `<p class="sub">${esc(foe ? 'Dokud trvá nepřátelství, stát vám úkoly nezadává.' : 'Nový úkol přijde na začátku příštího kola.')}</p>`
+    if (q) {
+      const can = q.k !== 'gold' || this.me.gold >= q.n
+      quest = `<div class="goal">${ic('flag')}<div>${esc(questText(q))} ${esc(`Odměna: vztah +${QUEST_POINTS[q.k]}.`)}${q.k === 'camp' ? ` <button class="btn small" data-a="state-camp" data-v="${q.tile}">Ukázat tábor</button>` : ''}${q.k === 'gold' ? ` <button class="btn small" data-a="state-gift" data-v="${c.id}" ${can ? '' : 'disabled'}${tip(can ? `Poslat ${q.n} zlata` : `Nemáte ${q.n} zlata`)}>${ic('gold', 's')}Poslat dar</button>` : ''}${q.k === 'unit' ? `<br><span class="sub">${esc('Vyberte bojovou jednotku, která stojí hned u města, a zvolte „Darovat státu“.')}</span>` : ''}</div></div>`
+    }
+    const rows = s.players.filter(p => p.id !== barbId(s) && p.alive && st.met.includes(p.id) && (p.id === this.my || this.me.met.includes(p.id)))
+      .sort((a, b) => (st.rel[b.id] ?? 0) - (st.rel[a.id] ?? 0) || a.id - b.id)
+      .map(p => { const lv = stateLevel(s, c, p.id); return `<div class="goal"><img class="ic" src="${UI}em_${p.nation}.png" alt=""><div><span style="color:${NATIONS[p.nation].css}">${esc(p.id === this.my ? 'Vy' : NATIONS[p.nation].name)}</span> – ${esc(stateHostile(s, c, p.id) ? 'v nepřátelství' : `vztah ${st.rel[p.id] ?? 0}${lv === 2 ? ', spojenec' : lv === 1 ? ', přítel' : ''}`)}</div></div>` }).join('')
+    this.open('state', `${ic(k.icon)}${esc(`${c.name} – ${k.name} městský stát`)}`, `
+      <p>${esc(this.stateStanding(c))}</p>
+      <p class="sub">${esc(`Přítel (${FRIEND} body): ${bonusText(st.kind, 1)}. Spojenec (aspoň ${ALLY} bodů a nejvíc ze všech, vždy jen jeden): ${bonusText(st.kind, 2)}. Body získáte plněním úkolů. Útokem o ně přijdete a stát se bude ${FOE_TURNS} tahů bránit; dobytí vám zazlí i ostatní městské státy.`)}</p>
+      <h4>Úkol</h4>${quest}
+      <h4>Kdo jak stojí</h4>${rows}`, undefined, '560px')
   }
 
   showMission(): void {
@@ -1492,8 +1574,9 @@ export class Hud {
       <h4>Plenění</h4><p>${esc('Bojová jednotka na poli národa, se kterým válčíte, může pole vyplenit (klávesa P): vylepšení, napodruhé i cesta, přestane fungovat, dokud je dělníci neopraví, a vy získáte zlato. Vypleněný důl či ohrada nedodává surovinu, vypleněná cesta přeruší spojení měst. Oprava trvá polovinu doby stavby. Plení i barbaři.')}</p>
       <h4>Šik a voj</h4><p>${esc('Dvě stejné jednotky stojící vedle sebe se po objevu Válečnictví spojí v šik (klávesa J), se Zbrojířstvím tři ve voj. Vznikne jedna jednotka na jednom poli se silou +50 %, respektive +90 %; hodí se tam, kde je málo místa, hlavně u hradeb. Životů má dál nejvýš 100 – při spojení dostane průměr spojovaných jednotek – a zkušenosti přebírá od zkušenější. Žold a suroviny se platí dál za každou jednotku. Rozdělit ji lze jen na vlastním území. Spojovat se smí pěchota, jízda a střelci.')}</p>
       <h4>Boj</h4><p>${esc('Na jednom poli může stát jedna vojenská a jedna civilní jednotka. V boji zblízka utrpí ztráty obě strany, střelci (dostřel 2) odvetu nedostanou. Pahorkatina a les dávají obránci +25 %, opevnění dalších +25 %. Kopiníci mají +50 % proti jízdě, obléhací stroje trojnásobný účinek proti městům a poloviční proti jednotkám. Jednotka, která se celý tah nehýbe, se léčí (nejrychleji ve městě). Opevnění (+25 % k obraně) platí hned, jen když jednotka v tahu neútočila a zbyl jí pohyb; jinak až od příštího tahu. Opevněná jednotka má na mapě štít. Útok zblízka stojí tolik pohybu jako vstup na pole cíle – jednotka s plným pohybem smí zaútočit vždy. Střelci na dvě pole nevidí přes les, pahorkatinu ani hory; z pahorkatiny se střílí přes les i přes jiné pahorky. Obléhací stroje nestřílejí v tahu, kdy se přesunuly. Po objevu Válečnictví pomáhá obklíčení: útok zblízka je o 10 % silnější za každou další vaši jednotku pro boj zblízka u cíle a obránce o 10 % za každou svou jednotku vedle sebe. Šermíři, sekerníci a zbrojnoši mají +25 % proti kopiníkům, jízda +25 % proti střelcům a strojům. Zraněná jednotka ztrácí nejvýš 35 % síly. Na území národa, se kterým válčíte, se jednotky léčí jen o 5 životů za tah. Spící jednotku probudí jen nepřítel, kterého vidíte do dvou polí.')}</p>
-      <p>${esc(`Město má 200 životů obránců; dobudete ho, když je útoky srazíte na nulu a vstoupíte do něj jednotkou pro boj zblízka. Stavby Hradby a Bašty přidají po 100 bodech hradeb, které berou rány místo obránců: od pěchoty jen 20 % škody (s beranidlem u města plnou), od střelců 50 %, od obléhacích strojů plnou. Co hradby nepoberou, projde na obránce. Dobyté město si hradby nechá tak pobořené, jak jsou, a obráncům zbude čtvrtina životů. Města střílejí na nepřátele do 2 polí – jednou za tah, cíl můžete vybrat v otevřeném městě kliknutím na jednotku v červeném rámu, jinak město vystřelí samo na nejslabší – a každý tah si opraví 10 životů. Obléhejte proto se stroji: beranidlo samo neútočí, ale pěchotě útočící na město, u kterého stojí, přidá +50 % síly a jednotkám hned u města +50 % obrany proti odvetě i střelbě z hradeb; katapult, balista a trebuchet mají proti městům trojnásobný účinek, proti jednotkám jen poloviční. Stojí-li hned u města aspoň ${SIEGE_UNITS} vaše bojové jednotky, je v obležení a neopravuje se.`)}</p>
+      <p>${esc(`Město má 200 životů obránců; dobudete ho, když je útoky srazíte na nulu a vstoupíte do něj jednotkou pro boj zblízka. Stavby Hradby a Bašty přidají po 100 bodech hradeb, které berou rány místo obránců: od pěchoty jen 20 % škody (s beranidlem u města plnou), od střelců 50 %, od obléhacích strojů plnou. Co hradby nepoberou, projde na obránce. Dobyté město si hradby nechá tak pobořené, jak jsou, a obráncům zbude čtvrtina životů. Zhruba polovina ostatních staveb se při dobývání poškodí: nefungují, dokud je ve výrobě města neopravíte za 35 % ceny. Města střílejí na nepřátele do 2 polí – jednou za tah, cíl můžete vybrat v otevřeném městě kliknutím na jednotku v červeném rámu, jinak město vystřelí samo na nejslabší – a každý tah si opraví 10 životů. Obléhejte proto se stroji: beranidlo samo neútočí, ale pěchotě útočící na město, u kterého stojí, přidá +50 % síly a jednotkám hned u města +50 % obrany proti odvetě i střelbě z hradeb; katapult, balista a trebuchet mají proti městům trojnásobný účinek, proti jednotkám jen poloviční. Stojí-li hned u města aspoň ${SIEGE_UNITS} vaše bojové jednotky, je v obležení a neopravuje se.`)}</p>
       <h4>Více hráčů</h4><p>${esc('Při zakládání hry zvolte, kolik národů se utká (2–8) a kolik z nich vedou lidé u tohoto počítače. Každý si vybere národ a pak táhnete jeden po druhém; mezi tahy mapu zakryje opona a počítač si předáte. Po posledním z vás táhnou soupeři vedení počítačem a barbaři. Zprávy, mlhu i rady má každý své. Mezi sebou si můžete vyhlásit válku, nabídnout mír (druhý hráč odpoví, až bude na tahu) a poslat dar; vše ostatní si domluvíte u stolu.')}</p>
+      <h4>Městské státy</h4><p>${esc(`Barbarský tábor, který přežije dost dlouho (první kolem ${STATE_FROM}. tahu), se usadí a stane se městským státem; odpočet vidíte u tábora na mapě. Nevznikne na území některého národa ani blízko města a za hru jich přibudou nejvýš ${STATE_MAX}. Městský stát se nerozpíná a sám neútočí. Zadává úkoly (vypálit tábor, poslat zlato, darovat jednotku, objevit technologii, postavit stavbu) a za každý přičte body vztahu. Od ${FRIEND} bodů jste přítel a dostáváte +${STATE_BONUS} podle zaměření státu (výroba, zlato, jídlo, věda, nebo kultura). Kdo má aspoň ${ALLY} bodů a nejvíc ze všech, je spojenec s dvojnásobnou výhodou; spojenec je vždy jen jeden. Stát lze i dobýt jako každé jiné město – útokem ale přijdete o body a pád státu vám zazlí i ostatní.`)}</p>
       <h4>Pokladna</h4><p>${esc('Každá vojenská jednotka nad volný limit (3 + 2 za město) stojí 1 zlato za tah, některé budovy také. Prázdná pokladna brzdí výzkum.')}</p>`, `<button class="btn" data-a="pedia" data-v="units">Encyklopedie</button><button class="btn" data-a="guide" data-v="0">Návod krok za krokem</button><button class="btn" data-a="close">Zavřít</button>`, '820px')
   }
 

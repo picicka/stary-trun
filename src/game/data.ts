@@ -25,7 +25,7 @@ export const SCENARIO_IDS = Object.keys(SCENARIOS) as ScenarioId[]
 export type TerrainId = 'ocean' | 'coast' | 'grass' | 'plains' | 'desert' | 'hills' | 'mountain'
 export type ResourceId = 'wheat' | 'horses' | 'iron' | 'gold' | 'stone' | 'fish' | 'deer'
 export type ImprovementId = 'farm' | 'mine' | 'pasture' | 'lumber' | 'village' | 'fishery'
-export type NationId = 'aur' | 'khar' | 'thal' | 'sylv' | 'tark' | 'zahi' | 'morv' | 'lume' | 'barb'
+export type NationId = 'aur' | 'khar' | 'thal' | 'sylv' | 'tark' | 'zahi' | 'morv' | 'lume' | 'barb' | 'free'
 export type UnitId =
   | 'settler' | 'worker' | 'scout' | 'warrior' | 'spearman' | 'archer' | 'horseman'
   | 'swordsman' | 'catapult' | 'chariot' | 'axeman' | 'hoplite' | 'hunter' | 'galley' | 'trireme'
@@ -491,8 +491,15 @@ export const NATIONS: Record<NationId, NationDef> = {
   },
   barb: {
     name: 'Barbaři', adjective: 'barbarský', leader: '', title: '',
-    color: 0x5a5a66, colorDark: 0x2c2c36, css: '#8a8a96',
+    color: 0x7a2b3a, colorDark: 0x2c1420, css: '#c0566a',
     trait: '', traitDesc: '', unique: 'warrior', lore: '', cities: [], temper: 'aggressive', persona: 'aggressive',
+  },
+  // Městské státy nejsou hráč: jejich města patří barbarskému hráči, tenhle záznam jim dává jen jméno a barvy.
+  free: {
+    name: 'Městský stát', adjective: 'svobodný', leader: '', title: '',
+    color: 0xa9b6c6, colorDark: 0x5c6878, css: '#b9c6d6',
+    trait: '', traitDesc: '', unique: 'warrior', lore: '',
+    cities: ['Brodec', 'Vranov', 'Solnice', 'Jasenná', 'Medník', 'Záhoří', 'Rudava', 'Havraní Újezd'], temper: 'builder', persona: 'defender',
   },
 }
 export const PLAYABLE: NationId[] = ['aur', 'khar', 'thal', 'sylv', 'tark', 'zahi', 'morv', 'lume']

@@ -26,6 +26,39 @@ export interface Tile {
   river?: number
 }
 
+/** Zaměření městského státu: čím odměňuje přátele a spojence. */
+export type StateKind = 'prod' | 'gold' | 'food' | 'sci' | 'culture'
+
+/** Úkol městského státu pro jednoho hráče. */
+export type StateQuest =
+  /** Vypálit barbarský tábor na daném poli. */
+  | { k: 'camp'; tile: number }
+  /** Poslat dar ve zlatě. */
+  | { k: 'gold'; n: number }
+  /** Darovat bojovou jednotku (musí stát hned u města). */
+  | { k: 'unit' }
+  | { k: 'tech'; id: TechId }
+  | { k: 'building'; id: BuildingId }
+
+/** Městský stát: samostatné město, které vzniklo z barbarského tábora. Nerozpíná se a samo neútočí. */
+export interface CityState {
+  kind: StateKind
+  /** Tah vzniku. */
+  born: number
+  /** Body vztahu jednotlivých hráčů (index = id hráče). */
+  rel: number[]
+  /** Aktuální úkol pro každého hráče (index = id hráče). */
+  quest: (StateQuest | null)[]
+  /** Druh posledního úkolu každého hráče, aby se neopakoval dvakrát po sobě. */
+  last: string[]
+  /** Do kterého tahu je stát s hráčem v nepřátelství (po útoku na něj). */
+  foe: number[]
+  /** Kdo už stát objevil. */
+  met: number[]
+  /** Spojenec (id hráče) nebo -1. */
+  ally: number
+}
+
 export type BuildItem = { kind: 'unit'; id: UnitId } | { kind: 'building'; id: BuildingId }
 
 export type CityFocus = 'food' | 'prod' | 'gold'
@@ -56,6 +89,8 @@ export interface City {
   focus?: CityFocus
   /** Kolik polí už město zabralo kulturou (od toho se odvíjí cena dalšího). */
   grown?: number
+  /** Stavby poškozené při dobytí: stojí, ale nefungují, dokud se neopraví (levněji než nová stavba). */
+  ruined?: BuildingId[]
   /** O kolik bodů jsou hradby pobořené (0 nebo chybí = stojí celé). */
   wallDmg?: number
   /** Součet životů obránců a hradeb na konci majitelova tahu – podle něj se na začátku dalšího ohlásí ztráty. */
@@ -66,6 +101,8 @@ export interface City {
   nextTile?: number
   /** Město je spojené cestou (nebo přístavem) s hlavním městem; trhové vsi pak vynášejí víc. */
   linked?: boolean
+  /** Městský stát: město patří „barbarskému“ hráči, ale chová se podle vlastních pravidel (viz states.ts). */
+  state?: CityState
   /** Město už v tomto tahu vystřelilo z hradeb (na cíl, který vybral hráč). */
   fired?: boolean
 }
@@ -170,6 +207,8 @@ export interface Mission {
   questCities?: boolean
   questCamps?: boolean
   questRuins: boolean
+  /** Kolik městských států už za hru vzniklo. */
+  states?: number
   /** Kdo drží dostavěný Sluneční chrám (-1 = nestojí) a od kterého tahu. */
   wonderBy: number
   wonderSince?: number

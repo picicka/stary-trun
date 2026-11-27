@@ -10,6 +10,7 @@ import {
   canWork, followAll, hasRoad, hasTech, isEmbarked, resourceCap, resourceVisible, unitsNeeding, upgradeBlock, upgradeCost, upgradeUnit,
   type PathMap,
 } from './rules.ts'
+import { stateAttacked, stateCities, stateHostile, stateLevel } from './states.ts'
 import { barbId, type BuildItem, type City, type GameState, type JobId, type Player, type Unit } from './types.ts'
 
 /** Povaha, podle které se národ rozhoduje; lidskému hráči radí stavitel. */
@@ -65,6 +66,11 @@ export function aiAcceptsPeace(s: GameState, aiId: number, from = 0): boolean {
   if (mine < theirs * 1.35) return true
   return warDuration(s, p) >= 20
 }
+
+/** Kolik tahů má vojsko počítače na to, aby k napadenému městskému státu došlo. */
+const STATE_MARCH = 30
+/** Je město pro hráče válečným cílem? U městského státu rozhoduje nepřátelství s ním, ne válka s národem. */
+const foeCity = (s: GameState, p: Player, c: City): boolean => c.state ? stateHostile(s, c, p.id) : p.war.includes(c.owner)
 
 function aiDiplomacy(s: GameState, p: Player): void {
   const aggro = DIFFICULTY[s.difficulty].aiAggro
@@ -132,6 +138,17 @@ function aiDiplomacy(s: GameState, p: Player): void {
       for (const c of s.cities) if (c.owner === q.id) for (const a of myCities) { const d = hexDist(a.x, a.y, c.x, c.y) + cityTotal(c) / 80 - (c.seat >= 0 ? TUNE.seatFocus : 0); if (d < bd) { bd = d; best = c } }
       if (best) { p.siege = { city: best.id, go: false, since: s.turn, pre: true }; log(s, p.id, 'tažení', `plán na město ${best.name} (${nat(s, q.id)}), ${Math.round(bd)} polí od vlastního města; síla ${Math.round(mine)} proti ${Math.round(theirs)}, jednotek ${myMil}`) }
       else { log(s, p.id, 'válka', `národu ${nat(s, q.id)} bez cíle tažení`); declareWar(s, p.id, q.id) }
+    }
+  }
+  // Výbojný národ, který zrovna s nikým neválčí, si občas vyhlédne blízký městský stát.
+  if (k.martial && !p.war.some(w => w !== barbId(s)) && !p.siege && myMil >= 6 && rand(s) < 0.04 * aggro) {
+    const prey = stateCities(s).filter(c => c.state.met.includes(p.id) && s.turn - c.state.born >= 15 && stateLevel(s, c, p.id) === 0 && myCities.some(a => hexDist(a.x, a.y, c.x, c.y) <= 9))
+      .sort((a, b) => Math.min(...myCities.map(o => hexDist(o.x, o.y, a.x, a.y))) - Math.min(...myCities.map(o => hexDist(o.x, o.y, b.x, b.y))) || a.id - b.id)[0]
+    if (prey && mine >= cityStrength(s, prey) * 4) {
+      log(s, p.id, 'válka', `městskému státu ${prey.name}: blízko a slabý`)
+      stateAttacked(s, prey, p.id)
+      // Vojsko potřebuje čas dojít; další útoky už nepřátelství prodlužují samy.
+      prey.state.foe[p.id] = s.turn + STATE_MARCH
     }
   }
   // Žádost o pomoc: soupeř ve válce s jiným národem zve hráče do spojenectví.
@@ -338,7 +355,7 @@ function threatNear(s: GameState, pid: number, x: number, y: number, r: number):
 }
 
 function aiCityBuild(s: GameState, p: Player, c: City): void {
-  if (c.build && c.prod >= itemCost(c.build, p) * 0.2) return
+  if (c.build && c.prod >= itemCost(c.build, p, c) * 0.2) return
   const cities = citiesOf(s, p.id)
   const units = unitsOf(s, p.id)
   const mil = headcount(units.filter(u => !isCivilian(u) && !isNaval(u) && u.type !== 'scout'))
@@ -598,8 +615,8 @@ function aiMilitary(s: GameState, p: Player): void {
   if (!field.length) return
 
   // Válečný cíl: nejbližší nepřátelské město. Jednou zvoleného cíle se vojsko drží, dokud město nepadne nebo nenastane mír.
-  const temple = s.cities.find(c => c.buildings.includes('wonder') && p.war.includes(c.owner)) ?? null
-  const kept = p.siege ? s.cities.find(c => c.id === p.siege!.city && p.war.includes(c.owner)) ?? null : null
+  const temple = s.cities.find(c => c.buildings.includes('wonder') && foeCity(s, p, c)) ?? null
+  const kept = p.siege ? s.cities.find(c => c.id === p.siege!.city && foeCity(s, p, c)) ?? null : null
   const busy = !!kept && !!p.siege?.go && (cityTotal(kept) < cityFull(kept) * 0.6 || army.filter(u => hexDist(u.x, u.y, kept.x, kept.y) <= 4).length >= 3)
   let target: City | null = busy ? kept : temple ?? kept
   // Chystané tažení před vyhlášením války; skutečná válka s někým jiným má přednost.
@@ -615,11 +632,11 @@ function aiMilitary(s: GameState, p: Player): void {
     }
   }
   const home = cities.find(c => c.capital) ?? cities[0]
-  if (!target && p.war.length && home) {
+  if (!target && (p.war.length || stateCities(s).some(c => stateHostile(s, c, pid))) && home) {
     let bd = Infinity
     for (const c of s.cities) {
       // Kde leží města národa, se kterým se zná, ví každý (poslové, kupci) – bez toho by vojsko nemělo kam táhnout.
-      if (!p.war.includes(c.owner) || c.owner === barbId(s) && !p.explored[idx(s, c.x, c.y)]) continue
+      if (!foeCity(s, p, c) || c.owner === barbId(s) && !p.explored[idx(s, c.x, c.y)]) continue
       // Město se Slunečním chrámem má přednost před vším ostatním.
       const d = hexDist(home.x, home.y, c.x, c.y) + cityTotal(c) / 80 - (c.buildings.includes('wonder') ? 100 : 0) - (c.seat >= 0 ? TUNE.seatFocus : 0)
       if (d < bd) { bd = d; target = c }
@@ -918,7 +935,7 @@ export function barbTurn(s: GameState): void {
       }
       if (prey) { approach(s, u, prey.x, prey.y, 1); if (s.units.includes(u)) tryAttack(s, u, 3); continue }
       let c: City | null = null, cd = Infinity
-      for (const o of s.cities) { const d = hexDist(u.x, u.y, o.x, o.y); if (d < cd) { cd = d; c = o } }
+      for (const o of s.cities) { if (o.state) continue; const d = hexDist(u.x, u.y, o.x, o.y); if (d < cd) { cd = d; c = o } }
       if (c && cd <= 14) { if (naval) { if (cd > 2) approach(s, u, c.x, c.y, 2) } else approach(s, u, c.x, c.y, 1) }
       continue
     }
@@ -941,6 +958,7 @@ export function barbTurn(s: GameState): void {
         if (d <= reach && d < td) { td = d; tx = o.x; ty = o.y }
       }
       if (s.turn > 22) for (const c of s.cities) {
+        if (c.state) continue
         const d = hexDist(u.x, u.y, c.x, c.y) + 1
         if (d <= reach && d < td) { td = d; tx = c.x; ty = c.y }
       }
@@ -963,7 +981,7 @@ export function barbTurn(s: GameState): void {
 function seaRaid(s: GameState): void {
   if (unitsOf(s, barbId(s)).filter(isNaval).length >= 3) return
   // Cílem jsou města u moře i kousek ve vnitrozemí – nájezdníci k nim dojdou pěšky.
-  const targets = s.cities.filter(c => tilesWithin(s, c.x, c.y, 4).some(([x, y]) => s.tiles[idx(s, x, y)].t === 'coast'))
+  const targets = s.cities.filter(c => !c.state && tilesWithin(s, c.x, c.y, 4).some(([x, y]) => s.tiles[idx(s, x, y)].t === 'coast'))
   if (!targets.length) return
   const c = targets[randInt(s, targets.length)]
   const spots = tilesWithin(s, c.x, c.y, 7).filter(([x, y]) => {

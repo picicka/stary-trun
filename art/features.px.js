@@ -145,82 +145,65 @@ const hut = (c, x, y, roof = "l", roofD = "b") => {       // 9x8 hut, (x, y) = t
   c.poly([x + 4, y, x + 5, y, x + 9, y + 4, x, y + 4], roof); c.poly([x + 5, y, x + 9, y + 4, x + 6, y + 4], roofD)
   c.hline(x, y + 4, 9, roofD)
 }
+// Farma: malý dvorek uprostřed pole – chalupa, kupka sena a tři záhony v tlumených barvách, ať nepřebije krajinu.
 sprite("_o_i_farm", { w: 30, h: 46, outline: "k" }, (c) => {
-  hut(c, 17, 20, "s", "Z")
-  c.rect(4, 27, 3, 4, "y"); c.rect(4, 27, 3, 1, "x"); c.px(6, 29, "Y"); c.px(6, 30, "Y")      // hay stack
-  c.px(5, 26, "y")
+  hut(c, 15, 22, "s", "Z")
+  c.rect(8, 29, 3, 3, "y"); c.rect(8, 29, 3, 1, "x"); c.px(10, 31, "Y")      // hay stack
 })
 sprite("i_farm", { w: 32, h: 48 },
-  clip((x, y) => inHexT(x, y) && hexDist(x, y - 16) > 2.5,
-    field(3, 21, 13, 11, "h", "G", true),
-    field(17, 30, 13, 7, "y", "S", false),
-    field(3, 33, 13, 12, "y", "S", false),
-    field(17, 38, 13, 8, "l", "B", true),
-    field(17, 22, 13, 7, "h", "G", false)),
+  clip((x, y) => inHexT(x, y),
+    field(7, 33, 9, 6, "q", "p", false),
+    field(17, 32, 9, 5, "m", "G", true),
+    field(12, 40, 10, 4, "p", "P", false)),
   stamp("_o_i_farm", 0, 0))
 
-tall("i_mine", [shadowBlob(16, 42, 13, 3)], (c) => {
-  // rock mound
-  c.poly([2, 40, 5, 28, 10, 21, 17, 18, 23, 22, 27, 30, 28, 40], "t")
-  c.poly([5, 28, 10, 21, 17, 18, 15, 23, 9, 27, 6, 34], "u")
-  c.poly([23, 22, 27, 30, 28, 40, 23, 40, 24, 30], "T")
-  c.line(10, 21, 12, 23, "W"); c.px(16, 19, "W"); c.line(6, 32, 4, 38, "T"); c.line(21, 25, 22, 28, "T")
-  // entrance
-  c.rect(10, 29, 9, 11, "k"); c.rect(11, 31, 7, 9, "E")
-  c.rect(9, 28, 11, 2, "l"); c.hline(9, 28, 11, "L"); c.rect(9, 30, 2, 10, "l"); c.vline(9, 30, 10, "L"); c.rect(18, 30, 2, 10, "b")
-  // rails + ore cart
-  c.hline(12, 41, 14, "B"); c.hline(13, 43, 15, "B"); for (let x = 14; x < 27; x += 3) c.vline(x, 41, 3, "b")
-  c.rect(17, 37, 7, 4, "b"); c.hline(17, 37, 7, "l"); c.vline(23, 37, 4, "B"); c.px(18, 41, "U"); c.px(22, 41, "U")
-  c.rect(18, 35, 5, 2, "T"); c.px(19, 35, "y"); c.px(21, 36, "y"); c.px(20, 34, "T"); c.px(18, 36, "U")
-  c.px(3, 39, "u"); c.px(4, 40, "T")
+// Vylepšení jsou schválně drobná (zhruba polovina pole kolem středu), ať krajina pod nimi zůstane čitelná.
+// Důl: skalka se vstupem do štoly a hromádkou rudy.
+tall("i_mine", [shadowBlob(16, 39, 8, 2)], (c) => {
+  c.poly([8, 37, 10, 30, 14, 26, 18, 27, 21, 31, 22, 37], "t")
+  c.poly([10, 30, 14, 26, 15, 29, 11, 33], "u")
+  c.poly([18, 27, 21, 31, 22, 37, 19, 37, 19, 31], "T")
+  c.px(13, 27, "W")
+  c.rect(12, 31, 5, 7, "E")
+  c.hline(11, 30, 7, "L"); c.vline(11, 31, 7, "l"); c.vline(17, 31, 7, "b")
+  c.rect(20, 37, 3, 1, "T"); c.px(21, 36, "T"); c.px(21, 37, "y"); c.px(20, 36, "y")
 })
 
-tall("i_pasture", [ellipse(16, 34, 12, 8, "m"), ellipse(13, 32, 5, 2, "h"), px(20, 36, "G"), px(11, 37, "G"), px(21, 31, "G")], (c) => {
-  // fence: back rail, posts, front rail
+// Ohrada: malý plot dokola a ovce.
+tall("i_pasture", [ellipse(16, 34, 7, 4, "m"), px(13, 33, "h"), px(19, 35, "G")], (c) => {
   const pts = []
-  for (let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; pts.push([Math.round(15 + Math.cos(a) * 12.5), Math.round(33 + Math.sin(a) * 8)]) }
-  for (let i = 0; i < 12; i++) {
-    const [x0, y0] = pts[i], [x1, y1] = pts[(i + 1) % 12]
-    if (i === 2) continue                              // gate gap at the front
-    c.line(x0, y0 - 1, x1, y1 - 1, "l"); c.line(x0, y0 - 3, x1, y1 - 3, "L")
+  for (let i = 0; i < 8; i++) { const a = (i + 0.5) / 8 * Math.PI * 2; pts.push([Math.round(15 + Math.cos(a) * 7.5), Math.round(33 + Math.sin(a) * 4.5)]) }
+  for (let i = 0; i < 8; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[(i + 1) % 8]
+    if (i === 1) continue                              // branka vepředu
+    c.line(x0, y0 - 1, x1, y1 - 1, "L")
   }
-  for (const [x, y] of pts) { c.vline(x, y - 4, 5, "b"); c.px(x, y - 4, "L") }
-  // water trough + a sheep
-  c.rect(8, 29, 5, 2, "b"); c.hline(9, 29, 3, "c")
-  c.rect(16, 33, 5, 3, "w"); c.hline(16, 35, 5, "W"); c.px(21, 33, "E"); c.px(21, 34, "E"); c.px(16, 36, "E"); c.px(19, 36, "E")
+  for (const [x, y] of pts) { c.vline(x, y - 2, 3, "b"); c.px(x, y - 2, "L") }
+  c.rect(13, 32, 3, 2, "w"); c.hline(13, 33, 3, "W"); c.px(16, 32, "E"); c.px(13, 34, "E"); c.px(15, 34, "E")
 })
 
-tall("i_lumber", [shadowBlob(16, 42, 13, 3)], (c) => {
-  // saw hut (lean-to) at the back
-  c.rect(15, 24, 11, 9, "l"); c.rect(23, 24, 3, 9, "b"); c.rect(18, 27, 4, 6, "E")
-  c.poly([13, 24, 20, 18, 28, 18, 28, 20, 27, 24], "H"); c.poly([13, 24, 20, 18, 22, 18, 15, 24], "G"); c.hline(13, 24, 15, "J")
-  for (let x = 15; x < 26; x += 3) c.vline(x, 26, 7, "b")
-  c.rect(18, 27, 4, 6, "E")
-  // log pile (ends facing us): 3 + 2 + 1
+// Pila: hranice klád a pařez se sekerou.
+tall("i_lumber", [shadowBlob(16, 39, 8, 2)], (c) => {
   const log = (x, y) => { c.rect(x, y, 4, 4, "l"); c.px(x, y, "b"); c.px(x + 3, y, "b"); c.px(x, y + 3, "b"); c.px(x + 3, y + 3, "B"); c.px(x + 1, y + 1, "L"); c.px(x + 2, y + 2, "b") }
-  log(2, 37); log(6, 37); log(10, 37); log(4, 33); log(8, 33); log(6, 29)
-  c.rect(14, 38, 3, 3, "b"); c.hline(14, 38, 3, "B")                    // long log side seen behind
-  // stump with axe
-  c.rect(20, 37, 5, 4, "b"); c.hline(20, 37, 5, "L"); c.vline(24, 38, 3, "B")
-  c.line(23, 32, 25, 36, "B"); c.rect(21, 31, 3, 2, "u"); c.px(21, 33, "W")
-  c.px(18, 41, "L"); c.px(27, 40, "L"); c.px(16, 42, "l")               // chips
+  log(8, 34); log(12, 34); log(10, 30)
+  c.rect(19, 35, 3, 3, "b"); c.hline(19, 35, 3, "L"); c.vline(21, 36, 2, "B")
+  c.line(22, 30, 20, 34, "B"); c.rect(21, 29, 3, 2, "u"); c.px(21, 29, "W")
+  c.px(17, 38, "L"); c.px(23, 38, "l")
 })
 
-// Trhová ves: tři domky a krám s plachtou.
-tall("i_village", [shadowBlob(16, 42, 13, 3)], (c) => {
-  hut(c, 17, 22, "s", "Z"); hut(c, 3, 25, "r", "R"); hut(c, 12, 31, "l", "b")
-  c.rect(2, 36, 9, 2, "r"); for (let x = 3; x < 11; x += 2) c.px(x, 37, "w")
-  c.vline(2, 38, 4, "b"); c.vline(10, 38, 4, "b"); c.rect(3, 40, 7, 2, "y"); c.hline(3, 40, 7, "x")
-  c.px(24, 36, "y"); c.px(25, 37, "Y"); c.px(23, 38, "L")
+// Trhová ves: jeden domek a krám s pruhovanou plachtou.
+tall("i_village", [shadowBlob(16, 39, 8, 2)], (c) => {
+  hut(c, 14, 26, "r", "R")
+  c.rect(7, 31, 6, 2, "r"); c.px(8, 31, "w"); c.px(10, 31, "w"); c.px(12, 31, "w"); c.px(8, 32, "w"); c.px(10, 32, "w"); c.px(12, 32, "w")
+  c.vline(7, 33, 4, "b"); c.vline(12, 33, 4, "b"); c.rect(8, 35, 4, 2, "y"); c.hline(8, 35, 4, "x")
+  c.rect(19, 36, 2, 2, "l"); c.px(19, 36, "L")
 })
 
-// Loviště: rybářský člun se sítí a plováky.
+// Loviště: malý rybářský člun a dva plováky.
 tall("i_fishery", [], (c) => {
-  c.poly([6, 33, 23, 33, 20, 38, 9, 38], "b"); c.hline(6, 33, 18, "L"); c.hline(10, 37, 10, "B"); c.hline(7, 34, 16, "l")
-  c.vline(14, 21, 12, "B"); c.poly([15, 22, 23, 31, 15, 31], "w"); c.poly([15, 22, 18, 26, 15, 31], "W")
-  c.line(23, 34, 27, 40, "W"); c.line(25, 36, 28, 37, "W"); c.px(28, 40, "r"); c.px(27, 41, "w")
-  c.px(3, 39, "r"); c.px(3, 40, "w"); c.px(1, 36, "r"); c.px(1, 37, "w")
-  c.px(11, 41, "I"); c.px(12, 41, "I"); c.px(22, 42, "I")
+  c.poly([10, 34, 20, 34, 18, 37, 12, 37], "b"); c.hline(10, 34, 11, "L"); c.hline(12, 37, 7, "B")
+  c.vline(15, 27, 7, "B"); c.poly([16, 28, 20, 33, 16, 33], "w"); c.vline(16, 29, 5, "W")
+  c.px(7, 38, "r"); c.px(7, 39, "w"); c.px(23, 39, "r"); c.px(23, 40, "w")
 })
 
 // Vymýcení lesa (značka práce): pařez se zaseknutou sekerou.
@@ -232,7 +215,7 @@ tall("i_clear", [shadowBlob(16, 42, 10, 3)], (c) => {
 
 // Vypleněné vylepšení: dým a doutnající trosky přes obrázek vylepšení.
 sprite("i_ruin", { w: 32, h: 48 }, (c) => {
-  for (const [x, y, r] of [[15, 18, 3], [18, 13, 3], [14, 9, 2], [20, 7, 2], [12, 23, 2]]) c.circ(x, y, r, "#3c4058b0")
-  for (const [x, y] of [[16, 15], [19, 10], [13, 20]]) c.px(x, y, "#5c6278c0")
-  c.px(14, 30, "a"); c.px(15, 31, "r"); c.px(13, 31, "y"); c.px(17, 30, "a"); c.px(18, 31, "R"); c.px(16, 29, "y")
+  for (const [x, y, r] of [[15, 24, 3], [18, 19, 3], [14, 15, 2], [20, 13, 2]]) c.circ(x, y, r, "#3c4058b0")
+  for (const [x, y] of [[16, 21], [19, 16], [13, 25]]) c.px(x, y, "#5c6278c0")
+  c.px(14, 34, "a"); c.px(15, 35, "r"); c.px(13, 35, "y"); c.px(17, 34, "a"); c.px(18, 35, "R"); c.px(16, 33, "y")
 })
